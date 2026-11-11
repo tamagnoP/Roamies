@@ -8,7 +8,6 @@ import path from 'node:path';
 import { z } from 'zod';
 import { parseSipsSize, readProblem, rematch, sameBounds, shotFits, shotMap, shotProblem, snapRect, toScreen } from './pointing.mjs';
 import { ASK, BLOCK, checkDrawAction, checkOpen, checkRead, checkUrl, checkWrite, classifyCommand, isPrivateAddress, isRiskyClick, isYes, riskyKind } from './safety.mjs';
-import dns from 'node:dns/promises';
 import { CARDS, DrawArgs, LIMITS, checkDraw, createParts, createPhotos, describeParts, faviconFor, pickTextMatch, quizNote, resolveTargets } from './draw.mjs';
 import { plain } from './intro.mjs';
 import { linuxSession, seesPointer } from './platform.mjs';
@@ -886,30 +885,7 @@ A drawing stays until the user clears it or the window changes; your next drawin
         return out;
       },
     },
-    {
-      name: 'fetch_url', description: 'Fetch a web page and return its readable text.',
-      parameters: z.object({ url: z.string() }), // no .url(): OpenAI strict schemas reject format "uri"; checkUrl validates
-      execute: async ({ url }) => {
-        // Redirects are followed by hand so each hop is checked too (a public page can't bounce to localhost), and
-        // each host's addresses too (a public name can point at 127.0.0.1 or the local network).
-        let res, at = url;
-        for (let hop = 0; ; hop++) {
-          allowed(checkUrl(at));
-          const host = new URL(at).hostname.replace(/^\[|\]$/g, '');
-          const addrs = await dns.lookup(host, { all: true }).catch(() => []);
-          if (addrs.some((x) => isPrivateAddress(x.address))) throw new Error(`${host} leads to your own computer or network, so I won't fetch it.`);
-          res = await fetch(at, { headers: { 'user-agent': 'Roamies-Sidekick' }, redirect: 'manual', signal: AbortSignal.timeout(20_000) });
-          const next = res.status >= 300 && res.status < 400 && res.headers.get('location');
-          if (!next) break;
-          if (hop >= 5) throw new Error('Too many redirects.');
-          at = new URL(next, at).href;
-        }
-        url = at;
-        const html = await res.text();
-        const text = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-        return clip(`${res.status} ${url}\n${text}`, 15_000);
-      },
-    },
+    // Local-only build: no fetch_url tool, so the agent can't request web pages itself.
     {
       name: 'open', description: 'Open a website, a file or folder, or an app by name (e.g. "Safari", "https://skool.com", "~/Documents"). Links open in the default browser; set app to open one in a particular browser or app (e.g. app "Safari" when the user says "in Safari").',
       parameters: z.object({ target: z.string(), app: z.string().optional() }),

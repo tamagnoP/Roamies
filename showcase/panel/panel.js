@@ -145,7 +145,7 @@
       : fresh ? ['Up to date', `Roamies ${state.version} is up to date`, 'ghost', true]
       : u.result ? ['Check again', "Couldn't check for updates. Check again", 'ghost', false]
       : ['Check for updates', 'Check for updates', 'ghost', false];
-    b.hidden = false; b.textContent = label; b.disabled = off;
+    b.hidden = true; b.textContent = label; b.disabled = off; // local-only build: no update checks, so no button
     b.className = `px btn mini ${kind}`;
     b.setAttribute('aria-label', aria);
     b.title = u.result && !u.result.ok && !v && !u.checking ? `Couldn't check: ${u.result.error ?? 'unknown error'}` : '';
@@ -477,12 +477,9 @@
             Object.fromEntries(state.fishModels.map((c) => [c.id, `${WHY_LONG[c.id] ?? ''} ${price(c)}`.trim()]))),
           el('p', { className: `why${state.fishFree ? ' late' : ''}`, textContent: state.fishFree ? "No credit left, so it's on Fish's free tier" : WHY[state.fishModel] ?? '' }),
         ] : null,
+        // Local-only build: no Fish Audio key. Replies are spoken by the Mac's own voice.
         el('div', { className: 'setting' },
-          el('span', {}, 'Fish Audio key', el('small', { textContent: state.fishKey ? `Saved in ${where()}` : 'Needed for spoken replies' })),
-          el('span', { className: 'row-btns' },
-            link(ui.key === 'fish' ? 'Cancel' : state.fishKey ? 'Change' : 'Add', () => { ui.key = ui.key === 'fish' ? null : 'fish'; render(ui.key ? 'key-fish' : 'addkey:fish'); }, { k: 'addkey:fish', aria: state.fishKey ? 'Change the Fish Audio key' : 'Add a Fish Audio key' }),
-            state.fishKey && ui.key !== 'fish' ? armed('Remove', 'Confirm', 'fishkey-remove', 'fishkey_remove', 'Remove the Fish Audio key') : null)),
-        keyForm('fish', 'Fish Audio', (key) => send({ type: 'panel_fishkey', key }))),
+          el('span', {}, 'Voice', el('small', { textContent: "Your Mac's built-in voice. Nothing leaves this computer." })))),
       v ? group('Talking to me', 'Speak instead of typing.', null,
         toggle('Voice control', v.download
           ? (v.download.status === 'downloading' ? `Downloading the voice model… ${v.download.pct}%` : v.download.status === 'error' ? 'The download failed' : `Needs a ${v.download.size} download`)

@@ -433,10 +433,12 @@
         // A live transcript arrives in jumps, so its bubble is full width from the start and only grows down.
         let cols = bb.input.listen ? MAX_COLS : 18;
         for (const l of src) cols = Math.max(cols, Math.min(l.s.length + 1, MAX_COLS));
-        const rows = clamp(src.length, 1, MAX_LINES);
+        // Local-only build: a bubble with buttons (pi's Send bubble) grows to show its whole question, up to most of the screen.
+        const cap = bb.input.choices ? Math.max(MAX_LINES, Math.floor((H * 0.62) / (CH * t))) : MAX_LINES;
+        const rows = clamp(src.length, 1, cap);
         const meter = bb.input.listen ? (METER + 1) * k.P : 0;
         const footW = bb.input.choices ? choicesW(bb) : hintH(bb) ? G.textW(HINT, HINT_F) : 0;
-        return { cols, rows, maxRows: MAX_LINES, w: Math.max(cols * colW(t), footW), h: rows * CH * t + meter + footH(bb) };
+        return { cols, rows, maxRows: cap, w: Math.max(cols * colW(t), footW), h: rows * CH * t + meter + footH(bb) };
       }
       const shownLines = bb.lines.filter((l) => l.start < Math.max(1, bb.shown) || l === bb.lines[0]);
       let cols = 4;

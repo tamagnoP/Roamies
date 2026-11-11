@@ -365,7 +365,10 @@ export const describeParts = (entries) => entries.map(([id, p]) => `${id} ${p.de
 // ---------------------------------------------------------------- photos and favicons
 // Fetched through the same rules as fetch_url (public http(s) only, every redirect checked), size-capped, and handed
 // to the overlay as data URLs so it can dither them on its canvas without loading anything itself.
-async function getChecked(url, { fetchImpl = fetch, max, accept }) {
+// Local-only build: cards never go to the web for a photo or a site icon. A photo card shows its frame and caption,
+// a source shows a dot. (Tests pass their own fetch.)
+const noNetwork = async () => { throw new Error('pictures from the web are switched off in this build'); };
+async function getChecked(url, { fetchImpl = noNetwork, max, accept }) {
   let at = String(url), res;
   for (let hop = 0; ; hop++) {
     const v = checkUrl(at);
@@ -390,7 +393,7 @@ async function imageData(url, opts) {
   return `data:${type};base64,${buf.toString('base64')}`;
 }
 /** A named thing's picture: its Wikipedia summary thumbnail (query), or a picture URL the model already found. */
-export async function photoFor({ query, url }, { fetchImpl = fetch } = {}) {
+export async function photoFor({ query, url }, { fetchImpl = noNetwork } = {}) {
   if (url) return { src: await imageData(url, { fetchImpl, max: LIMITS.photoBytes }), credit: new URL(url).hostname.replace(/^www\./, '') };
   // Titles are case-sensitive after the first letter, which Wikipedia always capitalises.
   const title = String(query).trim().replace(/\s+/g, '_'), page = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.charAt(0).toUpperCase() + title.slice(1))}`;
@@ -405,7 +408,7 @@ const LOOKABLE = /^image\/(png|jpe?g|gif|webp)$/;
 /** The pictures the model has looked at (the see_photo tool). Labels go on a picture by where its parts are, which
  *  the model can't know for a picture it hasn't seen: a labelled photo is refused until its picture has been looked
  *  at, and the card then shows that very picture. */
-export function createPhotos({ fetchImpl = fetch, max = 12 } = {}) {
+export function createPhotos({ fetchImpl = noNetwork, max = 12 } = {}) { // local-only build
   const seen = new Map();
   const key = (m) => (m.url ? `url ${String(m.url).trim()}` : `query ${String(m.query ?? '').trim().toLowerCase().replace(/[\s_]+/g, ' ')}`);
   return {
@@ -434,7 +437,7 @@ export function createPhotos({ fetchImpl = fetch, max = 12 } = {}) {
 }
 const icons = new Map();
 /** A site's favicon as a data URL (cached), or null: the overlay draws a dot instead. */
-export async function faviconFor(link, { fetchImpl = fetch } = {}) {
+export async function faviconFor(link, { fetchImpl = noNetwork } = {}) {
   let host;
   try { const u = new URL(String(link)); if (!/^https?:$/.test(u.protocol)) return null; host = u.hostname; } catch { return null; }
   if (icons.has(host)) return icons.get(host);

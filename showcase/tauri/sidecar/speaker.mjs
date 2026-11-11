@@ -11,7 +11,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_VOICE, FISH_MODELS, FREE_MODEL, FishVoice, RATE, fishAccount } from './fish.mjs';
+import { DEFAULT_VOICE, FISH_MODELS, FREE_MODEL, RATE } from './fish.mjs';
+// Local-only build: the voice is the Mac's own (localvoice.mjs). Fish Audio's socket and account check are no longer
+// imported, so they aren't in the app; the names below (FishVoiceImpl, account, key) are kept so the rest reads the same.
+import { LocalVoice } from './localvoice.mjs';
+const localAccount = async () => ({ ok: true, credit: null });
 
 // One or two words each, so a beat never sounds canned; any of them must fit before a search, a page, the screen or a drawing.
 export const BEATS = [
@@ -40,7 +44,7 @@ export function bundledBeats(dir = path.join(path.dirname(fileURLToPath(import.m
   };
 }
 
-export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl = FishVoice, account = fishAccount, beatPhrases = BEATS, bundled = bundledBeats() }) {
+export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl = LocalVoice, account = localAccount, beatPhrases = BEATS, bundled = () => null }) {
   let key = null, voice = DEFAULT_VOICE, pref = FISH_MODELS[0], model = pref, seq = 0, current = null, checking = null;
   // The pick and the cheaper ones after it (FISH_MODELS runs from priciest to free).
   const chain = () => FISH_MODELS.slice(Math.max(0, FISH_MODELS.indexOf(pref)));

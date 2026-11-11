@@ -499,7 +499,7 @@
       const saved = !!state?.fishKey;
       if (!saved || mode !== 'voice') replies.changing = false;
       $('fish-form').hidden = mode !== 'voice' || (saved && !replies.changing);
-      $('fish-change').hidden = !saved || mode !== 'voice';
+      $('fish-change').hidden = true; // local-only build: the Mac's own voice, no key to change
       $('fish-change').textContent = replies.changing ? 'Keep my current key' : 'Change key';
       $('fish-label').textContent = replies.changing ? 'New Fish Audio API key' : 'Fish Audio API key';
       $('fish-change').setAttribute('aria-expanded', String(replies.changing));

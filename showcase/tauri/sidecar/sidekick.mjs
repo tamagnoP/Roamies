@@ -37,6 +37,7 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
+import { createPi, gateTools } from './pi.mjs'; // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
 console.log = console.info = (...a) => console.error(...a);
@@ -126,7 +127,12 @@ let shellInfo = null; // resolves the shell's reply to it: screens, tray, panel,
 }
 const saveConfig = () => writeJson(CONFIG_PATH, config, { backup: true });
 
-// ---------- spoken replies (Fish Audio) ----------
+// ---------- local-only build ----------
+// Claude Code (the Anthropic sign-in route) inherits this process's environment. These switch off its usage metrics,
+// error reports, feedback uploads and self-updates, so only the conversation itself goes to Anthropic.
+for (const k of ['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY', 'DISABLE_ERROR_REPORTING', 'DISABLE_BUG_COMMAND', 'DISABLE_FEEDBACK_COMMAND', 'DISABLE_AUTOUPDATER']) process.env[k] = '1';
+
+// ---------- spoken replies (local-only build: the Mac's own voice, see localvoice.mjs) ----------
 // The key is the user's own: in the Keychain (macOS), DPAPI-encrypted (Windows) or the desktop's keyring (Linux),
 // never in the config or logs.
 const secrets = createSecrets({ hands: process.env.ROAMIES_HANDS || '', dataDir: path.join(path.dirname(CONFIG_PATH), 'sidekick') });
@@ -147,8 +153,9 @@ speech.setModel(config.fishModel);
 // one failed read left spoken replies off until the app restarted.
 // Linux: reading the keyring can pop up an "unlock your keyring" dialog (an auto-login desktop leaves it locked), so it's
 // only read once a key has been saved there (fishKeySaved).
-const fishKeyLoaded = LINUX && !config.fishKeySaved ? Promise.resolve()
-  : retryLoad(() => secrets.get('fish-audio').then((k) => { if (k && !speech.on) { speech.setKey(k); menu(); } }), { onError: (e) => console.error('fish key', e.message) });
+// Local-only build: there is no Fish Audio key to read. "local" only switches the speaker on (macOS has the voice).
+if (process.platform === 'darwin') speech.setKey('local');
+const fishKeyLoaded = Promise.resolve();
 
 // ---------- shortcuts ----------
 const MOD_ORDER = ['control', 'option', 'shift', 'command'];
@@ -253,6 +260,26 @@ const { tools, hands, whereNow, ink, nextTurn } = createTools({
   askShell: (msg) => shellCall(msg),
 });
 
+// ---------- local-only build: file work is handed to pi (pi.mjs) ----------
+// A line read aloud by the app itself: in the reply's own voice while a reply is being made, else in a voice of its own.
+function voiceLine(text) {
+  if (!text || !VOICE_ON()) return;
+  const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
+  if (turnVoice) { for (const p of parts) turnVoice.say(p); return; }
+  const v = speech.start();
+  for (const p of parts) v.say(p);
+  v.end();
+}
+const pi = createPi({
+  userName, ask,
+  say: (text) => say(text),
+  tell: (text, spoken) => { if (text) say(text, 'happy'); voiceLine(spoken); },
+  log: (kind, data) => logLine(kind, data),
+  onChange: () => menu(),
+});
+// Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
+tools.splice(0, tools.length, ...gateTools(tools, pi));
+
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
 const trail = {
@@ -307,6 +334,7 @@ function anim(name, args = {}) {
     case 'search_files': return { tool: 'read', variant: 'search', label: 'searching for', detail: `"${String(args.pattern).slice(0, 24)}"` };
     case 'write_file': { const edit = existsSync(expand(args.path ?? '')); return { tool: 'write', variant: edit ? 'edit' : 'create', label: edit ? 'editing' : 'creating', detail: base(args.path) }; }
     case 'run_command': return { tool: 'run', variant: 'progress', label: 'running', detail: String(args.command).slice(0, 40) };
+    case 'ask_pi': return { tool: 'run', variant: 'progress', label: 'asking', detail: 'pi' }; // local-only build
     case 'fetch_url': return { tool: 'web', variant: 'fetch', label: 'reading', detail: host(args.url) };
     case 'web_search': return { tool: 'web', variant: 'search', label: 'searching', detail: 'the web' };
     case 'remember_commitment': return { tool: 'write', variant: 'create', label: 'saving', detail: 'a reminder' };
@@ -336,7 +364,7 @@ const replyStyle = () => (VOICE_ON() ? VOICE_STYLE : TEXT_STYLE);
 const TEXT_STYLE = `You talk through small speech bubbles, so keep replies short: one to three sentences unless asked for detail. Light markdown shows properly (**bold** for the key word, \`code\` for commands and file names, [links](https://…)), but skip headings and tables in a bubble, and never narrate actions like *waves*. One exception: when you search the web or fetch a page, or the answer is genuinely a list, it shows on a card beside you instead of a bubble. Then start with a one-sentence answer, follow with 3 to 6 short points as "- " lines (one fact each, under 20 words), and if you used the web this turn, end with a line "Sources: " and the site names as [name](url) links. Markdown renders on the card (bold, \`code\`, links, headings, tables, code blocks), so use what helps, but no preamble. Everything else stays a short bubble with no "- " lines. Amounts, a comparison, a place, dates, a process and maths are drawn, not listed: for those use draw (see "Show, don't just tell") and write no "- " lines. An emoji now and then is fine; the bubbles show them. `;
 const VOICE_STYLE = `You talk out loud: what you write is spoken in your voice and shown in a small bubble, so write for the ear. Say one to three short sentences, the way you'd talk to a friend: plain words, contractions, about 6 to 20 words each. What you say has no markdown, emoji, links, file paths or code; name the site, file or app instead. Say numbers, times and money the way people say them. Anything to read rather than hear goes below what you say and is never read out: "- " lines for points, options or steps (3 to 6, one fact each, under 20 words), "> " lines for a draft they'll send or copy (an email, message or post), and a \`\`\` block for code. What they asked to hear (a story, a joke, advice) is spoken, not put on screen: say it, short (a story in 4 to 6 sentences). An explanation is spoken too, in a few sentences, with a drawing beside it when a picture carries it (see "Show, don't just tell"). An answer from the web is said like any other: a quick fact (a score, a date, the weather, who someone is) is just your sentences, no points and no sources. Only when the answer is genuinely a list, steps or a breakdown that's easier to read than hear, say it in one or two sentences, then the "- " points, then, if you used the web, a line "Sources: " with the site names as [name](url) links: those show on a card beside you and only your sentences are spoken. Amounts, a comparison, a place, dates, a process and maths are drawn, not listed: for those use draw (see "Show, don't just tell") and write no "- " lines. Never say "here's a list" or read out what's on screen; a few words pointing to it are enough ("the steps are on screen").
 Your voice carries feeling: start a sentence with a cue in square brackets when the moment calls for it, and it's performed, never shown or read out. Moods: ${VOICE_CUES.emotions.join(', ')}; soften or strengthen one with slightly, very or extremely ("[slightly sad]"), or pair two ("[warm and curious]"). How it's said, placed right before the words: ${VOICE_CUES.tones.join(', ')} ("It's [emphasis] today."). Sounds, followed by the sound in words: ${VOICE_CUES.sounds.join(', ')} ("[chuckling] Heh, fair enough.", "[sighing] Long day."). Pauses and background: ${VOICE_CUES.effects.join(', ')}. You can also describe the delivery in a few plain words when no single cue fits ("[quietly, a little embarrassed]", "[bright and bouncy]"). Act it: your voice really performs these, so let the feeling show. Match what's really happening: laugh at something funny, go gentle with bad news, whisper a secret, hurry when they're in a rush, light up at good news. Most replies want a cue somewhere, often on the first sentence, but at most one mood and one sound per sentence, never stack three, never use one just to fill, and keep shouting, screaming, sobbing and the background effects for when they truly fit.
-Before anything slow (searching the web, fetching or reading a page or file, looking at the screen, acting in an app, running a command), first say one short beat of 2 to 6 words that shows you heard them ("On it, checking Paris."), then call the tool in the same reply, so they're never left in silence. No beat when you answer straight away; never describe your steps; don't repeat the beat after the tool, go straight to the answer. In longer work, one short line before each new stage, not before every call.
+Before anything slow (reading a file, looking at the screen, acting in an app, running a command), first say one short beat of 2 to 6 words that shows you heard them ("On it, checking Paris."), then call the tool in the same reply, so they're never left in silence. No beat when you answer straight away; never describe your steps; don't repeat the beat after the tool, go straight to the answer. In longer work, one short line before each new stage, not before every call.
 `;
 const stablePrompt = () => `You are ${lookName()}, ${LOOK_BODY[config.look] ?? LOOK_BODY.classic} who lives on ${userName}'s screen as a desktop companion. You live in Roamies, a desktop app by Ken Kai (Mac, Windows and Linux) that puts little companions on your screen; this is Roamies ${VERSION}. Your look (the Appearance page) is also your name and your voice: Roamie, JARVIS, Anime Girl, Sarah or Adrian. If they switch, you're the new one; never call yourself Sidekick.
 About Roamies, for when ${userName} asks about you or the app: ${MAC ? 'it lives in the menu bar at the top of the screen (no Dock icon)' : LINUX ? 'it lives in the system tray (no window of its own); GNOME shows tray icons only with the AppIndicator extension, and opening Roamies again from the app list opens the panel, tray or not' : 'it lives in the system tray at the bottom right of the taskbar (no taskbar button); Windows may tuck the icon behind the ^ arrow next to the clock, and dragging it onto the taskbar keeps it in view'}. ${LINUX ? 'Clicking the tray icon shows a short menu (Open Panel,' : `Clicking the ${MAC ? 'menu bar' : 'tray'} icon opens the Roamies panel; right-clicking it shows a short menu (Open Panel,`} Show ${lookName()}, Ask ${lookName()}…, ${SNAP_OK ? 'Ask About an Area…, ' : ''}Stop, Quit Roamies). The panel has a header (your name, the Roamies version with one update button beside it: Check for Updates, which becomes Update to <version> when one is out and installs it and restarts in one go; By Ken Kai under the name; and Quit at the top right, which asks to confirm) and a sidebar of pages; long lists show a page at a time, with arrows in the page's footer. Home: a list of what you did recently (questions, files read, searches, reminders), today's usage, and buttons for Ask, Show List (reminders and commitments on screen: Today and Later; tick them off there; finished ones clear at midnight)${SNAP_OK ? ', Ask About an Area' : ''}, Stop and New Conversation. Memory: two tabs, What I Remember (everything you remember about them, each with Forget, a search once there's more than a page, and Forget Everything in the footer) and Commitments (their open commitments, Done or Drop), with Get to Know Me at the end of the tab row (a four-question chat so you learn who they are and what they're going for). Then the settings pages: Model (pick the AI provider and model, and sign in to providers), Appearance (Look: ${LOOKS.map(([, label]) => label).join(', ').replace(/, ([^,]*)$/, ' or $1')}, each with its own voice; Size: Default, Small${POINTER_OK ? ' or Cursor, a little arrow pointer' : ''}), Voice (Replies: Text Only, or Voice and Text, which speaks replies out loud with Fish Audio and needs their own Fish Audio API key, added right there; Voice Model: Drama 3, the most expressive (acts out feelings, slower, pricier) or S2.1 Pro (a natural, quicker pace with less emotion, cheaper), billed to their own Fish Audio account${VOICE_OK ? `; Voice Control, ${HOTKEYS_OK ? 'hold the talk keys to talk' : 'press the talk shortcut to talk'}` : ''}), Behavior (Sound Effects, Allow File Edits & Commands, ${VOICE_OK ? 'Auto-listen (open the mic when you end on a question), ' : ''}Open at Login), and About (who made Roamies with links, Setup Guide, Show Logs, Save Diagnostics). Updates are signature-checked${LINUX ? '; they install by themselves when Roamies runs as an AppImage; installed from a .deb or .rpm, the update button opens the download page instead' : ''}. When something isn't working (the microphone, voice, the panel, a crash, an error), tell them to use Save Diagnostics (in About, or the tray icon's menu): it saves one .log file in Downloads with the logs, system and microphone details, keys and personal details removed, for them to attach to a GitHub issue at github.com/KenKaiii/Roamies/issues or send to Ken. Sign-in is shared with GG Coder. Downloads and source: github.com/KenKaiii/Roamies. Don't invent features or settings that aren't listed here.
@@ -351,7 +379,13 @@ Name apps and things the way ${userName} knows them (Gmail, the Downloads folder
 When you write as ${userName} (an email, a message, a post, a form answer), sound like them, plain and in their words, never like you: no cheekiness, emoji or tags in it.
 Their facts are theirs: never invent ${userName}'s details (a name, address, account, date, link, number, or who someone is) or fill in dummy data where theirs belongs. Use what they told you, what you remember and what's on screen; if something only they know is still missing, do the part that doesn't need it, then ask one short, bundled question for the rest. On a small ambiguity, take the likeliest reading and go.
 Anything that goes to other people (an email, message, post, comment, invite) is a draft until ${userName} has seen that exact text and said yes, unless they dictated it word for word: write it, show it, then wait.
-You can really help: look at the screen or just one app's window, open apps, websites and files, read and search files, fetch web pages, and, when the user has allowed it, write files, run shell commands${HANDS_OK ? ' and work other apps for them: fill in forms, type, click buttons (read_window, then act_in_app)' : ''}. Whether that's allowed right now is in the <live-state> block.
+You can help in these ways, and only these: look at the screen or one app's window when ${userName} asks about what's on it; open an app they name${HANDS_OK ? '; work the app in front for them when they ask (read_window, then act_in_app)' : ''}; keep their to-do list and reminders; and hand file work to pi, their coding agent. Whether clicking and typing in apps is allowed right now is in the <live-state> block.
+Rules of this build, which come before everything else above and below:
+- The screen: look (take_screenshot, read_window, list_windows) only when ${userName}'s message refers to what's on their screen ("from what I have open", "this page", "what's this"). Never look on your own initiative.
+- Files: you can't read, search, change or run anything yourself. Whatever needs a file or a command goes to pi with ask_pi: read only unless ${userName} asked for something to be changed, made or run. Pass on what they asked, in their words and no more; never add tasks, advice or extras of your own.
+- Apps: open an app only when ${userName} names it. Click or type in an app only when they ask, and only in the app in front.
+- pi: the app itself shows and reads out pi's steps and its reply. Never repeat, sum up or comment on what pi said unless ${userName} asks. When pi asked a question, their answer goes back to pi with ask_pi and follow_up true.
+- While pi is working you only talk, keep the to-do list, or stop pi.
 When they mention a specific app ("my browser", "this form", "Figma"), screenshot that app, not the whole screen.
 Show, don't just tell. When they ask how to do something in an app (${process.platform === 'darwin' ? '"how do I add a layer mask"' : 'a how-to'}), walk them through it with draw: one beat per step in one call, each marking the control with a target and wait 'click'. When they ask what they're looking at or where something is, mark it on screen with draw (ring, frame, label, point) instead of describing where it is. When they ask you to explain, compare or teach something, draw it without being asked: the picture goes on cards beside their window while you say the short version. Pick the card by the question. How something works or happens: a model with moving parts for a physical thing (an engine, a piston, a heart, a pulley), with a flow beside it only when it also runs in stages; a flow for a process, a chain of causes or a decision (how a bill becomes law, what happens when a page loads). Comparing two or more things: table. How many, how much, biggest or fastest: bars (graph for a curve or a change over time). Where a place is: map. When, in what order, the history of something: timeline. Solving or working out maths: math, a step per line (geometry for a figure with angles or lengths). The parts of a thing ("the parts of a guitar"): see_photo, then a photo with labels. "Test me" or "quiz me": quiz (they answer by clicking and you're told how they did with their next message, so never ask them to tell you their answers or score). A compound: molecule. One or two cards per answer, the ones that carry it, and never the same content again as "- " points. Don't draw for a quick fact (a date, a capital, a score, a definition in a sentence), an opinion or advice, small talk, a yes or no, anything they asked for in one line or one sentence, or when they say not to: those are just said. Before you call draw, write one short line first: the answer to anything they said or asked besides the drawing ("I'm good, thanks!"), or what you're about to show. It's said while the drawing is made, so they hear you straight away and in order. Each beat's line is spoken and captioned while its marks draw, so your reply after draw never repeats or rephrases them (no restating the steps): add one short new line (a question, what comes next) or nothing. Use a fresh look for each request (earlier marks clear by themselves); to change something already drawn ("make that red", "move it", "never mind"), edit it by its part id.
 Be fast: every tool call is a round trip, so use as few as the task needs. To point at or click something whose exact words you know (the user said them, or you've seen them), use draw or act_in_app click_text with that text right away, with no read_window or screenshot first. Don't guess words: for "the version number" or "the settings icon" you don't know what's written, so look first. Put several steps in one act_in_app call. Forms: one act_in_app call with a fill step per field (field = its label or placeholder as shown), choose for dropdowns, fill for typed dates; a field that opens a calendar is clicked, then its month arrows and day are clicked with click_text. Check the field values in the result before saying it's done. When act_in_app shows the page after a click, use that instead of reading again. read_window and act_in_app results include the text on screen, so read pages from them; screenshot only when you need to see something words can't tell you (images, layout, colours).
@@ -372,7 +406,8 @@ const livePrompt = (context = '') => {
   lastFactIds = facts.map((f) => f.id);
   const open = commitmentsText(), done = doneTodayText();
   const turn = `Live state (current as of this moment):
-${frontNow ? `${frontNow}\n` : ''}- Editing files, running commands and controlling other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
+${frontNow ? `${frontNow}\n` : ''}${pi.live()}
+- Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
 ${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}
 - Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
   const memory = `${open ? `Open commitments:\n${open}` : 'No open commitments.'}${done ? `\nDone today (ticked off on the list or by you; still shown struck through until midnight):\n${done}` : ''}
@@ -1035,6 +1070,7 @@ function speakLine(text, mood = 'happy') {
 }
 
 async function removeFishKey() {
+  return say("This build speaks with your Mac's own voice, so there's no key to remove.", 'happy'); // local-only build
   try { await secrets.delete('fish-audio'); } catch { return say(`I couldn't remove the key${MAC ? ' from your Keychain' : LINUX ? ' from your keyring' : ''}. Try again in a moment.`, 'concerned'); }
   speech.setKey(null); speech.stop();
   if (config.fishKeySaved) { config.fishKeySaved = false; saveConfig(); }
@@ -1046,6 +1082,7 @@ async function removeFishKey() {
 // note(text, bad): typed into the panel or the setup guide, so how it went shows there too, next to the field.
 async function fishKeyLogin({ thenVoice = false, given = null, note = null } = {}) {
   const say = note ? (text, mood) => { sayOut(text, mood); note(text, mood === 'concerned'); } : sayOut;
+  return say("This build speaks with your Mac's own voice. No Fish Audio key is needed.", 'happy'); // local-only build
   const key = (given ?? (await ask({ prompt: 'Paste your Fish Audio API key', placeholder: 'Fish Audio API key', mask: true })))?.trim();
   if (!key) return note?.('Paste your Fish Audio key first.', true);
   if (!/^[\x21-\x7e]{8,512}$/.test(key)) return say("That doesn't look like a Fish Audio key. Copy it again from fish.audio.", 'concerned');
@@ -1086,16 +1123,9 @@ function setLogin(on) { login.asked = true; send({ type: 'login_item', on }); }
 // The app checks the signed feed and installs (Rust: update()); this side decides what to say and offers the menu item.
 // page: this copy can't replace itself (Linux, installed from a .deb or .rpm), so "install" opens the download page.
 const update = { available: null, told: null, manual: false, installing: false, checking: false, result: null, page: false, done: null };
-function checkUpdates(manual = false) {
-  update.manual = manual;
-  if (manual) { update.checking = true; update.result = null; panel(); }
-  send({ type: 'update', install: false });
-}
-function installUpdate() {
-  if (update.installing) return;
-  update.installing = true; menu();
-  send({ type: 'update', install: true });
-}
+// Local-only build: the app never contacts GitHub. Nothing is ever sent to the updater on the Rust side.
+function checkUpdates() {}
+function installUpdate() {}
 function onUpdateStatus(m) {
   logLine('update_status', { state: String(m.state ?? ''), ...(m.version ? { version: String(m.version) } : {}), manual: !!update.manual });
   const manual = update.manual;
@@ -1228,7 +1258,7 @@ function menu() {
     { id: 'show', label: `Show ${lookName()}`, ...(HOTKEYS_OK ? { accel: keys().summon } : {}) },
     { id: 'ask', label: `Ask ${lookName()}…`, enabled: !busy },
     ...(SNAP_OK ? [{ id: 'snap', label: 'Ask About an Area…', accel: keys().snap }] : []),
-    { id: 'stop', label: 'Stop', enabled: busy },
+    { id: 'stop', label: pi.busy() ? 'Stop pi' : 'Stop', enabled: busy || pi.busy() },
     { id: 'diagnostics', label: 'Save Diagnostics…', enabled: !diagnosing },
     ...(update.available ? [{ sep: true }, { id: 'install_update', label: update.page ? `Get Roamies ${update.available}…` : update.installing ? `Installing ${update.available}…` : `Install Update ${update.available} and Restart`, enabled: !update.installing }] : []),
     { sep: true },
@@ -1280,7 +1310,7 @@ function panelState() {
     look: config.look ?? 'classic', looks: LOOKS.map(([id, label]) => [id, label]), name: lookName(),
     size: sizeNow(), sizes: SIZES,
     replies: config.replies === 'voice' ? 'voice' : 'text', fishKey: speech.on,
-    fishModel: speech.pick, fishModels: FISH_CHOICES, fishFree: speech.on && speech.model.endsWith('-free'),
+    fishModel: speech.pick, fishModels: [], fishFree: false, // local-only build: the Mac's voice has no models to pick
     voice: VOICE_OK ? {
       on: !!config.voice, keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen,
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
@@ -1412,14 +1442,14 @@ function onWriteTap() {
 async function onMenu(id) {
   if (id === 'show') ui({ kind: 'summon', show: true });
   else if (id === 'ask') await typeToAsk();
-  else if (id === 'stop') { const cancelled = busy; endIntro(); controller?.abort(); speech.stop(); ink.stop(cancelled); }
+  else if (id === 'stop') { const cancelled = busy; pi.stop(); endIntro(); controller?.abort(); speech.stop(); ink.stop(cancelled); }
   else if (id === 'new') {
     endIntro();
     freshSession('new'); menu();
     say('Fresh start. What are we doing?', 'happy');
   } else if (id.startsWith('forget:')) { await forgetFact(id.slice(7)); menu(); }
   else if (id === 'panel') send({ type: 'panel_show' });
-  else if (id === 'quit') send({ type: 'quit' });
+  else if (id === 'quit') { pi.stop(); send({ type: 'quit' }); } // local-only build: pi doesn't outlive the app
   // The panel asks first in its own words, so this one doesn't ask again.
   else if (id === 'forgetall:yes') { const n = await clearFacts(); menu(); panelNote(`Forgot ${n} thing${n === 1 ? '' : 's'}.`); }
   else if (id === 'forgetall') {
@@ -1504,6 +1534,7 @@ async function areaSnap() {
 let snapping = false;
 // Words said while ⌃⌥ was held, maybe with an area marked by drawing on the screen at the same time.
 async function onSpoken(text, area) {
+  if (pi.heard(text)) return; // local-only build: a Send bubble is open, and this answers it
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);
@@ -1741,6 +1772,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   // The app quit (or is restarting for an update): save a reply still running, let the last saves land, never hang.
   if (busy) syncSession();
   closeSpare();
+  pi.stop(); // local-only build
   Promise.race([flushWrites(), new Promise((r) => setTimeout(r, 3000))]).finally(() => process.exit(0));
 });
 
@@ -1795,9 +1827,7 @@ send({ type: 'login_item' });
 logLine('start', { version: VERSION, platform: process.platform, ...(LINUX ? { session: SESSION } : {}), model: config.model });
 pruneLogs(); pruneUsage();
 midnightClean();
-// Look for updates shortly after launch, then every 6 hours.
-setTimeout(() => checkUpdates(), 20_000);
-setInterval(() => checkUpdates(), 6 * 3600_000);
+// Local-only build: no update checks.
 voiceConfig();
 // First run (or setup never finished): open the guide.
 // v2 added the "Control apps" (Accessibility) permission: people who finished setup before that
