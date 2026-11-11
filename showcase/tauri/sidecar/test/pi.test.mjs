@@ -50,12 +50,13 @@ fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/D
 
 // ---- a pi with a scripted user
 const said = [], told = [], asked = [];
+let lastResolve = null; // the open Send bubble's own answer, as the overlay would give it
 let answer = 'yes'; // what the Send bubble gets: 'yes' (Send), null (Don't send), or a function for by-voice
 const pi = createPi({
   home, userName: 'Tiago', shell: '/bin/sh',
   say: (t) => said.push(t), tell: (t, v) => told.push({ t, v }),
   ask: (q, signal) => new Promise((resolve) => {
-    asked.push(q);
+    asked.push(q); lastResolve = resolve;
     if (typeof answer === 'function') { signal?.addEventListener('abort', () => resolve(null)); setTimeout(answer, 10); } else setTimeout(() => resolve(answer), 5);
   }),
 });
@@ -108,6 +109,19 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT files and run commands · in ~\/Documents\/roamies-pi · continues the last pi task\n/);
   assert.deepEqual(calls().at(-1).args, ['--mode', 'json', '--session', 'sess-1', '--', 'The column is called label']);
   assert.equal(pi.heard('send'), false, 'no bubble open: speech is not an answer');
+}
+{ // talking while the Send bubble is open: the bubble closing is not a "no"; what's said decides
+  assert.equal(pi.listening(), false, 'no bubble open: talking is just talking');
+  const realAsk = answer;
+  answer = () => { assert.equal(pi.listening(), true); lastResolve(null); setTimeout(() => assert.ok(pi.heard('Send it.')), 30); };
+  await tool('ask_pi').execute({ prompt: 'spoken approval', mode: 'read' }, {});
+  await settled();
+  assert.equal(records().at(-1)[0].approved_by, 'voice');
+  // ...and if nothing was heard, nothing is sent
+  answer = () => { pi.listening(); setTimeout(() => assert.ok(pi.unheard()), 20); };
+  await assert.rejects(tool('ask_pi').execute({ prompt: 'mumble', mode: 'read' }, {}), /didn't say send/);
+  assert.equal(pi.unheard(), false);
+  answer = realAsk;
 }
 { // said something else while the Send bubble was open: not sent
   answer = () => pi.heard('no wait, read the other file');

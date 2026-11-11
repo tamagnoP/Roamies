@@ -351,7 +351,8 @@
     if (m.type === 'state' && m.state === 'listening') {
       hearing = true;
       dropAutoListen();
-      if (ask) finishAsk(null);
+      // Local-only build: a bubble with buttons (pi's Send bubble) stays open while you talk, so "send" can answer it.
+      if (ask && !ask.choices) finishAsk(null);
       endTalk();
       heard = null;
       panel()?.close();

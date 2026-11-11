@@ -125,8 +125,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const closing = new AbortController();
     const signals = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
     let by = 'click';
-    const voiced = new Promise((resolve) => { approval = { answer: (text) => { by = 'voice'; resolve(isSend(text)); } }; });
-    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: ['Send', "Don't send"] }, signals).then((a) => isSend(a));
+    const voiced = new Promise((resolve) => { approval = { listening: false, answer: (text) => { by = 'voice'; resolve(isSend(text)); } }; });
+    // Once the user has started talking, the answer is what they say: a bubble that closes meanwhile isn't a "no".
+    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: ['Send', "Don't send"] }, signals).then((a) => (a == null && approval?.listening ? new Promise(() => {}) : isSend(a)));
     try {
       const ok = await Promise.race([clicked, voiced]);
       return { ok, by };
@@ -284,6 +285,10 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     busy: () => !!job,
     /** Something said while a Send bubble is open answers it ("send" sends, anything else doesn't). True if it did. */
     heard(text) { if (!approval) return false; approval.answer(text); return true; },
+    /** The user started talking. True while a Send bubble is open: what they say will answer it. */
+    listening() { if (!approval) return false; approval.listening = true; return true; },
+    /** They stopped and nothing was heard. True if that ended a Send bubble (nothing is sent). */
+    unheard() { if (!approval?.listening) return false; approval.answer(''); return true; },
     state: () => ({ working: job ? { prompt: job.prompt, mode: job.mode, project: job.project, since: job.at } : null, last }),
   };
 }
