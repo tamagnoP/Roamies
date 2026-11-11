@@ -12,6 +12,7 @@ after you approve it. Made against upstream commit `fa798b4` (app version 0.1.34
 | Open an app by name (Zotero, Inkscape) | Only when you name it. No websites, files or folders |
 | Click and type in an app | Only when you ask, only in the app in front, and only with "Allow File Edits & Commands" on |
 | Keep the to-do list and reminders | As before |
+| Keep notes in your Obsidian vault | Writes only when you ask; can add to a note, never change or delete one |
 | Hand a task to pi | Only after you say send |
 
 Its own file and command tools (`read_file`, `list_files`, `search_files`, `write_file`, `run_command`) and
@@ -25,11 +26,13 @@ or named an app) is a rule in its instructions, which the model follows but the 
 2. A bubble shows exactly what will be sent, the folder, and the mode, with **Send** and **Don't send**. With spoken
    replies on, it is read out too.
 3. Nothing is sent until you click Send, press Y, or say "send". Saying anything else, or Don't send, cancels it.
-4. pi starts in the background, in the project folder, as `pi --mode json`. Each step it takes ("pi · reading
-   segment.py") shows in a bubble.
-5. pi's reply, or its question back to you, is shown in full and read aloud by the app itself, not retold by the
-   model. Your answer to a question goes back to the same pi session, after another Send.
-6. While pi is working, Roamies can only talk, keep the to-do list, or stop pi (say "stop pi", or Stop in the menu).
+4. pi starts in the background, in the project folder, as `pi --mode json`. What it's doing ("Pi's reading
+   segment.py…") shows in a bubble, at most one every few seconds.
+5. When pi finishes, Roamies tells you the gist in its own voice (with spoken replies on), and then pi's full reply,
+   or its question back to you, goes on screen word for word. With text replies, the full reply is shown straight
+   away. Your answer to a question goes back to the same pi session, after another Send.
+6. While pi is working, Roamies can only talk, keep the to-do list and notes, or stop pi (say "stop pi", or Stop in
+   the menu).
 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.
@@ -50,7 +53,8 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
   "pi": "pi",
   "maxMinutes": 60,
   "voice": "",
-  "voices": { "jarvis": "Daniel (Enhanced)" }
+  "voices": { "jarvis": "Daniel (Enhanced)" },
+  "vault": "~/Documents/roamies-vault"
 }
 ```
 
@@ -61,6 +65,7 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
   folder.
 - `pi`: the command that starts pi. If Roamies says it couldn't start pi, put the full path here (run `which pi`).
 - `maxMinutes`: a task running longer than this is stopped.
+- `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
 - `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
   `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
@@ -71,6 +76,21 @@ letter-by-letter streaming updates), then the result. Nothing deletes these; cle
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
+
+## Notes
+
+Roamies keeps notes as plain Markdown files in `~/Documents/roamies-vault/` (the `vault` setting). Open that folder
+in Obsidian as a vault to browse them, see the links between them and edit them; Obsidian doesn't need to be running
+for Roamies to use it.
+
+- "Note this down…" makes a new note, named by its title, with the date at the top.
+- "Add to my note on…" adds to the end of an existing note under the date and time.
+- "What do my notes say about…" searches titles and text, in subfolders too, and can read a note back.
+- Related notes are linked the Obsidian way, `[[Title]]`.
+
+These are the only files Roamies touches itself. In code, a title is only ever a file name inside the vault, an
+existing note is never written over, and nothing is changed or deleted. What it reads from your notes to answer you
+becomes part of the conversation with your AI provider.
 
 ## What the patch changes besides pi
 
@@ -97,6 +117,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 
 - `showcase/tauri/sidecar/pi.mjs` (new): the hand-off, the Send approval, the background job, the record, projects,
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
+- `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
@@ -104,7 +125,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
-- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/localvoice.test.mjs` (new), `package.json`: tests.
+- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/localvoice.test.mjs` (new), `package.json`: tests.
 
 ## Build (macOS)
 

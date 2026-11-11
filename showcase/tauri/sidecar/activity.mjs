@@ -23,6 +23,9 @@ export function describe(name, args = {}) {
     case 'run_command': return ['Running a command', 'Ran a command'];
     case 'ask_pi': return ['Handing a task to pi', 'Handed a task to pi']; // local-only build
     case 'stop_pi': return ['Stopping pi', 'Stopped pi'];
+    case 'write_note': return ['Writing a note', 'Wrote a note'];
+    case 'search_notes': return ['Searching your notes', 'Searched your notes'];
+    case 'read_note': return ['Reading a note', 'Read a note'];
     case 'switch_project': return ['Switching pi\'s project', 'Switched pi\'s project'];
     case 'fetch_url': return [`Opening ${host(args.url)}`, `Read ${host(args.url)}`];
     case 'web_search': return ['Searching the web', 'Searched the web'];

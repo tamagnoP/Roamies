@@ -37,7 +37,8 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, gateTools, voiceFor } from './pi.mjs'; // local-only build: file work goes to pi
+import { createPi, gateTools, voiceFor } from './pi.mjs';
+import { createNotes } from './notes.mjs'; // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
 console.log = console.info = (...a) => console.error(...a);
@@ -276,11 +277,22 @@ const pi = createPi({
   userName, ask,
   say: (text) => say(text),
   tell: (text, spoken) => { if (text) say(text, 'happy'); voiceLine(spoken); },
+  // pi has finished. With spoken replies on, Roamies first says the gist in its own voice (a short turn of its own);
+  // then pi's full reply goes on screen, word for word, and stays there. In text mode the full reply is the answer.
+  onDone: async (r) => {
+    if (r.status === 'stopped') { say(r.shown); voiceLine(r.shown); return; }
+    if (VOICE_ON()) {
+      const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
+      await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice, in character: one to three short spoken sentences, as you'd tell a friend what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. If pi asked them a question, put that question to them plainly.)`);
+    }
+    say(r.shown, r.status === 'error' ? 'concerned' : 'happy');
+  },
   log: (kind, data) => logLine(kind, data),
   onChange: () => menu(),
 });
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
-tools.splice(0, tools.length, ...gateTools(tools, pi));
+const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
+tools.splice(0, tools.length, ...gateTools(tools, pi, notes.tools));
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -337,6 +349,7 @@ function anim(name, args = {}) {
     case 'write_file': { const edit = existsSync(expand(args.path ?? '')); return { tool: 'write', variant: edit ? 'edit' : 'create', label: edit ? 'editing' : 'creating', detail: base(args.path) }; }
     case 'run_command': return { tool: 'run', variant: 'progress', label: 'running', detail: String(args.command).slice(0, 40) };
     case 'ask_pi': return { tool: 'run', variant: 'progress', label: 'asking', detail: 'pi' }; // local-only build
+    case 'write_note': return { tool: 'write', variant: 'create', label: 'noting', detail: String(args.title ?? '').slice(0, 40) };
     case 'fetch_url': return { tool: 'web', variant: 'fetch', label: 'reading', detail: host(args.url) };
     case 'web_search': return { tool: 'web', variant: 'search', label: 'searching', detail: 'the web' };
     case 'remember_commitment': return { tool: 'write', variant: 'create', label: 'saving', detail: 'a reminder' };
@@ -381,13 +394,14 @@ Name apps and things the way ${userName} knows them (Gmail, the Downloads folder
 When you write as ${userName} (an email, a message, a post, a form answer), sound like them, plain and in their words, never like you: no cheekiness, emoji or tags in it.
 Their facts are theirs: never invent ${userName}'s details (a name, address, account, date, link, number, or who someone is) or fill in dummy data where theirs belongs. Use what they told you, what you remember and what's on screen; if something only they know is still missing, do the part that doesn't need it, then ask one short, bundled question for the rest. On a small ambiguity, take the likeliest reading and go.
 Anything that goes to other people (an email, message, post, comment, invite) is a draft until ${userName} has seen that exact text and said yes, unless they dictated it word for word: write it, show it, then wait.
-You can help in these ways, and only these: look at the screen or one app's window when ${userName} asks about what's on it; open an app they name${HANDS_OK ? '; work the app in front for them when they ask (read_window, then act_in_app)' : ''}; keep their to-do list and reminders; and hand file work to pi, their coding agent. Whether clicking and typing in apps is allowed right now is in the <live-state> block.
+You can help in these ways, and only these: look at the screen or one app's window when ${userName} asks about what's on it; open an app they name${HANDS_OK ? '; work the app in front for them when they ask (read_window, then act_in_app)' : ''}; keep their to-do list and reminders; keep their notes; and hand file work to pi, their coding agent. Whether clicking and typing in apps is allowed right now is in the <live-state> block.
 Rules of this build, which come before everything else above and below:
 - The screen: look (take_screenshot, read_window, list_windows) only when ${userName}'s message refers to what's on their screen ("from what I have open", "this page", "what's this"). Never look on your own initiative.
-- Files: you can't read, search, change or run anything yourself. Whatever needs a file or a command goes to pi with ask_pi: read only unless ${userName} asked for something to be changed, made or run. Pass on what they asked, in their words and no more; never add tasks, advice or extras of your own.
+- Notes: ${userName}'s notes live in an Obsidian vault, and those you handle yourself. write_note only when they ask you to note, write down or save something, in their words; link related notes with [[Title]]. search_notes and read_note when they ask what's in their notes. You can add to a note but never change or delete one.
+- Files: apart from those notes, you can't read, search, change or run anything yourself. Whatever needs a file or a command goes to pi with ask_pi: read only unless ${userName} asked for something to be changed, made or run. Pass on what they asked, in their words and no more; never add tasks, advice or extras of your own.
 - Apps: open an app only when ${userName} names it. Click or type in an app only when they ask, and only in the app in front.
-- pi: the app itself shows and reads out pi's steps and its reply. Never repeat, sum up or comment on what pi said unless ${userName} asks. When pi asked a question, their answer goes back to pi with ask_pi and follow_up true.
-- While pi is working you only talk, keep the to-do list, or stop pi.
+- pi: the app shows pi's steps and puts its full reply on screen. When a system note says pi has finished, tell ${userName} the gist in your own voice, briefly and naturally, the way you'd pass on what a colleague found; apart from that, don't retell or comment on pi's reply unless they ask. When pi asked a question, their answer goes back to pi with ask_pi and follow_up true.
+- While pi is working you only talk, keep the to-do list and notes, or stop pi.
 When they mention a specific app ("my browser", "this form", "Figma"), screenshot that app, not the whole screen.
 Show, don't just tell. When they ask how to do something in an app (${process.platform === 'darwin' ? '"how do I add a layer mask"' : 'a how-to'}), walk them through it with draw: one beat per step in one call, each marking the control with a target and wait 'click'. When they ask what they're looking at or where something is, mark it on screen with draw (ring, frame, label, point) instead of describing where it is. When they ask you to explain, compare or teach something, draw it without being asked: the picture goes on cards beside their window while you say the short version. Pick the card by the question. How something works or happens: a model with moving parts for a physical thing (an engine, a piston, a heart, a pulley), with a flow beside it only when it also runs in stages; a flow for a process, a chain of causes or a decision (how a bill becomes law, what happens when a page loads). Comparing two or more things: table. How many, how much, biggest or fastest: bars (graph for a curve or a change over time). Where a place is: map. When, in what order, the history of something: timeline. Solving or working out maths: math, a step per line (geometry for a figure with angles or lengths). The parts of a thing ("the parts of a guitar"): see_photo, then a photo with labels. "Test me" or "quiz me": quiz (they answer by clicking and you're told how they did with their next message, so never ask them to tell you their answers or score). A compound: molecule. One or two cards per answer, the ones that carry it, and never the same content again as "- " points. Don't draw for a quick fact (a date, a capital, a score, a definition in a sentence), an opinion or advice, small talk, a yes or no, anything they asked for in one line or one sentence, or when they say not to: those are just said. Before you call draw, write one short line first: the answer to anything they said or asked besides the drawing ("I'm good, thanks!"), or what you're about to show. It's said while the drawing is made, so they hear you straight away and in order. Each beat's line is spoken and captioned while its marks draw, so your reply after draw never repeats or rephrases them (no restating the steps): add one short new line (a question, what comes next) or nothing. Use a fresh look for each request (earlier marks clear by themselves); to change something already drawn ("make that red", "move it", "never mind"), edit it by its part id.
 Be fast: every tool call is a round trip, so use as few as the task needs. To point at or click something whose exact words you know (the user said them, or you've seen them), use draw or act_in_app click_text with that text right away, with no read_window or screenshot first. Don't guess words: for "the version number" or "the settings icon" you don't know what's written, so look first. Put several steps in one act_in_app call. Forms: one act_in_app call with a fill step per field (field = its label or placeholder as shown), choose for dropdowns, fill for typed dates; a field that opens a calendar is clicked, then its month arrows and day are clicked with click_text. Check the field values in the result before saying it's done. When act_in_app shows the page after a click, use that instead of reading again. read_window and act_in_app results include the text on screen, so read pages from them; screenshot only when you need to see something words can't tell you (images, layout, colours).
@@ -409,6 +423,7 @@ const livePrompt = (context = '') => {
   const open = commitmentsText(), done = doneTodayText();
   const turn = `Live state (current as of this moment):
 ${frontNow ? `${frontNow}\n` : ''}${pi.live()}
+${notes.live()}
 - Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
 ${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}
 - Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;

@@ -20,13 +20,13 @@ import { z } from 'zod';
 
 const READ_TOOLS = 'read,grep,find,ls';
 const SHOW_MAX = 600; // characters of a prompt the approval bubble holds; longer ones are also saved to pending.txt
-const STEP_GAP = 1500; // ms between step bubbles, so a burst of steps doesn't flicker
+const STEP_GAP = 4000; // ms between step bubbles: a burst of steps shows as one line, the latest
 const LIVE_MAX = 3000; // characters of pi's last reply the model is given
 
 // Tools taken out of Roamies: files and commands are pi's job.
 export const REMOVED = new Set(['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'run_command', 'fetch_url']);
 // What still works while pi is busy.
-const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list']);
+const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note']);
 
 export const isSend = (text) => /^\s*(send|send it|yes|yeah|yep|yup|ok|okay|go|go ahead|do it|approve|approved|confirm)\b/i.test(String(text ?? ''));
 
@@ -74,7 +74,7 @@ export function forVoice(text) {
 
 // voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
 const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
-const DEFAULTS = (dir) => ({ project: dir, projects: [dir], pi: 'pi', maxMinutes: 60, voice: '', voices: DEFAULT_VOICES });
+const DEFAULTS = (dir) => ({ project: dir, projects: [dir], pi: 'pi', maxMinutes: 60, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault' });
 
 /** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. */
 export function loadSettings(home) {
@@ -92,7 +92,8 @@ export function loadSettings(home) {
   const minutes = Number(raw.maxMinutes);
   const str = (v) => (typeof v === 'string' ? v.trim() : '');
   const voices = raw.voices && typeof raw.voices === 'object' && !Array.isArray(raw.voices) ? Object.fromEntries(Object.entries(raw.voices).map(([k, v]) => [k.toLowerCase(), str(v)]).filter(([, v]) => v)) : raw.voices === undefined ? { ...DEFAULT_VOICES } : {};
-  return { dir, file, raw, project, projects, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  const vault = expand(str(raw.vault) || '~/Documents/roamies-vault', home); // the Obsidian vault Roamies keeps notes in (notes.mjs)
+  return { dir, file, raw, project, projects, vault, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
 }
 
 /** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
@@ -111,7 +112,7 @@ export function projectProblem(dir, home) {
   return '';
 }
 
-export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', now = () => Date.now() } = {}) {
+export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', now = () => Date.now() } = {}) {
   let job = null; // the hand-off pi is working on
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
   let approval = null; // an approval waiting for Send: { answer(text) }
@@ -165,7 +166,10 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     onChange();
     let stepAt = 0, stepTimer = null, stepText = '';
     const step = (line) => {
-      j.steps++; stepText = `pi · ${line}`;
+      j.steps++;
+      const next = `Pi's ${line}…`;
+      if (next === stepText) return; // the same thing again: nothing new to show
+      stepText = next;
       const wait = stepAt + STEP_GAP - now();
       if (wait <= 0) { stepAt = now(); say(stepText); } else if (!stepTimer) stepTimer = setTimeout(() => { stepTimer = null; stepAt = now(); if (job === j) say(stepText); }, wait);
     };
@@ -209,9 +213,13 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       log('pi_end', { status, ms: now() - t0, steps: j.steps, chars: j.reply.length });
       if (job === j) job = null;
       onChange();
-      if (status === 'stopped') tell('Stopped pi.', 'Stopped pi.');
-      else if (status === 'error') tell(`pi ran into a problem: ${j.problem}${j.reply ? `\n\n**pi said:**\n${j.reply}` : ''}`, `pi ran into a problem. ${forVoice(j.problem)}`);
-      else tell(`**pi says:**\n${j.reply}`, `pi says: ${forVoice(j.reply)}`);
+      // What's put on screen: pi's own words, whole and unchanged.
+      const shown = status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`;
+      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, shown };
+      // The app decides how it's told (sidekick.mjs: Roamies says the gist in its own voice, then the full reply goes on
+      // screen). Without one, it's shown and read out as it is.
+      if (onDone) Promise.resolve().then(() => onDone(result)).catch((e) => { console.error('pi relay', e); tell(shown, null); });
+      else tell(shown, status === 'done' ? `Pi says: ${forVoice(j.reply)}` : forVoice(shown));
     };
     child.on('error', (e) => finish(null, e));
     child.on('close', (code) => finish(code));
@@ -228,7 +236,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   const tools = [
     {
       name: 'ask_pi',
-      description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. Nothing is sent until ${userName} has seen the exact prompt and said send; pi then works in the background and the app itself shows and reads out pi's steps and its reply, so don't wait for it, repeat it or sum it up.`,
+      description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. Nothing is sent until ${userName} has seen the exact prompt and said send; pi then works in the background and the app shows its steps. Don't wait for it: you're told when pi has finished.`,
       parameters: z.object({ prompt: z.string(), mode: z.enum(['read', 'edit']), follow_up: z.boolean().optional() }),
       executionMode: 'sequential', timeoutMs: 10 * 60_000, // time to read the prompt and answer; pi itself runs in the background
       execute: async ({ prompt, mode, follow_up: followUp }, ctx) => {
@@ -244,7 +252,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir }, ctx?.signal);
         if (!ok) { log('pi_declined', { mode: m }); throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`); }
         start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by });
-        return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background. The app shows ${userName} each step and shows and reads out pi's reply itself, so say only that it's been sent (a few words) and stop.`;
+        return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
       },
     },
     {
@@ -281,9 +289,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     try { s = loadSettings(home); } catch (e) { return `- pi: its settings file has a problem (${e.message}).`; }
     const others = s.projects.filter((p) => p.dir !== s.project).map((p) => p.name);
     const lines = [`- pi works in: ${tilde(s.project, home)}${others.length ? `. Other projects ${userName} listed: ${others.join(', ')}` : ''}.`];
-    if (job) lines.push(`- pi is WORKING now (${job.mode === 'edit' ? 'editing allowed' : 'read only'}) on: "${clip(job.prompt, 300)}". Until it replies you can only talk, keep the to-do list, or stop_pi.`);
+    if (job) lines.push(`- pi is WORKING now (${job.mode === 'edit' ? 'editing allowed' : 'read only'}) on: "${clip(job.prompt, 300)}". Until it replies you can only talk, keep the to-do list and notes, or stop_pi.`);
     else if (last && last.project === s.project) {
-      const said = last.reply ? ` pi's reply, which ${userName} has already been shown in full and heard: <<<${clip(last.reply, LIVE_MAX)}>>>` : '';
+      const said = last.reply ? ` pi's reply (the app puts it on screen for ${userName} in full): <<<${clip(last.reply, LIVE_MAX)}>>>` : '';
       lines.push(`- Last pi task (${last.status}${last.problem ? `: ${clip(last.problem, 200)}` : ''}; ${last.mode === 'edit' ? 'editing allowed' : 'read only'}): "${clip(last.prompt, 300)}".${said}${/\?\s*$/.test(last.reply) ? ` It ended with a question: ${userName}'s answer goes to pi with ask_pi and follow_up true.` : ''}`);
     }
     return lines.join('\n');
@@ -313,7 +321,7 @@ export const isAppName = (target) => {
 /** Roamies' own tools for this build: file and command tools out, pi's in, the rest refused while pi works, and
  *  the app tools narrowed: open takes an app's name only, act_in_app works the app in front only, and a drawing
  *  can't open a link by itself. (tools.mjs is left as upstream wrote it, so its own tests still hold.) */
-export function gateTools(tools, pi) {
+export function gateTools(tools, pi, extra = []) {
   const narrowed = tools.filter((t) => !REMOVED.has(t.name)).map((t) => {
     if (t.name === 'open') {
       return { ...t,
@@ -332,10 +340,10 @@ export function gateTools(tools, pi) {
     }
     return t;
   });
-  return [...narrowed, ...pi.tools].map((t) => (DURING.has(t.name) ? t : {
+  return [...narrowed, ...extra, ...pi.tools].map((t) => (DURING.has(t.name) ? t : {
     ...t,
     execute: async (...a) => {
-      if (pi.busy() && t.name !== 'ask_pi' && t.name !== 'switch_project') throw new Error('pi is working on a task, and until it replies I only talk, keep the to-do list, or stop pi (stop_pi). Say so in a few words.');
+      if (pi.busy() && t.name !== 'ask_pi' && t.name !== 'switch_project') throw new Error('pi is working on a task, and until it replies I only talk, keep the to-do list and notes, or stop pi (stop_pi). Say so in a few words.');
       return t.execute(...a);
     },
   }));

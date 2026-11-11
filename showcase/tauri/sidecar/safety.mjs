@@ -91,6 +91,7 @@ export function redactArgs(name, args = {}) {
   // text too, and reading them as a list crashed the request before the tool could say what was wrong.
   if (name === 'act_in_app') return { ...args, steps: Array.isArray(args.steps) ? args.steps.map((s) => (['type', 'set', 'fill'].includes(s?.do) ? { ...s, text: len(s.text) } : s)) : args.steps == null ? [] : `[${typeof args.steps}, ${len(typeof args.steps === 'string' ? args.steps : JSON.stringify(args.steps)).slice(1)}` };
   if (name === 'write_file') return { path: args.path, content: len(args.content) };
+  if (name === 'write_note') return { title: args.title, append: args.append, content: len(args.content) }; // local-only build: the text is in the vault, not the log
   if (name === 'ask_pi') return { mode: args.mode, follow_up: args.follow_up, prompt: len(args.prompt) }; // local-only build: the prompt itself is in ~/Documents/roamies-pi/log
   return args;
 }

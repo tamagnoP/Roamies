@@ -99,10 +99,10 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   assert.deepEqual(c.args, ['--mode', 'json', '--tools', 'read,grep,find,ls', '--', 'Count the functions in "segment.py"; $(touch pwned) `x`']);
   assert.equal(c.cwd, dir);
   assert.ok(!fs.existsSync(path.join(dir, 'pwned')), 'the prompt is never run as shell text');
-  assert.deepEqual(said, ['pi · reading segment.py']);
+  assert.deepEqual(said, ["Pi's reading segment.py…"]);
   const last = told.at(-1);
-  assert.equal(last.t, '**pi says:**\nIt has **3** functions.\n```py\nprint(1)\n```');
-  assert.equal(last.v, 'pi says: It has 3 functions. (code, shown on screen)');
+  assert.equal(last.t, "Here's what pi came back with:\n\nIt has **3** functions.\n```py\nprint(1)\n```");
+  assert.equal(last.v, 'Pi says: It has 3 functions. (code, shown on screen)');
   const rec = records()[0];
   assert.equal(rec[0].type, 'roamies_handoff'); assert.equal(rec[0].approved_by, 'click'); assert.equal(rec[0].mode, 'read');
   assert.ok(rec.some((e) => e.type === 'tool_execution_start') && !rec.some((e) => e.type === 'message_update'), 'events kept, streaming deltas left out');
@@ -114,7 +114,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await tool('ask_pi').execute({ prompt: 'ASK about the labels', mode: 'read' }, {});
   await settled();
   assert.equal(records().at(-1)[0].approved_by, 'voice');
-  assert.equal(told.at(-1).t, '**pi says:**\nWhich column holds the labels?');
+  assert.equal(told.at(-1).t, "Here's what pi came back with:\n\nWhich column holds the labels?");
   assert.match(pi.live(), /ended with a question.*follow_up true/);
   answer = 'yes';
   await tool('ask_pi').execute({ prompt: 'The column is called label', mode: 'edit', follow_up: true }, {});
@@ -155,7 +155,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   answer = 'yes';
   await tool('ask_pi').execute({ prompt: 'BOOM', mode: 'read' }, {});
   await settled();
-  assert.match(told.at(-1).t, /^pi ran into a problem: auth: token expired/);
+  assert.match(told.at(-1).t, /^Pi hit a problem: auth: token expired/);
   assert.equal(records().at(-1).at(-1).status, 'error');
 }
 { // stop: the task ends, and the other tools are refused only while pi works
@@ -218,6 +218,28 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   assert.deepEqual(seen.at(-1), ['act', 'front']);
   await assert.rejects(g('draw').execute({ beats: [{ say: 'x', marks: [{ kind: 'open', url: 'https://example.com' }] }] }), /doesn't open links/);
   assert.equal(await g('draw').execute({ beats: [{ say: 'x', marks: [{ kind: 'ring' }] }] }), 'drawn');
+}
+{ // an app that relays the result itself (onDone) gets pi's words whole, and nothing is read out behind its back
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/cells', pi: fakePi }));
+  const done = [], spoken = [];
+  const pi2 = createPi({ home, userName: 'Tiago', shell: '/bin/sh', say: () => {}, tell: (t, v) => spoken.push({ t, v }), onDone: (r) => done.push(r), ask: async () => 'yes' });
+  const run = async (prompt) => { await pi2.tools.find((t) => t.name === 'ask_pi').execute({ prompt, mode: 'read' }, {}); for (let i = 0; i < 400 && (pi2.busy() || !done.length); i++) await new Promise((r) => setTimeout(r, 10)); return done.pop(); };
+  const ok = await run('Count things');
+  assert.equal(ok.status, 'done'); assert.equal(ok.reply, 'It has **3** functions.\n```py\nprint(1)\n```');
+  assert.equal(ok.shown, `Here's what pi came back with:\n\n${ok.reply}`);
+  const bad = await run('BOOM');
+  assert.equal(bad.status, 'error'); assert.match(bad.shown, /^Pi hit a problem: auth: token expired/);
+  assert.deepEqual(spoken.filter((x) => x.t), [], 'only the Send prompt is read out by pi.mjs itself');
+  // the extra tools an app adds (its notes) pass the gate and keep working while pi is busy
+  const extra = [{ name: 'write_note', execute: async () => 'noted' }];
+  const gated = gateTools([{ name: 'take_screenshot', execute: async () => 'shot' }], pi2, extra);
+  assert.deepEqual(gated.map((t) => t.name), ['take_screenshot', 'write_note', 'ask_pi', 'stop_pi', 'switch_project']);
+  await gated.find((t) => t.name === 'ask_pi').execute({ prompt: 'HANG', mode: 'read' }, {});
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await gated.find((t) => t.name === 'write_note').execute({}), 'noted');
+  await assert.rejects(gated.find((t) => t.name === 'take_screenshot').execute({}), /pi is working/);
+  pi2.stop(); for (let i = 0; i < 400 && pi2.busy(); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(loadSettings(home).vault, path.join(home, 'Documents', 'roamies-vault'));
 }
 fs.rmSync(home, { recursive: true, force: true });
 console.log('pi hand-off tests: passed');
