@@ -72,7 +72,9 @@ export function forVoice(text) {
     .trim();
 }
 
-const DEFAULTS = (dir) => ({ project: dir, projects: [dir], pi: 'pi', maxMinutes: 60 });
+// voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
+const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
+const DEFAULTS = (dir) => ({ project: dir, projects: [dir], pi: 'pi', maxMinutes: 60, voice: '', voices: DEFAULT_VOICES });
 
 /** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. */
 export function loadSettings(home) {
@@ -88,7 +90,14 @@ export function loadSettings(home) {
   const project = expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : dir, home);
   if (!projects.some((p) => p.dir === project)) projects.unshift({ name: base(project), dir: project });
   const minutes = Number(raw.maxMinutes);
-  return { dir, file, raw, project, projects, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  const str = (v) => (typeof v === 'string' ? v.trim() : '');
+  const voices = raw.voices && typeof raw.voices === 'object' && !Array.isArray(raw.voices) ? Object.fromEntries(Object.entries(raw.voices).map(([k, v]) => [k.toLowerCase(), str(v)]).filter(([, v]) => v)) : raw.voices === undefined ? { ...DEFAULT_VOICES } : {};
+  return { dir, file, raw, project, projects, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+}
+
+/** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
+export function voiceFor(look, home = os.homedir()) {
+  try { const s = loadSettings(home); return s.voices[String(look ?? '').toLowerCase()] || s.voice || ''; } catch { return ''; }
 }
 
 /** Why a folder can't be pi's project, or '' when it can: it must exist, and be inside the home folder. */

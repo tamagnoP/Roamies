@@ -19,6 +19,7 @@ let text = '';
 process.stdin.on('data', (d) => { text += d; }).on('end', () => {
   text = text.trim();
   if (text === 'FAIL') process.exit(1);
+  if (process.argv.includes('NoSuchVoice')) { process.stderr.write('Voice NoSuchVoice not found.\\n'); process.exit(1); }
   fs.appendFileSync(${JSON.stringify(path.join(dir, 'args.log'))}, JSON.stringify(process.argv.slice(2)) + '\\n');
   const ch = text.startsWith('STEREO') ? 2 : 1;
   const data = Buffer.alloc(text.length * 2 * ch);
@@ -50,6 +51,23 @@ assert.equal(spoken('[break]'), '');
   const args = fs.readFileSync(path.join(dir, 'args.log'), 'utf8');
   assert.ok(!/One|Two|Three/.test(args), 'the text is not on the command line');
   assert.match(args, /--data-format=LEI16@44100/);
+}
+{ // the look's voice is passed to say; one that isn't installed falls back to the system voice, once
+  const log = path.join(dir, 'args.log');
+  fs.rmSync(log, { force: true });
+  assert.equal(heardText((await run(['Hi.'], { voice: 'Daniel (Enhanced)' })).got), 'Hi.');
+  assert.deepEqual(JSON.parse(fs.readFileSync(log, 'utf8').trim()).slice(0, 2), ['-v', 'Daniel (Enhanced)']);
+  fs.rmSync(log, { force: true });
+  await run(['Hi.'], { voice: '933563129e564b19a115bedd57b7406a' }); // a Fish Audio id is not a Mac voice
+  assert.ok(!JSON.parse(fs.readFileSync(log, 'utf8').trim()).includes('-v'));
+  fs.rmSync(log, { force: true });
+  const errs = []; const realErr = console.error; console.error = (...a) => errs.push(a.join(' '));
+  const a = await run(['One.', 'Two.'], { voice: 'NoSuchVoice' });
+  const b = await run(['Three.'], { voice: 'NoSuchVoice' });
+  console.error = realErr;
+  assert.equal(a.err, undefined); assert.equal(heardText(a.got), 'One.Two.'); assert.equal(heardText(b.got), 'Three.');
+  assert.equal(errs.length, 1, 'said once, then not tried again');
+  assert.ok(fs.readFileSync(log, 'utf8').trim().split('\n').every((l) => !JSON.parse(l).includes('-v')), 'the ones that spoke used the system voice');
 }
 { // nothing said: ends straight away, no process
   const { got, err } = await run([]);

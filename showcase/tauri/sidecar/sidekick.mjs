@@ -37,7 +37,7 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, gateTools } from './pi.mjs'; // local-only build: file work goes to pi
+import { createPi, gateTools, voiceFor } from './pi.mjs'; // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
 console.log = console.info = (...a) => console.error(...a);
@@ -107,7 +107,8 @@ const LOOKS = [
   ['sarah', 'Sarah', '933563129e564b19a115bedd57b7406a'],
   ['adrian', 'Adrian', 'bf322df2096a46f18c579d0baa36f41d'],
 ];
-const lookVoice = () => (LOOKS.find(([id]) => id === config.look) ?? LOOKS[0])[2];
+// Local-only build: each look's Mac voice is in ~/Documents/roamies-pi/settings.json ("voices", else "voice"); '' is the system voice.
+const lookVoice = () => voiceFor(config.look ?? 'classic', HOME);
 // Its name is its look's: Roamie, JARVIS, Anime Girl, Sarah or Adrian. Roamies is the app.
 const lookName = () => (LOOKS.find(([id]) => id === config.look) ?? LOOKS[0])[1];
 const LOOK_BODY = { classic: 'a tiny glowing pixel creature', jarvis: 'a glowing sphere of light', anime: 'a pixel anime girl', sarah: 'a pixel woman', adrian: 'a pixel man' };
@@ -266,6 +267,7 @@ function voiceLine(text) {
   if (!text || !VOICE_ON()) return;
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
   if (turnVoice) { for (const p of parts) turnVoice.say(p); return; }
+  speech.setVoice(lookVoice());
   const v = speech.start();
   for (const p of parts) v.say(p);
   v.end();
@@ -799,6 +801,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   agent.setSignal(controller.signal);
   ui({ kind: 'agent', e: { type: 'start' } });
   // Voice: the socket opens now, while the model thinks; sentences are spoken as soon as each is ready.
+  if (VOICE_ON()) speech.setVoice(lookVoice()); // local-only build: picks up a voice changed in the settings file
   const voice = VOICE_ON() ? speech.start() : (speech.stop(), null);
   turnVoice = voice;
   if (voice && intro) guideVoices.add(voice.id);

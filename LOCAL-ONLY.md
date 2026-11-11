@@ -48,7 +48,9 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
   "project": "~/Documents/roamies-pi",
   "projects": ["~/Documents/roamies-pi", "~/Documents/cell-segmentation"],
   "pi": "pi",
-  "maxMinutes": 60
+  "maxMinutes": 60,
+  "voice": "",
+  "voices": { "jarvis": "Daniel (Enhanced)" }
 }
 ```
 
@@ -59,6 +61,9 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
   folder.
 - `pi`: the command that starts pi. If Roamies says it couldn't start pi, put the full path here (run `which pi`).
 - `maxMinutes`: a task running longer than this is stopped.
+- `voice`: the Mac voice every character speaks in; `""` means the system voice.
+- `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
+  `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
 
 `log/`: one `.jsonl` file per hand-off, named by date, time and mode. The first line is what was sent (prompt,
 folder, mode, whether you approved by click or by voice), then pi's events as it emitted them (without the
@@ -118,8 +123,11 @@ rebuild.
 
 ## The voice
 
-Replies are spoken in the system voice: System Settings > Accessibility > Spoken Content > System voice. To use a
-different one for Roamies only, start the app with `ROAMIES_SAY_VOICE` set to a name from `say -v '?'`.
+Replies are spoken by the Mac's own voices. Which one is set in `~/Documents/roamies-pi/settings.json` (`voice` and
+`voices`, above), using names exactly as `say -v '?'` lists them in Terminal, for example `Daniel (Enhanced)`.
+Download better voices in System Settings > Accessibility > Spoken Content > System voice > Manage Voices. A change
+to the file is picked up the next time Roamies speaks. A voice that isn't installed is skipped and the system voice
+speaks instead.
 
 ## Updating
 

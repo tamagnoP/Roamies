@@ -5,8 +5,9 @@
 // audio had been made).
 // Each sentence is made by one `say` run, in order: the text goes in on stdin (never on the command line), the
 // audio comes back as a WAV file in a private temp folder that's read and deleted straight away.
-// The voice is the system one (System Settings > Accessibility > Spoken Content > System voice), or the one named
-// in ROAMIES_SAY_VOICE (a name from `say -v '?'`).
+// The voice is the one named for the look in ~/Documents/roamies-pi/settings.json ("voice", "voices"), else the one
+// in ROAMIES_SAY_VOICE, else the system voice (System Settings > Accessibility > Spoken Content > System voice).
+// Names are those `say -v '?'` lists. A voice that isn't installed is skipped: the system voice speaks instead.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +18,9 @@ export const RATE = 44100;
 const CHUNK = 44100; // bytes handed over at a time: half a second of 16-bit mono
 
 let dir = null, seq = 0;
+const missing = new Set(); // voices `say` didn't have: not tried again until the app restarts
+// A name for `say -v`. Fish Audio voice ids (32 hex digits, the speaker's default) aren't Mac voices.
+const named = (v) => (typeof v === 'string' && v.trim() && !/^[0-9a-f]{32}$/i.test(v.trim()) ? v.trim() : null);
 function tmpDir() {
   if (!dir) {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roamies-voice-')); // mkdtemp: owner-only (0700)
@@ -49,7 +53,7 @@ export function wavPcm(buf) {
 }
 
 export class LocalVoice {
-  constructor({ onAudio, onEnd, onError, sayBin = SAY, spawnImpl = spawn, voiceName = process.env.ROAMIES_SAY_VOICE || null, platform = process.platform, timeout = 30_000 } = {}) {
+  constructor({ onAudio, onEnd, onError, voice, sayBin = SAY, spawnImpl = spawn, voiceName = named(voice) ?? named(process.env.ROAMIES_SAY_VOICE), platform = process.platform, timeout = 30_000 } = {}) {
     Object.assign(this, { onAudio, onEnd, onError, sayBin, spawnImpl, voiceName, platform, timeout });
     this.queue = []; // sentences waiting their turn
     this.state = 'open'; // open → ending → done
@@ -111,8 +115,18 @@ export class LocalVoice {
     if (this.state === 'ending' && !this.queue.length) { this.close(); this.onEnd?.(); }
   }
 
-  /** One sentence as PCM. */
-  make(text) {
+  /** One sentence as PCM, in the look's voice, or in the system voice if that one isn't installed. */
+  async make(text) {
+    const name = this.voiceName && !missing.has(this.voiceName) ? this.voiceName : null;
+    try { return await this.synth(text, name); } catch (e) {
+      if (!name || this.state === 'done' || this.platform !== 'darwin') throw e;
+      missing.add(name);
+      console.error(`[voice] "${name}" didn't work (${e.message}); using the system voice. Check the name with: say -v '?'`);
+      return this.synth(text, null);
+    }
+  }
+
+  synth(text, name) {
     return new Promise((resolve, reject) => {
       if (this.platform !== 'darwin') return reject(new Error('The built-in voice needs macOS.'));
       const file = path.join(tmpDir(), `${process.pid}-${++seq}.wav`);
@@ -122,7 +136,7 @@ export class LocalVoice {
       const timer = setTimeout(() => { try { child?.kill(); } catch { /* already gone */ } done(new Error('The built-in voice took too long.')); }, this.timeout);
       try {
         // No message and no -f: `say` reads what to speak from stdin.
-        child = this.spawnImpl(this.sayBin, [...(this.voiceName ? ['-v', this.voiceName] : []), '-o', file, '--file-format=WAVE', `--data-format=LEI16@${RATE}`], { stdio: ['pipe', 'ignore', 'ignore'] });
+        child = this.spawnImpl(this.sayBin, [...(name ? ['-v', name] : []), '-o', file, '--file-format=WAVE', `--data-format=LEI16@${RATE}`], { stdio: ['pipe', 'ignore', 'ignore'] });
       } catch (e) { return done(e); }
       this.child = child;
       child.on('error', (e) => done(new Error(`Couldn't start the built-in voice: ${e.message}`)));

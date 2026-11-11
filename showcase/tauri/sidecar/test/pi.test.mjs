@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createPi, describeStep, forVoice, gateTools, isAppName, isSend, loadSettings, messageText, projectProblem, REMOVED } from '../pi.mjs';
+import { createPi, describeStep, forVoice, gateTools, isAppName, isSend, loadSettings, messageText, projectProblem, REMOVED, voiceFor } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-home-')));
 const dir = path.join(home, 'Documents', 'roamies-pi');
@@ -41,6 +41,19 @@ for (const n of ['read_file', 'write_file', 'run_command', 'search_files', 'list
 const s0 = loadSettings(home);
 assert.equal(s0.project, dir); assert.deepEqual(s0.projects, [{ name: 'roamies-pi', dir }]);
 assert.ok(fs.existsSync(path.join(dir, 'settings.json')) && fs.existsSync(path.join(dir, 'log')));
+// voices: JARVIS is British out of the box; "voices" sets one per look, "voice" one for all, '' is the system voice
+assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).voices, { jarvis: 'Daniel' });
+assert.equal(voiceFor('jarvis', home), 'Daniel'); assert.equal(voiceFor('classic', home), '');
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ voice: 'Samantha', voices: { JARVIS: ' Jamie (Premium) ', sarah: '' } }));
+assert.equal(voiceFor('jarvis', home), 'Jamie (Premium)'); assert.equal(voiceFor('sarah', home), 'Samantha'); assert.equal(voiceFor('adrian', home), 'Samantha');
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ voices: {} }));
+assert.equal(voiceFor('jarvis', home), '', 'an empty "voices" switches the JARVIS default off');
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi' }));
+assert.equal(voiceFor('jarvis', home), 'Daniel', 'a settings file from before this still gets the JARVIS default');
+fs.writeFileSync(path.join(dir, 'settings.json'), '{ broken');
+assert.equal(voiceFor('jarvis', home), '', 'a broken file never stops the voice');
+fs.rmSync(path.join(dir, 'settings.json'));
+loadSettings(home);
 assert.equal(projectProblem(dir, home), '');
 assert.match(projectProblem(home, home), /whole home folder/);
 assert.match(projectProblem('/etc', home), /outside the home folder/);
