@@ -38,7 +38,8 @@ import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, gateTools, voiceFor } from './pi.mjs';
-import { createNotes } from './notes.mjs'; // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
+import { createNotes } from './notes.mjs';
+import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
 console.log = console.info = (...a) => console.error(...a);
@@ -292,7 +293,9 @@ const pi = createPi({
 });
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
-tools.splice(0, tools.length, ...gateTools(tools, pi, notes.tools));
+// Apps on the never-look list are checked before any screen tool runs.
+const guard = createGuard({ windows: async () => (await hands('windows')).windows ?? [] });
+tools.splice(0, tools.length, ...gateTools(guard.wrap(tools), pi, notes.tools));
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -851,6 +854,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
     const soon = frontSoon; frontSoon = null;
     frontNow = soon && Date.now() - soon.at < 8000 ? await soon.p : await whereNow();
+    frontNow = guard.front(frontNow); // local-only build: an app on the never-look list isn't named
     const quiz = takeQuizNote();
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
     // An area snap rides along as an image in the same message.

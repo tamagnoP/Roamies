@@ -12,7 +12,7 @@
 // ~/Documents/roamies-pi/settings.json holds the project folder pi starts in and the list of projects to pick from.
 // Only the user edits that list; the model can switch between listed projects, after a yes.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -74,26 +74,34 @@ export function forVoice(text) {
 
 // voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
 const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
-const DEFAULTS = (dir) => ({ project: dir, projects: [dir], pi: 'pi', maxMinutes: 60, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault' });
+const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages']; // guard.mjs
+// pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in.
+const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK });
 
 /** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. */
 export function loadSettings(home) {
   const dir = path.join(home, 'Documents', 'roamies-pi'), file = path.join(dir, 'settings.json');
   fs.mkdirSync(path.join(dir, 'log'), { recursive: true });
-  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify({ ...DEFAULTS(tilde(dir, home)), projects: [tilde(dir, home)] }, null, 2)}\n`);
+  fs.mkdirSync(path.join(dir, 'workspace'), { recursive: true });
+  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(DEFAULTS(tilde(dir, home)), null, 2)}\n`);
   let raw;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`${tilde(file, home)} isn't valid JSON (${e.message}). Fix or delete it.`); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${tilde(file, home)} should be a JSON object.`);
   // projects: a list of folders (named by their last part), or { name: folder }.
   const list = Array.isArray(raw.projects) ? raw.projects.map((p) => [base(expand(p, home)), p]) : raw.projects && typeof raw.projects === 'object' ? Object.entries(raw.projects) : [];
-  const projects = list.filter(([n, p]) => n && typeof p === 'string' && p.trim()).map(([name, p]) => ({ name: String(name), dir: expand(p.trim(), home) }));
-  const project = expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : dir, home);
+  // The settings folder itself used to be pi's default project. It no longer can be one (pi could rewrite these
+  // settings), so it means its workspace subfolder now.
+  const moved = (p) => (p === dir ? path.join(dir, 'workspace') : p);
+  const projects = list.filter(([n, p]) => n && typeof p === 'string' && p.trim()).map(([name, p]) => { const d = moved(expand(p.trim(), home)); return { name: d === path.join(dir, 'workspace') ? 'workspace' : String(name), dir: d }; });
+  const project = moved(expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : path.join(dir, 'workspace'), home));
   if (!projects.some((p) => p.dir === project)) projects.unshift({ name: base(project), dir: project });
   const minutes = Number(raw.maxMinutes);
   const str = (v) => (typeof v === 'string' ? v.trim() : '');
   const voices = raw.voices && typeof raw.voices === 'object' && !Array.isArray(raw.voices) ? Object.fromEntries(Object.entries(raw.voices).map(([k, v]) => [k.toLowerCase(), str(v)]).filter(([, v]) => v)) : raw.voices === undefined ? { ...DEFAULT_VOICES } : {};
   const vault = expand(str(raw.vault) || '~/Documents/roamies-vault', home); // the Obsidian vault Roamies keeps notes in (notes.mjs)
-  return { dir, file, raw, project, projects, vault, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  const neverLook = Array.isArray(raw.neverLook) ? raw.neverLook.map(str).filter(Boolean) : [...NEVER_LOOK];
+  const keep = Number(raw.keepLogsDays);
+  return { dir, file, raw, project, projects, vault, neverLook, keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
 }
 
 /** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
@@ -109,7 +117,40 @@ export function projectProblem(dir, home) {
   const realHome = fs.realpathSync(home);
   if (real === realHome) return 'The whole home folder can\'t be a project: pick a folder inside it.';
   if (!real.startsWith(realHome + path.sep)) return `${dir} is outside the home folder.`;
+  // Not the settings folder, nor a folder with it inside: pi must not be started where it can rewrite its own settings.
+  let settingsDir; try { settingsDir = fs.realpathSync(path.join(home, 'Documents', 'roamies-pi')); } catch { settingsDir = null; }
+  if (settingsDir && (real === settingsDir || settingsDir.startsWith(real + path.sep))) return `${tilde(dir, home)} holds Roamies' own settings, so it can't be a project. Use a folder beside it or inside it, like ~/Documents/roamies-pi/workspace.`;
   return '';
+}
+
+/** A snapshot of a project as it is now, kept as a git ref (refs/roamies/<stamp>) without touching the branch, the
+ *  index or any file: the tracked files as they are, plus new files up to 2 MB each that .gitignore doesn't exclude.
+ *  { ref } on success, { why } when there's none (not a git repository, git missing, or it failed). */
+export function snapshot(project, stampText, { init = false } = {}) {
+  const git = (args, opts = {}) => spawnSync('git', ['-c', 'user.name=Roamies', '-c', 'user.email=roamies@localhost', ...args], { cwd: project, encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024, ...opts });
+  try {
+    let inside = git(['rev-parse', '--is-inside-work-tree']);
+    if (inside.error) return { why: 'git isn\'t installed' };
+    if (inside.status !== 0 && init) { git(['init', '-q']); inside = git(['rev-parse', '--is-inside-work-tree']); }
+    if (inside.status !== 0 || inside.stdout.trim() !== 'true') return { why: 'not a git repository' };
+    const gitDir = path.resolve(project, git(['rev-parse', '--git-dir']).stdout.trim());
+    const index = path.join(gitDir, `roamies-index-${process.pid}-${Date.now()}`);
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    try {
+      const head = git(['rev-parse', '--verify', '-q', 'HEAD']).stdout.trim();
+      if (head && git(['read-tree', head], { env }).status !== 0) return { why: 'git couldn\'t read the last commit' };
+      if (git(['add', '-u'], { env }).status !== 0) return { why: 'git couldn\'t record the changed files' };
+      const fresh = git(['ls-files', '-o', '--exclude-standard', '-z'], { env }).stdout.split('\0').filter(Boolean)
+        .filter((f) => { try { const st = fs.lstatSync(path.join(project, f)); return st.isFile() && st.size <= 2 * 1024 * 1024; } catch { return false; } }).slice(0, 5000);
+      if (fresh.length && git(['add', '--pathspec-from-file=-', '--pathspec-file-nul'], { env, input: fresh.join('\0') }).status !== 0) return { why: 'git couldn\'t record the new files' };
+      const tree = git(['write-tree'], { env }).stdout.trim();
+      if (!tree) return { why: 'git couldn\'t write the snapshot' };
+      const commit = git(['commit-tree', tree, ...(head ? ['-p', head] : []), '-m', `Roamies snapshot before pi could edit (${stampText})`]).stdout.trim();
+      const ref = `refs/roamies/${stampText}`;
+      if (!commit || git(['update-ref', ref, commit]).status !== 0) return { why: 'git couldn\'t save the snapshot' };
+      return { ref };
+    } finally { fs.rmSync(index, { force: true }); fs.rmSync(`${index}.lock`, { force: true }); }
+  } catch (e) { return { why: e.message }; }
 }
 
 export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', now = () => Date.now() } = {}) {
@@ -118,13 +159,15 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   let approval = null; // an approval waiting for Send: { answer(text) }
   const sessions = new Map(); // project folder -> pi session id of the last hand-off there
   let seq = 0;
+  let seen = null; // the settings file as it was at the last hand-off, to notice a change made behind Roamies' back
+  const settingsText = (s) => { try { return fs.readFileSync(s.file, 'utf8'); } catch { return ''; } };
 
   const stamp = (d = new Date(now())) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
 
   /** Shows the hand-off and waits for Send (a click, the Y key, or the word "send"). */
-  async function approve({ prompt, mode, project, followUp, dir }, signal) {
+  async function approve({ prompt, mode, project, followUp, dir, notes = [] }, signal) {
     const where = tilde(project, home);
-    const head = `Send to pi?  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}`;
+    const head = `Send to pi?  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}${notes.map((n) => `\n${n}`).join('')}`;
     let body = prompt;
     const pendingFile = path.join(dir, 'pending.txt');
     if (prompt.length > SHOW_MAX) {
@@ -148,20 +191,27 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     }
   }
 
-  function start({ prompt, mode, project, followUp, settings, by }) {
+  function start({ prompt, mode, project, followUp, settings, by, snap = null }) {
     const id = ++seq, t0 = now();
+    // Old records go: keepLogsDays in the settings (30 unless it says otherwise; 0 keeps them all).
+    if (settings.keepLogsDays > 0) {
+      try {
+        const logs = path.join(settings.dir, 'log'), cutoff = t0 - settings.keepLogsDays * 864e5;
+        for (const f of fs.readdirSync(logs)) { const p = path.join(logs, f); if (f.endsWith('.jsonl') && fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true }); }
+      } catch { /* best effort */ }
+    }
     const record = path.join(settings.dir, 'log', `${stamp()}_${String(id).padStart(3, '0')}_${mode}.jsonl`); // one file per hand-off
     const write = (o) => { try { fs.appendFileSync(record, `${typeof o === 'string' ? o : JSON.stringify(o)}\n`); } catch { /* the record is best effort */ } };
     const session = followUp ? sessions.get(project) : null;
     // "--" ends pi's options; a leading @ would attach a file, so it's kept off the front.
     const text = prompt.startsWith('@') ? ` ${prompt}` : prompt;
     const args = ['--mode', 'json', ...(mode === 'read' ? ['--tools', READ_TOOLS] : []), ...(session ? ['--session', session] : []), '--', text];
-    write({ type: 'roamies_handoff', at: new Date(t0).toISOString(), project, mode, follow_up: !!session, approved_by: by, prompt, command: [settings.pi, ...args.slice(0, -1), '<prompt>'] });
+    write({ type: 'roamies_handoff', at: new Date(t0).toISOString(), project, mode, follow_up: !!session, approved_by: by, snapshot: snap?.ref ?? null, undo: snap?.ref ? `git -C "${project}" restore --source=${snap.ref} --worktree -- .` : null, prompt, command: [settings.pi, ...args.slice(0, -1), '<prompt>'] });
     const env = { ...process.env };
     if (path.isAbsolute(settings.pi)) env.PATH = `${path.dirname(settings.pi)}${path.delimiter}${env.PATH ?? ''}`; // node sits beside it
     // A login shell, so pi and node are found the way they are in Terminal. The prompt travels as an argument, never as shell text.
     const child = spawnImpl(shell, ['-lc', 'exec "$0" "$@"', settings.pi, ...args], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const j = job = { id, prompt, mode, project, at: t0, child, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record };
+    const j = job = { id, prompt, mode, project, at: t0, child, snapshot: snap?.ref ?? null, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record };
     log('pi_start', { mode, followUp: !!session, chars: prompt.length });
     onChange();
     let stepAt = 0, stepTimer = null, stepText = '';
@@ -208,14 +258,14 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       if (j.stopped === true) status = 'stopped';
       else if (code === 127 || /command not found|No such file or directory/i.test(spawnError?.message ?? (code ? errText : ''))) { status = 'error'; j.problem = `I couldn't start pi ("${settings.pi}" wasn't found). Put its full path, from \`which pi\` in Terminal, as "pi" in ${tilde(settings.file, home)}.`; }
       else if (j.problem || code || !j.reply) { status = 'error'; j.problem ||= errText || (code ? `pi exited with code ${code}` : 'pi finished without a reply'); }
-      last = { prompt: j.prompt, mode: j.mode, project: j.project, status, reply: j.reply, problem: status === 'error' ? j.problem : '', at: now() };
+      last = { prompt: j.prompt, mode: j.mode, project: j.project, snapshot: j.snapshot, status, reply: j.reply, problem: status === 'error' ? j.problem : '', at: now() };
       write({ type: 'roamies_result', at: new Date(now()).toISOString(), status, exit: code ?? null, ms: now() - t0, steps: j.steps, reply: j.reply, problem: last.problem || undefined });
       log('pi_end', { status, ms: now() - t0, steps: j.steps, chars: j.reply.length });
       if (job === j) job = null;
       onChange();
       // What's put on screen: pi's own words, whole and unchanged.
       const shown = status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`;
-      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, shown };
+      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown };
       // The app decides how it's told (sidekick.mjs: Roamies says the gist in its own voice, then the full reply goes on
       // screen). Without one, it's shown and read out as it is.
       if (onDone) Promise.resolve().then(() => onDone(result)).catch((e) => { console.error('pi relay', e); tell(shown, null); });
@@ -249,9 +299,21 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         if (problem) throw new Error(`${problem} Tell ${userName} to fix "project" in ${tilde(settings.file, home)}.`);
         const cont = !!followUp && sessions.has(settings.project);
         const m = mode === 'edit' ? 'edit' : 'read';
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir }, ctx?.signal);
+        // Things the Send bubble points out: settings changed by something other than Roamies, an unusual pi command,
+        // and (for edits) whether there's a snapshot to go back to.
+        const notes = [];
+        const now_ = settingsText(settings);
+        if (seen !== null && seen !== now_) notes.push('⚠ settings.json has changed since the last hand-off. Check the folder above.');
+        seen = now_;
+        if (settings.pi !== 'pi') notes.push(`⚠ pi is started with: ${settings.pi}`);
+        let snap = null;
+        if (m === 'edit') {
+          snap = snapshot(settings.project, stamp(), { init: settings.project === path.join(settings.dir, 'workspace') });
+          notes.push(snap.ref ? 'Undo snapshot taken.' : `No undo snapshot (${snap.why}).`);
+        }
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes }, ctx?.signal);
         if (!ok) { log('pi_declined', { mode: m }); throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`); }
-        start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by });
+        start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap });
         return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
       },
     },
@@ -276,6 +338,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         const a = await ask({ placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: ['Switch', "Don't switch"] }, ctx?.signal);
         if (!isSend(a)) throw new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`);
         fs.writeFileSync(settings.file, `${JSON.stringify({ ...settings.raw, project: tilde(hit.dir, home) }, null, 2)}\n`);
+        if (seen !== null) seen = settingsText(settings);
         log('pi_project', {});
         onChange();
         return `pi now works in ${hit.name} (${tilde(hit.dir, home)}).`;
@@ -292,7 +355,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     if (job) lines.push(`- pi is WORKING now (${job.mode === 'edit' ? 'editing allowed' : 'read only'}) on: "${clip(job.prompt, 300)}". Until it replies you can only talk, keep the to-do list and notes, or stop_pi.`);
     else if (last && last.project === s.project) {
       const said = last.reply ? ` pi's reply (the app puts it on screen for ${userName} in full): <<<${clip(last.reply, LIVE_MAX)}>>>` : '';
-      lines.push(`- Last pi task (${last.status}${last.problem ? `: ${clip(last.problem, 200)}` : ''}; ${last.mode === 'edit' ? 'editing allowed' : 'read only'}): "${clip(last.prompt, 300)}".${said}${/\?\s*$/.test(last.reply) ? ` It ended with a question: ${userName}'s answer goes to pi with ask_pi and follow_up true.` : ''}`);
+      lines.push(`- Last pi task (${last.status}${last.problem ? `: ${clip(last.problem, 200)}` : ''}; ${last.mode === 'edit' ? 'editing allowed' : 'read only'}): "${clip(last.prompt, 300)}".${said}${last.snapshot ? ` A snapshot from before pi's edits is kept as ${last.snapshot}; to undo, ${userName} runs in Terminal: git -C "${last.project}" restore --source=${last.snapshot} --worktree -- .` : ''}${/\?\s*$/.test(last.reply) ? ` It ended with a question: ${userName}'s answer goes to pi with ask_pi and follow_up true.` : ''}`);
     }
     return lines.join('\n');
   }

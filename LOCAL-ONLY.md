@@ -48,34 +48,65 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
 
 ```json
 {
-  "project": "~/Documents/roamies-pi",
-  "projects": ["~/Documents/roamies-pi", "~/Documents/cell-segmentation"],
+  "project": "~/Documents/roamies-pi/workspace",
+  "projects": ["~/Documents/roamies-pi/workspace", "~/Documents/cell-segmentation"],
   "pi": "pi",
   "maxMinutes": 60,
+  "keepLogsDays": 30,
+  "neverLook": ["1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Passwords", "Messages"],
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
   "vault": "~/Documents/roamies-vault"
 }
 ```
 
-- `project`: the folder pi starts in (its working directory).
+- `project`: the folder pi starts in (its working directory). The default is the `workspace` folder inside
+  `roamies-pi`. The `roamies-pi` folder itself, or any folder that contains it, can't be a project, so pi is never
+  started where it could rewrite these settings; a settings file that still names it means `workspace`.
 - `projects`: the folders you can switch between by telling Roamies ("work on cell-segmentation"). Each is named by
   its last part; write `{"name": "folder"}` instead of a list to choose the names. Only you add to this list: Roamies
   can switch between listed projects, after a yes, and nothing more. A project must be a folder inside your home
   folder.
 - `pi`: the command that starts pi. If Roamies says it couldn't start pi, put the full path here (run `which pi`).
 - `maxMinutes`: a task running longer than this is stopped.
+- `keepLogsDays`: hand-off records older than this are deleted when a new hand-off starts. `0` keeps them all.
+- `neverLook`: apps Roamies never screenshots, reads or works in (see Safeguards). `[]` switches the check off.
 - `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
 - `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
   `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
 
 `log/`: one `.jsonl` file per hand-off, named by date, time and mode. The first line is what was sent (prompt,
-folder, mode, whether you approved by click or by voice), then pi's events as it emitted them (without the
-letter-by-letter streaming updates), then the result. Nothing deletes these; clear the folder when you like.
+folder, mode, whether you approved by click or by voice, and the undo snapshot if there is one), then pi's events as
+it emitted them (without the letter-by-letter streaming updates), then the result. Records older than `keepLogsDays`
+are deleted.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
+
+## Safeguards
+
+**Undo snapshots.** Before a "Can edit" hand-off, Roamies saves the project as it is: the tracked files with their
+uncommitted changes, plus new files up to 2 MB each that `.gitignore` doesn't exclude. It is stored as a git ref,
+`refs/roamies/<date_time>`, without touching your branch, your staging area or any file. The Send bubble says
+"Undo snapshot taken", or why there isn't one (the project isn't a git repository). To put the files back:
+
+```bash
+git -C <project> restore --source=refs/roamies/<date_time> --worktree -- .
+```
+
+The exact command is in the hand-off's record, and Roamies can tell you it. Files pi created stay; `git status`
+shows them. Large and ignored files (raw data, images) are not in snapshots. `git for-each-ref refs/roamies` lists
+snapshots; `git update-ref -d <ref>` removes one.
+
+**Warnings in the Send bubble.** If `settings.json` was changed by anything other than Roamies since the last
+hand-off, or pi is started with a command other than `pi`, the bubble says so.
+
+**The never-look list.** Apps in `neverLook` are never captured, read or worked in. A screenshot or read of such an
+app, or of the front window while it is in front, is refused. A whole-screen screenshot is refused while one has a
+window open, because it could be in the picture. Its windows are left out of window lists, and its name and window
+title are hidden from what is sent with each request. If the open windows can't be listed, nothing is captured.
+"Ask About an Area", where you draw the box yourself, is not covered.
 
 ## Notes
 
@@ -118,6 +149,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/pi.mjs` (new): the hand-off, the Send approval, the background job, the record, projects,
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
+- `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
@@ -125,7 +157,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
-- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/localvoice.test.mjs` (new), `package.json`: tests.
+- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs` (new), `package.json`: tests.
 
 ## Build (macOS)
 

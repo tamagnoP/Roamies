@@ -4,10 +4,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createPi, describeStep, forVoice, gateTools, isAppName, isSend, loadSettings, messageText, projectProblem, REMOVED, voiceFor } from '../pi.mjs';
+import { execFileSync } from 'node:child_process';
+import { createPi, describeStep, forVoice, gateTools, isAppName, isSend, loadSettings, messageText, projectProblem, REMOVED, snapshot, voiceFor } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-home-')));
 const dir = path.join(home, 'Documents', 'roamies-pi');
+const work = path.join(dir, 'workspace'); // pi's own folder: beside the settings, not the folder that holds them
 const bin = path.join(home, 'bin'); fs.mkdirSync(bin);
 // The stand-in: records how it was called, then plays a run. The prompt decides what happens.
 const fakePi = path.join(bin, 'pi');
@@ -39,7 +41,9 @@ for (const n of ['read_file', 'write_file', 'run_command', 'search_files', 'list
 
 // ---- settings: made on first use, with the roamies-pi folder as the project
 const s0 = loadSettings(home);
-assert.equal(s0.project, dir); assert.deepEqual(s0.projects, [{ name: 'roamies-pi', dir }]);
+assert.equal(s0.project, work); assert.deepEqual(s0.projects, [{ name: 'workspace', dir: work }]);
+assert.ok(fs.statSync(work).isDirectory());
+assert.deepEqual(s0.neverLook.slice(0, 2), ['1Password', 'Bitwarden']); assert.equal(s0.keepLogsDays, 30);
 assert.ok(fs.existsSync(path.join(dir, 'settings.json')) && fs.existsSync(path.join(dir, 'log')));
 // voices: JARVIS is British out of the box; "voices" sets one per look, "voice" one for all, '' is the system voice
 assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).voices, { jarvis: 'Daniel' });
@@ -54,7 +58,9 @@ fs.writeFileSync(path.join(dir, 'settings.json'), '{ broken');
 assert.equal(voiceFor('jarvis', home), '', 'a broken file never stops the voice');
 fs.rmSync(path.join(dir, 'settings.json'));
 loadSettings(home);
-assert.equal(projectProblem(dir, home), '');
+assert.equal(projectProblem(work, home), '');
+assert.match(projectProblem(dir, home), /holds Roamies' own settings/);
+assert.match(projectProblem(path.join(home, 'Documents'), home), /holds Roamies' own settings/);
 assert.match(projectProblem(home, home), /whole home folder/);
 assert.match(projectProblem('/etc', home), /outside the home folder/);
 assert.match(projectProblem(path.join(home, 'nope'), home), /doesn't exist/);
@@ -83,7 +89,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await assert.rejects(tool('ask_pi').execute({ prompt: 'Count the functions in segment.py', mode: 'read' }, {}), /didn't say send/);
   assert.ok(!fs.existsSync(path.join(home, 'calls.log')), 'pi was never started');
   assert.equal(records().length, 0);
-  assert.match(asked[0].placeholder, /^Send to pi\?  Read only · in ~\/Documents\/roamies-pi\n\nCount the functions in segment\.py$/);
+  assert.match(asked[0].placeholder, /^Send to pi\?  Read only · in ~\/Documents\/roamies-pi\/workspace\n⚠ pi is started with: \S+\/bin\/pi\n\nCount the functions in segment\.py$/);
   assert.deepEqual(asked[0].choices, ['Send', "Don't send"]);
   assert.match(told[0].v, /^For pi, read only\. Count the functions in segment\.py Say send to send it\.$/);
   assert.equal(told[0].t, null, 'the prompt is read out; the bubble is the Send bubble');
@@ -91,13 +97,13 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
 { // Send: read only, in the project folder, the prompt passed as one argument; steps and the reply come from the app
   answer = 'yes'; told.length = 0;
   const r = await tool('ask_pi').execute({ prompt: 'Count the functions in "segment.py"; $(touch pwned) `x`', mode: 'read' }, {});
-  assert.match(r, /^Sent to pi \(read only, in ~\/Documents\/roamies-pi\)/);
+  assert.match(r, /^Sent to pi \(read only, in ~\/Documents\/roamies-pi\/workspace\)/);
   assert.ok(pi.busy());
   await assert.rejects(tool('ask_pi').execute({ prompt: 'another', mode: 'read' }, {}), /still working/);
   await settled();
   const c = calls()[0];
   assert.deepEqual(c.args, ['--mode', 'json', '--tools', 'read,grep,find,ls', '--', 'Count the functions in "segment.py"; $(touch pwned) `x`']);
-  assert.equal(c.cwd, dir);
+  assert.equal(c.cwd, work, 'a settings file that still names the settings folder means its workspace');
   assert.ok(!fs.existsSync(path.join(dir, 'pwned')), 'the prompt is never run as shell text');
   assert.deepEqual(said, ["Pi's reading segment.py…"]);
   const last = told.at(-1);
@@ -119,7 +125,10 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   answer = 'yes';
   await tool('ask_pi').execute({ prompt: 'The column is called label', mode: 'edit', follow_up: true }, {});
   await settled();
-  assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT files and run commands · in ~\/Documents\/roamies-pi · continues the last pi task\n/);
+  assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT files and run commands · in ~\/Documents\/roamies-pi\/workspace · continues the last pi task\n⚠ pi is started with: \S+\nUndo snapshot taken\.\n\nThe column/);
+  assert.match(records().at(-1)[0].snapshot, /^refs\/roamies\/\d{4}-\d\d-\d\d_\d{6}$/);
+  assert.match(records().at(-1)[0].undo, /restore --source=refs\/roamies\//);
+  assert.match(pi.live(), /A snapshot from before pi's edits is kept as refs\/roamies\//);
   assert.deepEqual(calls().at(-1).args, ['--mode', 'json', '--session', 'sess-1', '--', 'The column is called label']);
   assert.equal(pi.heard('send'), false, 'no bubble open: speech is not an answer');
 }
@@ -178,24 +187,26 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
 }
 { // projects: only ones the user listed, only after a yes
   answer = 'yes';
-  await assert.rejects(tool('switch_project').execute({ name: 'secrets' }, {}), /No project called "secrets"\. The list: roamies-pi, cells/);
+  await assert.rejects(tool('switch_project').execute({ name: 'secrets' }, {}), /No project called "secrets"\. The list: workspace, cells/);
   answer = null;
   await assert.rejects(tool('switch_project').execute({ name: 'cells' }, {}), /said no/);
-  assert.equal(loadSettings(home).project, dir);
+  assert.equal(loadSettings(home).project, work);
   answer = 'yes';
   assert.match(await tool('switch_project').execute({ name: 'Cells' }, {}), /pi now works in cells \(~\/Documents\/cells\)/);
   const s = loadSettings(home);
   assert.equal(s.project, cells); assert.equal(s.pi, fakePi, 'the rest of the file is kept');
-  assert.match(pi.live(), /pi works in: ~\/Documents\/cells\. Other projects Tiago listed: roamies-pi\./);
+  assert.match(pi.live(), /pi works in: ~\/Documents\/cells\. Other projects Tiago listed: workspace\./);
   await tool('ask_pi').execute({ prompt: 'hello', mode: 'read', follow_up: true }, {});
   await settled();
+  assert.ok(!asked.at(-1).placeholder.includes('settings.json has changed'), 'a switch made through Roamies is not a surprise');
   assert.equal(calls().at(-1).cwd, cells);
   assert.ok(!calls().at(-1).args.includes('--session'), 'a new project starts a new pi session');
 }
-{ // pi not installed where the settings say
+{ // pi not installed where the settings say; and a settings file changed behind Roamies' back is pointed out
   fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/cells', pi: 'no-such-pi-anywhere' }));
   await tool('ask_pi').execute({ prompt: 'hello', mode: 'read' }, {});
   await settled();
+  assert.match(asked.at(-1).placeholder, /\n⚠ settings\.json has changed since the last hand-off\. Check the folder above\.\n⚠ pi is started with: no-such-pi-anywhere\n\nhello$/);
   assert.match(told.at(-1).t, /couldn't start pi \("no-such-pi-anywhere" wasn't found\).*which pi/);
   fs.writeFileSync(path.join(dir, 'settings.json'), '{ not json');
   await assert.rejects(tool('ask_pi').execute({ prompt: 'hello', mode: 'read' }, {}), /isn't valid JSON/);
@@ -240,6 +251,38 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await assert.rejects(gated.find((t) => t.name === 'take_screenshot').execute({}), /pi is working/);
   pi2.stop(); for (let i = 0; i < 400 && pi2.busy(); i++) await new Promise((r) => setTimeout(r, 10));
   assert.equal(loadSettings(home).vault, path.join(home, 'Documents', 'roamies-vault'));
+}
+{ // the undo snapshot: everything as it was, kept as a ref, with the branch, the index and the files untouched
+  const repo = path.join(home, 'Documents', 'repo'); fs.mkdirSync(repo);
+  assert.deepEqual(snapshot(repo, 'x'), { why: 'not a git repository' });
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: repo, encoding: 'utf8' });
+  git('init', '-q');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'data/\n'); fs.writeFileSync(path.join(repo, 'a.py'), 'v1\n'); fs.writeFileSync(path.join(repo, 'gone.py'), 'here\n');
+  git('add', '-A'); git('commit', '-qm', 'first');
+  fs.writeFileSync(path.join(repo, 'a.py'), 'v2 (not committed)\n'); fs.writeFileSync(path.join(repo, 'new.md'), 'untracked\n');
+  fs.writeFileSync(path.join(repo, 'big.tif'), Buffer.alloc(3 * 1024 * 1024)); fs.mkdirSync(path.join(repo, 'data')); fs.writeFileSync(path.join(repo, 'data', 'raw.csv'), 'ignored\n');
+  const before = git('status', '--porcelain'), head = git('rev-parse', 'HEAD');
+  const { ref } = snapshot(repo, '2026-11-12_101500');
+  assert.equal(ref, 'refs/roamies/2026-11-12_101500');
+  assert.equal(git('status', '--porcelain'), before); assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.deepEqual(git('ls-tree', '-r', '--name-only', ref).trim().split('\n'), ['.gitignore', 'a.py', 'gone.py', 'new.md'], 'changed and new files in; ignored and over-2-MB files out');
+  assert.equal(git('show', `${ref}:a.py`), 'v2 (not committed)\n');
+  // pi "edits": the undo command from the record puts the files back
+  fs.writeFileSync(path.join(repo, 'a.py'), 'broken by pi\n'); fs.rmSync(path.join(repo, 'gone.py')); fs.writeFileSync(path.join(repo, 'new.md'), 'rewritten\n');
+  git('restore', `--source=${ref}`, '--worktree', '--', '.');
+  assert.equal(fs.readFileSync(path.join(repo, 'a.py'), 'utf8'), 'v2 (not committed)\n'); assert.equal(fs.readFileSync(path.join(repo, 'gone.py'), 'utf8'), 'here\n'); assert.equal(fs.readFileSync(path.join(repo, 'new.md'), 'utf8'), 'untracked\n');
+  assert.ok(fs.readdirSync(path.join(repo, '.git')).every((f) => !f.startsWith('roamies-index')), 'no temporary index left behind');
+}
+{ // old hand-off records are cleared when a new one starts
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ pi: fakePi, keepLogsDays: 7 }));
+  const old = path.join(dir, 'log', '2026-01-01_000000_001_read.jsonl'), recent = path.join(dir, 'log', '2026-11-10_000000_001_read.jsonl');
+  fs.writeFileSync(old, '{}\n'); fs.writeFileSync(recent, '{}\n');
+  const days = (n) => new Date(Date.now() - n * 864e5);
+  fs.utimesSync(old, days(40), days(40)); fs.utimesSync(recent, days(2), days(2));
+  answer = 'yes';
+  await tool('ask_pi').execute({ prompt: 'tidy', mode: 'read' }, {});
+  await settled();
+  assert.ok(!fs.existsSync(old) && fs.existsSync(recent));
 }
 fs.rmSync(home, { recursive: true, force: true });
 console.log('pi hand-off tests: passed');
