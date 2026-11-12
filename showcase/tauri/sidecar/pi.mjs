@@ -8,6 +8,8 @@
 //   4. Each step pi takes shows in a bubble. Its reply (an answer, or a question back) is shown in full and read
 //      aloud by the app itself, not retold by the model.
 //   5. Everything is kept in ~/Documents/roamies-pi/log, one .jsonl file per hand-off.
+// pi runs under a macOS sandbox (see sandboxProfile): it writes only in the project, reads only the folders the owner
+// listed, and never the settings, the records, or keys.
 //
 // ~/Documents/roamies-pi/settings.json holds the project folder pi starts in and the list of projects to pick from.
 // Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
@@ -73,11 +75,130 @@ export function forVoice(text) {
     .trim();
 }
 
+// ---- the sandbox pi runs in
+// pi, its login shell and everything they start run under a macOS sandbox profile (sandbox-exec), so the file limits
+// below are enforced by the system, not by pi's instructions. The profile is built here from the project folder and
+// the settings, with real paths, and handed to sandbox-exec as an argument: nothing is written to disk.
+const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
+// Folders developer and ML tools keep in the home folder, which pi may read and never write. "toolFolders" in the
+// settings adds to these; "toolFoldersOff" drops one.
+export const TOOL_FOLDERS = [
+  '~/.anaconda', '~/.conda', '~/.condarc', '~/.continuum', '~/.cargo', '~/.local', '~/.npm',
+  '~/.cache/huggingface', '~/.cache/uv', '~/.cache/fontconfig', '~/.cache/tree-sitter', '~/.cache/chroma',
+  '~/.cellpose', '~/.matplotlib', '~/.ipython', '~/.jupyter', '~/.duckdb',
+  '~/.config/git', '~/.config/rstudio',
+  '~/Library/Jupyter', '~/Library/Fonts', '~/Library/Caches/pip',
+];
+// What the login shell and git read on the way to starting pi. Readable always.
+const STARTUP = ['.bash_profile', '.bashrc', '.bash_login', '.profile', '.zshenv', '.zprofile', '.zshrc', '.zlogin', '.gitconfig'];
+// Inside pi's own folder (~/.pi/agent), all of which it can read, the only things it can write: its session files; its
+// sign-in (refreshed tokens); and the lock folders it makes and removes beside its sign-in, settings and trust files
+// while it reads them (without the trust lock it doesn't start; without the settings lock it ignores its settings).
+// A lock is an empty folder: the settings and trust files themselves, and pi's instructions, skills, packages,
+// extensions and tools, are not writable.
+const PI_WRITES = [['subpath', 'sessions'], ['literal', 'auth.json'], ['subpath', 'auth.json.lock'], ['subpath', 'settings.json.lock'], ['subpath', 'trust.json.lock']];
+// Never readable or writable, wherever they sit and whatever lists a folder around them. (home, roamies-pi folder)
+const BLOCKED = (h, r) => [
+  ['literal', `${r}/settings.json`], ['literal', `${r}/state.json`], ['subpath', `${r}/log`],
+  ['subpath', `${h}/.ssh`], ['subpath', `${h}/.gnupg`], ['subpath', `${h}/.gg`], ['subpath', `${h}/.claude`],
+  ['subpath', `${h}/Library/Keychains`], ['subpath', '/Library/Keychains'],
+  ['subpath', `${h}/Library/Application Support/superProductivity`],
+  ['subpath', `${h}/.config/gh`], ['literal', `${h}/.cache/huggingface/token`], ['subpath', `${h}/.cache/huggingface/stored_tokens`],
+  ['subpath', `${h}/.orbstack/ssh`], ['subpath', `${h}/.orbstack/config`],
+];
+// Programs that reach outside the sandbox by asking the system or another app to act.
+const NO_EXEC = ['/usr/bin/security', '/usr/bin/osascript', '/usr/bin/open'];
+
+/** A path with its symbolic links resolved, as the sandbox sees it. One that doesn't exist (yet) is resolved as far
+ *  as it does exist. */
+function realPath(p) {
+  const rest = [];
+  for (let cur = path.resolve(String(p)); ;) {
+    try { return path.join(fs.realpathSync(cur), ...rest); } catch { /* go up */ }
+    const up = path.dirname(cur);
+    if (up === cur) return path.resolve(String(p));
+    rest.unshift(path.basename(cur)); cur = up;
+  }
+}
+const inside = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+
+/** The sandbox profile for a hand-off in `project`: { profile, reads, docker }. reads is how many of the owner's
+ *  folders pi can read (the project, the other "projects" and "readOnly"); docker is whether this project is in "docker".
+ *  In the profile a later rule wins over an earlier one, so the order is the policy: the blocked paths come last. */
+export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir() }) {
+  const q = (p) => { if (/[\0\n\r]/.test(p)) throw new Error(`a folder name with a line break in it (${JSON.stringify(p)})`); return `"${p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`; };
+  const rule = ([kind, p]) => `(${kind} ${q(p)})`;
+  const sub = (list) => list.map((p) => rule(['subpath', p])).join(' ');
+  const uniq = (list) => [...new Set(list)];
+  const h = realPath(home), proj = realPath(project), roamies = realPath(settings.dir);
+  const others = uniq(settings.projects.map((p) => realPath(p.dir))).filter((p) => p !== proj);
+  const readOnly = uniq((settings.readOnly ?? []).map(realPath)).filter((p) => p !== proj);
+  const tools = uniq((settings.toolFolders ?? []).map(realPath));
+  const docker = (settings.docker ?? []).some((d) => realPath(d) === proj);
+  const agent = realPath(path.join(home, '.pi', 'agent'));
+  const temp = uniq(['/private/tmp', '/private/var/tmp', realPath(tmpdir)].flatMap((t) => (path.basename(t) === 'T' && t.startsWith('/private/var/folders/') ? [t, path.join(path.dirname(t), 'C')] : [t])));
+  // Readable inside the home folder, beyond the owner's listed folders: pi's own folder, the shell's start-up files,
+  // the tool folders, the folder an absolute "pi" command sits in, and (with Docker allowed) what docker reads.
+  const own = [realPath(path.join(home, '.pi')), ...STARTUP.map((f) => path.join(h, f)), ...tools];
+  if (path.isAbsolute(settings.pi)) own.push(path.dirname(realPath(settings.pi)), path.dirname(path.resolve(settings.pi)));
+  const dockerReads = [`${h}/.docker`, `${h}/.orbstack/bin`, `${h}/.orbstack/run`];
+  const dockerSockets = `(subpath ${q(`${h}/.orbstack/run`)}) (subpath ${q(`${h}/.docker/run`)}) (literal "/private/var/run/docker.sock") (literal "/var/run/docker.sock")`;
+  const listed = uniq([proj, ...others, ...readOnly]);
+  // A folder listed through a symbolic link (~/gdrive) is allowed by its real path; the link itself has to be readable
+  // too, for the path as the owner wrote it to work.
+  const links = [];
+  for (const p of [project, ...settings.projects.map((x) => x.dir), ...(settings.readOnly ?? []), ...(settings.toolFolders ?? [])]) {
+    for (let at = path.resolve(String(p)); inside(at, path.resolve(home)) && at !== path.resolve(home); at = path.dirname(at)) {
+      try { if (fs.lstatSync(at).isSymbolicLink()) links.push(path.join(realPath(path.dirname(at)), path.basename(at))); } catch { /* not there */ }
+    }
+  }
+  const readable = uniq([...own, ...(docker ? dockerReads : []), ...listed]);
+  // The folders above a readable one can be seen to exist (so a path can be walked), but not listed or read.
+  const above = new Set();
+  for (const p of [...readable, ...links]) for (let up = path.dirname(p); inside(up, h); up = path.dirname(up)) { above.add(up); if (up === h) break; }
+  // Listed folders pi must not write: every one but the project. One that holds the project is left to the
+  // deny-everything rule; one inside the project, or anywhere else, is denied after the project is allowed, so
+  // "readOnly" and other projects win over the project they sit in.
+  const noWrite = uniq([...others, ...readOnly, ...tools]).filter((p) => !inside(proj, p));
+  const lines = [
+    '(version 1)',
+    '(allow default)', // the network, processes and everything outside the rules below are left as they are
+    ';; writing: nowhere, but temporary folders, what pi must write of its own, and the project',
+    '(deny file-write* (subpath "/"))',
+    `(allow file-write* (subpath "/dev") ${sub(temp)})`,
+    `(allow file-write* ${PI_WRITES.map(([kind, f]) => rule([kind, path.join(agent, f)])).join(' ')})`,
+    `(allow file-write* (subpath ${q(proj)}))`,
+    ...(noWrite.length ? [`(deny file-write* ${sub(noWrite)})`] : []),
+    ';; reading: nothing in the home folder, but pi\'s own folder, start-up files, tool folders and the listed folders',
+    `(deny file-read* (subpath ${q(h)}))`,
+    `(allow file-read-metadata ${[...above].map((p) => rule(['literal', p])).join(' ')})`,
+    `(allow file-read* ${sub(readable)})`,
+    ...(links.length ? [`(allow file-read* ${uniq(links).map((p) => rule(['literal', p])).join(' ')})`] : []),
+    ';; programs that act outside the sandbox, Apple Events, and Docker',
+    `(deny process-exec* ${NO_EXEC.map((p) => rule(['literal', p])).join(' ')})`,
+    '(deny appleevent-send)',
+    ...(docker ? [] : [`(deny network-outbound (remote unix-socket ${dockerSockets}))`]),
+    ';; blocked whatever is listed above',
+    `(deny file-read* file-write* ${BLOCKED(h, roamies).map(rule).join(' ')})`,
+  ];
+  return { profile: `${lines.join('\n')}\n`, reads: listed.length, docker };
+}
+
+/** Why a profile can't be applied on this Mac, or '' when it can: sandbox-exec is run once with it, on /usr/bin/true. */
+export function sandboxProblem(profile, exec = SANDBOX_EXEC) {
+  try {
+    const r = spawnSync(exec, ['-p', profile, '/usr/bin/true'], { encoding: 'utf8', timeout: 10_000 });
+    if (r.error) return r.error.code === 'ENOENT' ? `${exec} is missing` : r.error.message;
+    if (r.status !== 0) return clip((r.stderr || '').trim().split('\n').filter(Boolean).at(-1) || `sandbox-exec exited with ${r.status ?? r.signal}`, 160);
+    return '';
+  } catch (e) { return e.message; }
+}
+
 // voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
 const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
 const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages']; // guard.mjs
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in.
-const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK });
+const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK, sandbox: true, readOnly: [], toolFolders: [], toolFoldersOff: [], docker: [] });
 
 /** What Roamies itself keeps in ~/Documents/roamies-pi/state.json: the project chosen with switch_project, and the
  *  days the briefings were given. {} when there's none or it can't be read. */
@@ -122,7 +243,13 @@ export function loadSettings(home) {
     ? Object.entries(raw.routines).map(([name, steps]) => ({ name: str(name), steps: (Array.isArray(steps) ? steps : [steps]).map(str).filter(Boolean) })).filter((r) => r.name && r.steps.length) : [];
   const clock = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(str(v)); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
   const briefings = raw.briefings && typeof raw.briefings === 'object' ? { morning: clock(raw.briefings.morning), evening: clock(raw.briefings.evening) } : { morning: null, evening: null };
-  return { dir, file, raw, project, fileProject, projects, vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  // The sandbox (all four are read from this file only). sandbox: on unless it says false. readOnly: more folders pi
+  // may read. toolFolders: more tool folders, added to the built-in ones; toolFoldersOff: built-in ones to drop.
+  // docker: the projects where pi may reach Docker.
+  const folders = (v) => (Array.isArray(v) ? v.map(str).filter(Boolean).map((p) => expand(p, home)) : []);
+  const off = new Set(folders(raw.toolFoldersOff));
+  const toolFolders = [...new Set([...TOOL_FOLDERS.map((p) => expand(p, home)).filter((p) => !off.has(p)), ...folders(raw.toolFolders)])];
+  return { dir, file, raw, project, fileProject, projects, sandbox: raw.sandbox !== false, readOnly: folders(raw.readOnly), toolFolders, docker: folders(raw.docker), vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
 }
 
 /** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
@@ -174,7 +301,7 @@ export function snapshot(project, stampText, { init = false } = {}) {
   } catch (e) { return { why: e.message }; }
 }
 
-export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', now = () => Date.now() } = {}) {
+export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, now = () => Date.now() } = {}) {
   let job = null; // the hand-off pi is working on
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
   let approval = null; // an approval waiting for Send: { answer(text) }
@@ -217,7 +344,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     }
   }
 
-  function start({ prompt, mode, project, followUp, settings, by, snap = null }) {
+  function start({ prompt, mode, project, followUp, settings, by, snap = null, box = null }) {
     const id = ++seq, t0 = now();
     // Old records go: keepLogsDays in the settings (30 unless it says otherwise; 0 keeps them all).
     if (settings.keepLogsDays > 0) {
@@ -232,11 +359,14 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     // "--" ends pi's options; a leading @ would attach a file, so it's kept off the front.
     const text = prompt.startsWith('@') ? ` ${prompt}` : prompt;
     const args = ['--mode', 'json', ...(mode === 'read' ? ['--tools', READ_TOOLS] : []), ...(session ? ['--session', session] : []), '--', text];
-    write({ type: 'roamies_handoff', at: new Date(t0).toISOString(), project, mode, follow_up: !!session, approved_by: by, snapshot: snap?.ref ?? null, undo: snap?.ref ? `git -C "${project}" restore --source=${snap.ref} --worktree -- .` : null, prompt, command: [settings.pi, ...args.slice(0, -1), '<prompt>'] });
+    write({ type: 'roamies_handoff', at: new Date(t0).toISOString(), project, mode, follow_up: !!session, approved_by: by, snapshot: snap?.ref ?? null, undo: snap?.ref ? `git -C "${project}" restore --source=${snap.ref} --worktree -- .` : null, prompt, command: [settings.pi, ...args.slice(0, -1), '<prompt>'], sandbox: box ? 'on' : settings.sandbox ? 'not applied' : 'off', docker: box ? box.docker : undefined });
     const env = { ...process.env };
     if (path.isAbsolute(settings.pi)) env.PATH = `${path.dirname(settings.pi)}${path.delimiter}${env.PATH ?? ''}`; // node sits beside it
     // A login shell, so pi and node are found the way they are in Terminal. The prompt travels as an argument, never as shell text.
-    const child = spawnImpl(shell, ['-lc', 'exec "$0" "$@"', settings.pi, ...args], { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Under the sandbox it's sandbox-exec that starts the shell, so the shell's start-up, pi and all they run are confined.
+    const line = [shell, '-lc', 'exec "$0" "$@"', settings.pi, ...args];
+    const [cmd, ...cmdArgs] = box ? [sandboxExec, '-p', box.profile, ...line] : line;
+    const child = spawnImpl(cmd, cmdArgs, { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
     const j = job = { id, prompt, mode, project, at: t0, child, snapshot: snap?.ref ?? null, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record };
     log('pi_start', { mode, followUp: !!session, chars: prompt.length });
     onChange();
@@ -341,9 +471,22 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
           snap = snapshot(settings.project, stamp(), { init: settings.project === path.join(settings.dir, 'workspace') });
           notes.push(snap.ref ? 'Undo snapshot taken.' : `No undo snapshot (${snap.why}).`);
         }
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: m === 'read' ? settings.autoSendReadOnly : 0 }, ctx?.signal);
+        // The sandbox: built and tried before anything is shown, so the bubble says what will really happen. If it
+        // can't be applied the hand-off is not sent by itself, and not confined if it is sent: the owner decides.
+        let box = null, unconfined = false;
+        if (!settings.sandbox) notes.push('⚠ Sandbox is off: pi is not confined.');
+        else {
+          let why;
+          try { box = sandboxProfile({ home, project: settings.project, settings }); why = sandboxProblem(box.profile, sandboxExec); } catch (e) { why = e.message; }
+          if (why) { box = null; unconfined = true; notes.push(`⚠ The sandbox could not be applied (${why}). If you send, pi runs unconfined.`); }
+          else {
+            notes.push(`Sandboxed: pi can read ${box.reads} folder${box.reads === 1 ? '' : 's'} and write only in this project.`);
+            if (box.docker) notes.push('Docker allowed: containers can reach folders outside this project.');
+          }
+        }
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: m === 'read' && !unconfined ? settings.autoSendReadOnly : 0 }, ctx?.signal);
         if (!ok) { log('pi_declined', { mode: m }); throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`); }
-        start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap });
+        start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box });
         return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
       },
     },

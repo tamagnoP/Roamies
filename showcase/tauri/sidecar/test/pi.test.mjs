@@ -90,7 +90,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await assert.rejects(tool('ask_pi').execute({ prompt: 'Count the functions in segment.py', mode: 'read' }, {}), /didn't say send/);
   assert.ok(!fs.existsSync(path.join(home, 'calls.log')), 'pi was never started');
   assert.equal(records().length, 0);
-  assert.match(asked[0].placeholder, /^Send to pi\?  Read only · in ~\/Documents\/roamies-pi\/workspace\n⚠ pi is started with: \S+\/bin\/pi\n\nCount the functions in segment\.py$/);
+  assert.match(asked[0].placeholder, /^Send to pi\?  Read only · in ~\/Documents\/roamies-pi\/workspace\n⚠ pi is started with: \S+\/bin\/pi\nSandboxed: pi can read 2 folders and write only in this project\.\n\nCount the functions in segment\.py$/);
   assert.deepEqual(asked[0].choices, ['Send', "Don't send"]);
   assert.match(told[0].v, /^For pi, read only\. Count the functions in segment\.py Say send to send it\.$/);
   assert.equal(told[0].t, null, 'the prompt is read out; the bubble is the Send bubble');
@@ -126,7 +126,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   answer = 'yes';
   await tool('ask_pi').execute({ prompt: 'The column is called label', mode: 'edit', follow_up: true }, {});
   await settled();
-  assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT files and run commands · in ~\/Documents\/roamies-pi\/workspace · continues the last pi task\n⚠ pi is started with: \S+\nUndo snapshot taken\.\n\nThe column/);
+  assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT files and run commands · in ~\/Documents\/roamies-pi\/workspace · continues the last pi task\n⚠ pi is started with: \S+\nUndo snapshot taken\.\nSandboxed: pi can read 2 folders and write only in this project\.\n\nThe column/);
   assert.match(records().at(-1)[0].snapshot, /^refs\/roamies\/\d{4}-\d\d-\d\d_\d{6}$/);
   assert.match(records().at(-1)[0].undo, /restore --source=refs\/roamies\//);
   assert.match(pi.live(), /A snapshot from before pi's edits is kept as refs\/roamies\//);
@@ -233,7 +233,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/cells', pi: 'no-such-pi-anywhere' }));
   await tool('ask_pi').execute({ prompt: 'hello', mode: 'read' }, {});
   await settled();
-  assert.match(asked.at(-1).placeholder, /\n⚠ settings\.json has changed since the last hand-off\. Check the folder above\.\n⚠ pi is started with: no-such-pi-anywhere\n\nhello$/);
+  assert.match(asked.at(-1).placeholder, /\n⚠ settings\.json has changed since the last hand-off\. Check the folder above\.\n⚠ pi is started with: no-such-pi-anywhere\nSandboxed: pi can read 1 folder and write only in this project\.\n\nhello$/);
   assert.match(told.at(-1).t, /couldn't start pi \("no-such-pi-anywhere" wasn't found\).*which pi/);
   fs.writeFileSync(path.join(dir, 'settings.json'), '{ not json');
   await assert.rejects(tool('ask_pi').execute({ prompt: 'hello', mode: 'read' }, {}), /isn't valid JSON/);

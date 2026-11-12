@@ -39,8 +39,95 @@ or named an app) is a rule in its instructions, which the model follows but the 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.
 
-**pi runs as it does in Terminal**: same sign-in, same `~/.pi/agent` settings, rules and packages, started through
-your login shell so `pi` and `node` are found. The model and thinking level are whatever pi's own settings say.
+**pi runs as it does in Terminal, inside a sandbox**: same sign-in, same `~/.pi/agent` settings, rules and
+packages, started through your login shell so `pi` and `node` are found. The model and thinking level are whatever pi's own settings say.
+
+## The sandbox pi runs in
+
+Every hand-off starts pi under a macOS sandbox (`sandbox-exec`), with a profile Roamies builds from the project
+folder and your settings. The limits are enforced by the system on pi, on its login shell, and on every command
+they start, whatever pi's instructions or the model say. The Send bubble says so in one line: "Sandboxed: pi can
+read 3 folders and write only in this project." (the count is the project, your other `projects` and `readOnly`).
+
+**What pi can write.** Only:
+
+- the project it was started in, with everything beneath it;
+- temporary folders (`/tmp`, `/var/tmp`, and your own temporary and cache folders under `/var/folders`);
+- in its own folder, `~/.pi/agent`: its session files (`sessions`), its sign-in (`auth.json`, which it rewrites
+  when a token is refreshed), and the three locks it takes while it reads its files (`auth.json.lock`,
+  `settings.json.lock`, `trust.json.lock`). A lock is an empty folder pi makes and removes; without the trust lock
+  pi doesn't start, and without the settings lock it ignores its own settings.
+
+Not its instructions (`SYSTEM.md`, `APPEND_SYSTEM.md`), templates, skills, packages, extensions, tools (`bin`),
+settings or trust files; not your other projects; not a `readOnly` folder. A `readOnly` folder or another project
+that sits inside the current project stays unwritable.
+
+**What pi can read.** Outside your home folder, everything it could before: the system, Homebrew, conda, Node, and
+pi's own installation. Inside your home folder, nothing except:
+
+- the current project, the other folders under `projects`, and the folders under `readOnly`;
+- its own folder, `~/.pi`;
+- what the shell and git read on the way to starting it (`~/.bash_profile`, `~/.bashrc`, `~/.bash_login`,
+  `~/.profile`, `~/.zshenv`, `~/.zprofile`, `~/.zshrc`, `~/.zlogin`, `~/.gitconfig`);
+- the tool folders: `~/.anaconda`, `~/.conda`, `~/.condarc`, `~/.continuum`, `~/.cargo`, `~/.local`, `~/.npm`,
+  `~/.cache/huggingface`, `~/.cache/uv`, `~/.cache/fontconfig`, `~/.cache/tree-sitter`, `~/.cache/chroma`,
+  `~/.cellpose`, `~/.matplotlib`, `~/.ipython`, `~/.jupyter`, `~/.duckdb`, `~/.config/git`, `~/.config/rstudio`,
+  `~/Library/Jupyter`, `~/Library/Fonts`, `~/Library/Caches/pip`, plus any you add with `toolFolders`, minus any
+  you drop with `toolFoldersOff`;
+- the folder the `pi` setting points into, when it is a full path.
+
+So Documents, Desktop, Downloads, Pictures, Movies, Music, cloud-synced folders (`~/Library/CloudStorage`, and the
+links to it such as `~/gdrive`), the rest of `~/Library`, shell histories and every other folder in your home are
+unreadable unless you list them. A listed folder includes everything beneath it, and may be a link to a folder.
+
+**Always blocked**, for reading and writing, even inside a folder you listed:
+
+- `~/Documents/roamies-pi/settings.json`, `state.json` and the hand-off records in `log`;
+- `~/.ssh`, `~/.gnupg`, `~/.gg`, `~/.claude`, the keychains (`~/Library/Keychains`, `/Library/Keychains`);
+- `~/Library/Application Support/superProductivity`;
+- `~/.config/gh`, the Hugging Face token (`~/.cache/huggingface/token`, `stored_tokens`), and OrbStack's keys and
+  configuration (`~/.orbstack/ssh`, `~/.orbstack/config`).
+
+**Also denied:** running `/usr/bin/security`, `/usr/bin/osascript` and `/usr/bin/open`, and sending Apple Events,
+so pi can't ask the keychain for a password or ask another app to act for it.
+
+**Docker and OrbStack.** A container can mount any folder on the Mac, so reaching Docker is a way out of every
+rule above. It is denied by default: pi can't connect to the Docker or OrbStack sockets
+(`~/.orbstack/run`, `~/.docker/run`, `/var/run/docker.sock`). List a project under `docker` to allow it there; pi
+can then also read `~/.docker`, `~/.orbstack/bin` and `~/.orbstack/run`, and the Send bubble adds "Docker allowed:
+containers can reach folders outside this project." **A project with Docker allowed is not fully confined**: what
+pi does through a container happens outside the sandbox, with OrbStack's access to your files, not pi's.
+`~/.docker/config.json` is where `docker login` keeps registry credentials, and becomes readable there.
+
+**When it isn't on.** With `"sandbox": false` the bubble says "⚠ Sandbox is off: pi is not confined." If the
+sandbox can't be applied (Roamies tries the profile before showing the bubble), the bubble says "⚠ The sandbox
+could not be applied (…). If you send, pi runs unconfined.", and a read-only hand-off does not send itself: nothing
+runs until you click Send. Each hand-off's record says `"sandbox": "on"`, `"off"` or `"not applied"`.
+
+**What breaks inside it, and what it doesn't cover.**
+
+- Installs fail: `pip install`, `conda install`, `npm install -g`, `brew install`, `uv` and anything else that
+  writes outside the project or to a cache in your home folder (`~/.npm`, `~/.cache`, `~/Library/Caches`). Do
+  installs yourself in Terminal. `npm install` inside a project needs its cache in `~/.npm`, which pi can't write.
+- pi can't refresh its saved model catalogue (`~/.pi/agent/models-store.json`); it carries on with the one it has.
+  Running pi in Terminal refreshes it.
+- Programs that run with another user's rights (`sudo`, `ps`, `top`) don't run inside a sandbox.
+- A line in your `~/.bash_profile` that reads a file from a folder pi can't read (OrbStack's `~/.orbstack/shell`)
+  is skipped with an error the shell ignores.
+- Tools that put themselves in a sandbox fail, because a sandbox can't be started inside one: `swift build`
+  and `xcodebuild`, for example.
+- `git push` over SSH fails (no `~/.ssh`). The keychain service itself is not blocked, only the `security`
+  command and the keychain files, so a program that asks the keychain directly (git's saved HTTPS passwords) still
+  can.
+- pi looks for `AGENTS.md` and `CLAUDE.md` in every folder above the project. Ones in folders you haven't listed
+  are not loaded, and pi prints a warning for each that exists.
+- The network is not limited: pi reaches its provider as before, and a command it runs can reach any server.
+  Limit that outside this app if you need to.
+- It limits files, three programs, Apple Events and Docker. It does not stop pi from talking to other services
+  running on your Mac that listen on a local port or socket.
+- Inside the project pi can change anything, including `.git`; the undo snapshot is what protects that.
+- `sandbox-exec` is Apple's own tool but Apple calls it deprecated. If a macOS update removes it, hand-offs stop
+  being sent by themselves and the bubble tells you, as above.
 
 ## The roamies-pi folder
 
@@ -63,6 +150,11 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
   "routines": { "start a research session": ["open Zotero", "switch project to cell-segmentation", "ask pi to read TODO.md and tell me where I left off"] },
   "briefings": { "morning": "09:00", "evening": "18:30" },
   "neverLook": ["1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Passwords", "Messages"],
+  "sandbox": true,
+  "readOnly": ["~/Documents/papers"],
+  "toolFolders": ["~/.streamlit"],
+  "toolFoldersOff": ["~/.npm"],
+  "docker": ["~/Documents/cell-segmentation"],
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
   "vault": "~/Documents/roamies-vault"
@@ -88,6 +180,16 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
 - `briefings`: times, as `"HH:MM"`, for a morning rundown (your to-dos, and what pi was asked yesterday) and an
   end-of-day summary (saved to the vault as "Daily log <date>"). Each is given once a day, when Roamies is idle: the
   morning one within four hours of its time, the evening one any time after it. Leave a time out to switch it off.
+- `sandbox`: `true` unless you write `false`. Switch it off only if it breaks pi; the Send bubble then warns on
+  every hand-off (see "The sandbox pi runs in").
+- `readOnly`: folders pi may read but never write, in every project. Default: none.
+- `toolFolders`: more folders (or single files) that tools need to read, added to the built-in list in "The
+  sandbox pi runs in". pi can read them, never write them. Default: none added.
+- `toolFoldersOff`: built-in tool folders to take off that list, written as they appear there (`"~/.npm"`).
+- `docker`: the projects in which pi may reach Docker and OrbStack. Default: none. A project listed here is not
+  fully confined.
+- These five are read from this file only, which pi can neither read nor write. A file from before they existed
+  works as if it had the defaults.
 - `neverLook`: apps Roamies never screenshots, reads or works in (see Safeguards). `[]` switches the check off.
 - `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
@@ -112,7 +214,7 @@ prompt.
   itself after Roamies asks you something. That now includes questions pi sends back: Roamies ends its spoken gist
   with pi's question and listens for your answer.
 - **Long tasks.** While pi works, Roamies says now and then that it's still going and what it's on.
-- **Read-only trust.** A read-only pi can still read any file it can reach, and what it reads goes to pi's AI
+- **Read-only trust.** A read-only pi can still read any file the sandbox lets it reach, and what it reads goes to pi's AI
   provider. If a project holds things you'd rather approve each time, set `autoSendReadOnly` to `0`.
 
 ## Safeguards
@@ -169,15 +271,15 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 
 - Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, and
   screenshots or window text when you ask about your screen.
-- pi's own conversation with its provider, using pi's sign-in. Whatever pi does with its tools, including any
-  command it runs in "Can edit" mode, is governed by your pi setup, not by this patch.
+- pi's own conversation with its provider, using pi's sign-in. Which files pi and the commands it runs can
+  touch is limited by the sandbox; what they send over the network is not.
 - Signing in to Anthropic the first time: a browser sign-in, and a one-time download of the Claude Code program.
 - Links you click in a reply open in your browser.
 - Building: `npm ci`, `cargo` and `fetch-node.sh` download dependencies once, at build time.
 
 ## Files changed
 
-- `showcase/tauri/sidecar/pi.mjs` (new): the hand-off, the Send approval, the background job, the record, projects,
+- `showcase/tauri/sidecar/pi.mjs` (new): the hand-off, the Send approval, the sandbox, the background job, the record, projects,
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
@@ -189,7 +291,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs` (new), `package.json`: tests.
+  `test/settings.test.mjs`, `test/sandbox.test.mjs` (new), `package.json`: tests.
 
 ## Build (macOS)
 
