@@ -46,6 +46,9 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
 
 `~/Documents/roamies-pi/` is made the first time it's needed.
 
+`settings.json` is yours alone. Roamies makes it once, with the defaults, when it doesn't exist, and never writes it
+again: it only reads it. What Roamies needs to remember goes in `state.json` (below).
+
 `settings.json`:
 
 ```json
@@ -66,12 +69,14 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
 }
 ```
 
-- `project`: the folder pi starts in (its working directory). The default is the `workspace` folder inside
-  `roamies-pi`. The `roamies-pi` folder itself, or any folder that contains it, can't be a project, so pi is never
+- `project`: the folder pi starts in (its working directory), until you tell Roamies to switch (see `projects`). The
+  default is the `workspace` folder inside `roamies-pi`. The `roamies-pi` folder itself, or any folder that contains it, can't be a project, so pi is never
   started where it could rewrite these settings; a settings file that still names it means `workspace`.
 - `projects`: the folders you can switch between by telling Roamies ("work on cell-segmentation"). Each is named by
   its last part; write `{"name": "folder"}` instead of a list to choose the names. Only you add to this list: Roamies
-  can switch between listed projects, after a yes, and nothing more. A project must be a folder inside your home
+  can switch between listed projects, after a yes, and nothing more. A switch is remembered in `state.json`, not
+  here, and holds for as long as that folder is still in this list; take it off the list (or delete `state.json`)
+  and pi is back in `project`. A project must be a folder inside your home
   folder.
 - `pi`: the command that starts pi. If Roamies says it couldn't start pi, put the full path here (run `which pi`).
 - `maxMinutes`: a task running longer than this is stopped.
@@ -93,6 +98,9 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
 folder, mode, whether you approved by click or by voice, and the undo snapshot if there is one), then pi's events as
 it emitted them (without the letter-by-letter streaming updates), then the result. Records older than `keepLogsDays`
 are deleted.
+
+`state.json`: Roamies' own memory, which it writes itself: the project you last switched to, and the days the
+briefings were given. Deleting it is safe.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
@@ -121,8 +129,8 @@ The exact command is in the hand-off's record, and Roamies can tell you it. File
 shows them. Large and ignored files (raw data, images) are not in snapshots. `git for-each-ref refs/roamies` lists
 snapshots; `git update-ref -d <ref>` removes one.
 
-**Warnings in the Send bubble.** If `settings.json` was changed by anything other than Roamies since the last
-hand-off, or pi is started with a command other than `pi`, the bubble says so.
+**Warnings in the Send bubble.** If `settings.json` has changed since the last hand-off (Roamies never changes it, so
+that was you or something else), or pi is started with a command other than `pi`, the bubble says so.
 
 **The never-look list.** Apps in `neverLook` are never captured, read or worked in. A screenshot or read of such an
 app, or of the front window while it is in front, is refused. A whole-screen screenshot is refused while one has a
@@ -179,7 +187,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
-- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs` (new), `package.json`: tests.
+- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
+  `test/settings.test.mjs` (new), `package.json`: tests.
 
 ## Build (macOS)
 

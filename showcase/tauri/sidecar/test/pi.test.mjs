@@ -193,9 +193,22 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await assert.rejects(tool('switch_project').execute({ name: 'cells' }, {}), /said no/);
   assert.equal(loadSettings(home).project, work);
   answer = 'yes';
+  const fileBefore = fs.readFileSync(path.join(dir, 'settings.json'), 'utf8');
   assert.match(await tool('switch_project').execute({ name: 'Cells' }, {}), /pi now works in cells \(~\/Documents\/cells\)/);
   const s = loadSettings(home);
   assert.equal(s.project, cells); assert.equal(s.pi, fakePi, 'the rest of the file is kept');
+  // the choice is kept in state.json; settings.json is the owner's and is left exactly as it was
+  assert.equal(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'), fileBefore);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')).project, '~/Documents/cells');
+  // a choice that is no longer listed under "projects" falls back to "project" from the settings file
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi'], pi: fakePi, autoSendReadOnly: 0 }));
+  assert.equal(loadSettings(home).project, work);
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/cells', projects: ['~/Documents/roamies-pi'], pi: fakePi, autoSendReadOnly: 0 }));
+  assert.equal(loadSettings(home).project, cells, 'the settings file\'s own "project" needs no listing');
+  fs.writeFileSync(path.join(dir, 'state.json'), '{ broken');
+  assert.equal(loadSettings(home).project, cells, 'a broken state.json is ignored');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ project: '~/Documents/cells' }));
+  fs.writeFileSync(path.join(dir, 'settings.json'), fileBefore);
   assert.match(pi.live(), /pi works in: ~\/Documents\/cells\. Other projects Tiago listed: workspace\./);
   await tool('ask_pi').execute({ prompt: 'hello', mode: 'read', follow_up: true }, {});
   await settled();

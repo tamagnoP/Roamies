@@ -10,7 +10,8 @@
 //   5. Everything is kept in ~/Documents/roamies-pi/log, one .jsonl file per hand-off.
 //
 // ~/Documents/roamies-pi/settings.json holds the project folder pi starts in and the list of projects to pick from.
-// Only the user edits that list; the model can switch between listed projects, after a yes.
+// Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
+// between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -78,7 +79,15 @@ const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'P
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in.
 const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK });
 
-/** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. */
+/** What Roamies itself keeps in ~/Documents/roamies-pi/state.json: the project chosen with switch_project, and the
+ *  days the briefings were given. {} when there's none or it can't be read. */
+function readState(dir) {
+  try { const s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; } catch { return {}; }
+}
+const writeState = (dir, state) => fs.writeFileSync(path.join(dir, 'state.json'), `${JSON.stringify(state, null, 2)}\n`);
+
+/** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. After that the file is
+ *  the owner's alone: nothing here, or anywhere else in Roamies, writes it. */
 export function loadSettings(home) {
   const dir = path.join(home, 'Documents', 'roamies-pi'), file = path.join(dir, 'settings.json');
   fs.mkdirSync(path.join(dir, 'log'), { recursive: true });
@@ -93,7 +102,11 @@ export function loadSettings(home) {
   // settings), so it means its workspace subfolder now.
   const moved = (p) => (p === dir ? path.join(dir, 'workspace') : p);
   const projects = list.filter(([n, p]) => n && typeof p === 'string' && p.trim()).map(([name, p]) => { const d = moved(expand(p.trim(), home)); return { name: d === path.join(dir, 'workspace') ? 'workspace' : String(name), dir: d }; });
-  const project = moved(expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : path.join(dir, 'workspace'), home));
+  // The project chosen with switch_project (state.json) counts while it's still listed under "projects"; otherwise
+  // it's "project" from the settings file.
+  const picked = readState(dir).project;
+  const chosen = typeof picked === 'string' && picked.trim() ? moved(expand(picked.trim(), home)) : null;
+  const project = chosen && projects.some((p) => p.dir === chosen) ? chosen : moved(expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : path.join(dir, 'workspace'), home));
   if (!projects.some((p) => p.dir === project)) projects.unshift({ name: base(project), dir: project });
   const minutes = Number(raw.maxMinutes);
   const str = (v) => (typeof v === 'string' ? v.trim() : '');
@@ -352,8 +365,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         if (hit.dir === settings.project) return `pi already works in ${hit.name} (${tilde(hit.dir, home)}).`;
         const a = await ask({ placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: ['Switch', "Don't switch"] }, ctx?.signal);
         if (!isSend(a)) throw new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`);
-        fs.writeFileSync(settings.file, `${JSON.stringify({ ...settings.raw, project: tilde(hit.dir, home) }, null, 2)}\n`);
-        if (seen !== null) seen = settingsText(settings);
+        writeState(settings.dir, { ...readState(settings.dir), project: tilde(hit.dir, home) }); // never settings.json: that file is the owner's
         log('pi_project', {});
         onChange();
         return `pi now works in ${hit.name} (${tilde(hit.dir, home)}).`;
@@ -397,7 +409,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   function briefing(d = new Date(now())) {
     let s; try { s = loadSettings(home); } catch { return null; }
     const mins = d.getHours() * 60 + d.getMinutes(), today = stamp(d).slice(0, 10);
-    let given = {}; try { given = JSON.parse(fs.readFileSync(path.join(s.dir, 'state.json'), 'utf8')).briefings ?? {}; } catch { /* none yet */ }
+    const given = readState(s.dir).briefings ?? {};
     const list = (tasks) => (tasks.length ? tasks.map((t) => `- ${t.time} (${t.mode === 'edit' ? 'could edit' : 'read only'}, ${t.status}): ${t.prompt}`).join('\n') : '- nothing');
     const due = (kind, until) => s.briefings[kind] !== null && mins >= s.briefings[kind] && mins < until && given[kind] !== today;
     if (due('morning', s.briefings.morning + 240)) {
@@ -411,9 +423,8 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   }
   briefing.done = (kind, d = new Date(now())) => {
     try {
-      const s = loadSettings(home), file = path.join(s.dir, 'state.json');
-      let state = {}; try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new */ }
-      fs.writeFileSync(file, `${JSON.stringify({ ...state, briefings: { ...(state.briefings ?? {}), [kind]: stamp(d).slice(0, 10) } }, null, 2)}\n`);
+      const s = loadSettings(home), state = readState(s.dir);
+      writeState(s.dir, { ...state, briefings: { ...(state.briefings ?? {}), [kind]: stamp(d).slice(0, 10) } });
     } catch { /* best effort */ }
   };
 
