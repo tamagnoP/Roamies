@@ -199,16 +199,29 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   assert.equal(s.project, cells); assert.equal(s.pi, fakePi, 'the rest of the file is kept');
   // the choice is kept in state.json; settings.json is the owner's and is left exactly as it was
   assert.equal(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'), fileBefore);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')).project, '~/Documents/cells');
+  const state = fs.readFileSync(path.join(dir, 'state.json'), 'utf8');
+  assert.deepEqual(JSON.parse(state), { project: '~/Documents/cells', projectWas: '~/Documents/roamies-pi/workspace' });
+  const withSettings = (o) => { fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ pi: fakePi, autoSendReadOnly: 0, ...o })); return loadSettings(home).project; };
+  const other = path.join(home, 'Documents', 'other'); fs.mkdirSync(other);
   // a choice that is no longer listed under "projects" falls back to "project" from the settings file
-  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi'], pi: fakePi, autoSendReadOnly: 0 }));
-  assert.equal(loadSettings(home).project, work);
-  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/cells', projects: ['~/Documents/roamies-pi'], pi: fakePi, autoSendReadOnly: 0 }));
-  assert.equal(loadSettings(home).project, cells, 'the settings file\'s own "project" needs no listing');
-  fs.writeFileSync(path.join(dir, 'state.json'), '{ broken');
-  assert.equal(loadSettings(home).project, cells, 'a broken state.json is ignored');
+  assert.equal(withSettings({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi'] }), work);
+  // "project" written another way but meaning the same folder is not a change: the choice still holds
+  assert.equal(withSettings({ project: path.join(dir, 'workspace'), projects: ['~/Documents/roamies-pi', '~/Documents/cells'] }), cells);
+  // the owner edits "project" by hand after the switch: their value wins, though the chosen folder is still listed
+  assert.equal(withSettings({ project: '~/Documents/other', projects: ['~/Documents/roamies-pi', '~/Documents/cells', '~/Documents/other'] }), other);
+  assert.equal(withSettings({ project: '~/Documents/other', projects: ['~/Documents/cells'] }), other);
+  // ...and switching again from there is remembered against the new value
+  assert.match(await tool('switch_project').execute({ name: 'cells' }, {}), /pi now works in cells/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')), { project: '~/Documents/cells', projectWas: '~/Documents/other' });
+  assert.equal(loadSettings(home).project, cells);
+  // a choice stored without the remembered value, or a broken state.json, is not used
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ project: '~/Documents/cells' }));
+  assert.equal(withSettings({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi', '~/Documents/cells'] }), work);
+  fs.writeFileSync(path.join(dir, 'state.json'), '{ broken');
+  assert.equal(loadSettings(home).project, work);
+  fs.writeFileSync(path.join(dir, 'state.json'), state);
   fs.writeFileSync(path.join(dir, 'settings.json'), fileBefore);
+  assert.equal(loadSettings(home).project, cells);
   assert.match(pi.live(), /pi works in: ~\/Documents\/cells\. Other projects Tiago listed: workspace\./);
   await tool('ask_pi').execute({ prompt: 'hello', mode: 'read', follow_up: true }, {});
   await settled();

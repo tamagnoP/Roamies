@@ -102,11 +102,13 @@ export function loadSettings(home) {
   // settings), so it means its workspace subfolder now.
   const moved = (p) => (p === dir ? path.join(dir, 'workspace') : p);
   const projects = list.filter(([n, p]) => n && typeof p === 'string' && p.trim()).map(([name, p]) => { const d = moved(expand(p.trim(), home)); return { name: d === path.join(dir, 'workspace') ? 'workspace' : String(name), dir: d }; });
-  // The project chosen with switch_project (state.json) counts while it's still listed under "projects"; otherwise
-  // it's "project" from the settings file.
-  const picked = readState(dir).project;
-  const chosen = typeof picked === 'string' && picked.trim() ? moved(expand(picked.trim(), home)) : null;
-  const project = chosen && projects.some((p) => p.dir === chosen) ? chosen : moved(expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : path.join(dir, 'workspace'), home));
+  const fileProject = moved(expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : path.join(dir, 'workspace'), home));
+  // The project chosen with switch_project (state.json) counts while it's still listed under "projects" and "project"
+  // in the settings file is what it was when the switch was made. A "project" the owner has edited since wins.
+  const state = readState(dir);
+  const at = (v) => (typeof v === 'string' && v.trim() ? moved(expand(v.trim(), home)) : null);
+  const chosen = at(state.project);
+  const project = chosen && at(state.projectWas) === fileProject && projects.some((p) => p.dir === chosen) ? chosen : fileProject;
   if (!projects.some((p) => p.dir === project)) projects.unshift({ name: base(project), dir: project });
   const minutes = Number(raw.maxMinutes);
   const str = (v) => (typeof v === 'string' ? v.trim() : '');
@@ -120,7 +122,7 @@ export function loadSettings(home) {
     ? Object.entries(raw.routines).map(([name, steps]) => ({ name: str(name), steps: (Array.isArray(steps) ? steps : [steps]).map(str).filter(Boolean) })).filter((r) => r.name && r.steps.length) : [];
   const clock = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(str(v)); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
   const briefings = raw.briefings && typeof raw.briefings === 'object' ? { morning: clock(raw.briefings.morning), evening: clock(raw.briefings.evening) } : { morning: null, evening: null };
-  return { dir, file, raw, project, projects, vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  return { dir, file, raw, project, fileProject, projects, vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
 }
 
 /** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
@@ -365,7 +367,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         if (hit.dir === settings.project) return `pi already works in ${hit.name} (${tilde(hit.dir, home)}).`;
         const a = await ask({ placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: ['Switch', "Don't switch"] }, ctx?.signal);
         if (!isSend(a)) throw new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`);
-        writeState(settings.dir, { ...readState(settings.dir), project: tilde(hit.dir, home) }); // never settings.json: that file is the owner's
+        // Kept in state.json, never settings.json (that file is the owner's), with "project" as the settings file has it
+        // now: if the owner edits that later, their value wins over this choice.
+        writeState(settings.dir, { ...readState(settings.dir), project: tilde(hit.dir, home), projectWas: tilde(settings.fileProject, home) });
         log('pi_project', {});
         onChange();
         return `pi now works in ${hit.name} (${tilde(hit.dir, home)}).`;

@@ -105,7 +105,10 @@ assert.deepEqual(touched, [], `settings.json was written after its creation, by:
 assert.equal(fs.readFileSync(file, 'utf8'), owners, 'byte for byte as the owner left it');
 const stat1 = fs.statSync(file);
 assert.equal(stat1.mtimeMs, stat0.mtimeMs); assert.equal(stat1.ino, stat0.ino, 'not replaced by a new file either');
-assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')).project, '~/Documents/roamies-pi/workspace', 'the chosen project is in state.json');
+const kept = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
+assert.equal(kept.project, '~/Documents/roamies-pi/workspace', 'the chosen project is in state.json');
+assert.equal(kept.projectWas, '~/Documents/roamies-pi/workspace', 'with "project" as the settings file had it at the switch');
+assert.ok(kept.briefings.morning && kept.briefings.evening, 'beside the briefing state, which a switch leaves alone');
 
 // ---- a broken or missing-key file is reported or defaulted, not repaired
 touched.length = 0;

@@ -75,8 +75,8 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
 - `projects`: the folders you can switch between by telling Roamies ("work on cell-segmentation"). Each is named by
   its last part; write `{"name": "folder"}` instead of a list to choose the names. Only you add to this list: Roamies
   can switch between listed projects, after a yes, and nothing more. A switch is remembered in `state.json`, not
-  here, and holds for as long as that folder is still in this list; take it off the list (or delete `state.json`)
-  and pi is back in `project`. A project must be a folder inside your home
+  here. It holds while that folder is still in this list and you haven't changed `project` since the switch: edit
+  `project` by hand and your value wins. Deleting `state.json` also puts pi back in `project`. A project must be a folder inside your home
   folder.
 - `pi`: the command that starts pi. If Roamies says it couldn't start pi, put the full path here (run `which pi`).
 - `maxMinutes`: a task running longer than this is stopped.
@@ -99,7 +99,8 @@ folder, mode, whether you approved by click or by voice, and the undo snapshot i
 it emitted them (without the letter-by-letter streaming updates), then the result. Records older than `keepLogsDays`
 are deleted.
 
-`state.json`: Roamies' own memory, which it writes itself: the project you last switched to, and the days the
+`state.json`: Roamies' own memory, which it writes itself: the project you last switched to (with what `project` was at
+that moment, so a later edit of yours is noticed), and the days the
 briefings were given. Deleting it is safe.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
