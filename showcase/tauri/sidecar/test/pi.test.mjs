@@ -65,7 +65,8 @@ assert.match(projectProblem(home, home), /whole home folder/);
 assert.match(projectProblem('/etc', home), /outside the home folder/);
 assert.match(projectProblem(path.join(home, 'nope'), home), /doesn't exist/);
 const cells = path.join(home, 'Documents', 'cells'); fs.mkdirSync(cells);
-fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi', '~/Documents/cells'], pi: fakePi }));
+// autoSendReadOnly 0: every hand-off waits for Send, as the tests below expect (the countdown has its own test)
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi', '~/Documents/cells'], pi: fakePi, autoSendReadOnly: 0 }));
 
 // ---- a pi with a scripted user
 const said = [], told = [], asked = [];
@@ -251,6 +252,49 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await assert.rejects(gated.find((t) => t.name === 'take_screenshot').execute({}), /pi is working/);
   pi2.stop(); for (let i = 0; i < 400 && pi2.busy(); i++) await new Promise((r) => setTimeout(r, 10));
   assert.equal(loadSettings(home).vault, path.join(home, 'Documents', 'roamies-vault'));
+}
+{ // read-only tasks go by themselves after the countdown; ones that can edit never do
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ pi: fakePi, autoSendReadOnly: 0.05, progressSeconds: 0.05, routines: { 'Start a research session': ['open Zotero', 'ask pi to read TODO.md'], bad: [] }, briefings: { morning: '09:00', evening: '18:30' } }));
+  const s = loadSettings(home);
+  assert.equal(s.autoSendReadOnly, 0.05); assert.deepEqual(s.routines, [{ name: 'Start a research session', steps: ['open Zotero', 'ask pi to read TODO.md'] }]); assert.deepEqual(s.briefings, { morning: 540, evening: 1110 });
+  assert.match(pi.live(), /- Routine "Start a research session": 1\) open Zotero {2}2\) ask pi to read TODO\.md/);
+  const never = () => {}; // the bubble is left alone: nobody clicks, nobody speaks
+  answer = never; told.length = 0;
+  await tool('ask_pi').execute({ prompt: 'auto one', mode: 'read' }, {});
+  await settled();
+  assert.match(asked.at(-1).placeholder, /^Asking pi in 0\.05 s {2}Read only · in ~\/Documents\/roamies-pi\/workspace\n/);
+  assert.deepEqual(asked.at(-1).choices, ['Send now', "Don't send"]);
+  assert.equal(told[0].v, 'Asking pi: auto one');
+  assert.equal(records().at(-1)[0].approved_by, 'auto');
+  // stopped in time: by a click on Don't send, or by saying anything but send
+  answer = null;
+  await assert.rejects(tool('ask_pi').execute({ prompt: 'auto two', mode: 'read' }, {}), /didn't say send/);
+  answer = () => { pi.listening(); setTimeout(() => pi.heard('no, stop'), 120); }; // talking pauses the countdown; the words decide
+  await assert.rejects(tool('ask_pi').execute({ prompt: 'auto three', mode: 'read' }, {}), /didn't say send/);
+  // one that can edit waits, however long
+  let done = false; answer = never;
+  const waiting = tool('ask_pi').execute({ prompt: 'edit something', mode: 'edit' }, {}).then(() => { done = true; });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(done, false); assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT/);
+  lastResolve('yes'); await waiting; await settled();
+  // a long task says so now and then (spoken only)
+  answer = 'yes'; told.length = 0;
+  await tool('ask_pi').execute({ prompt: 'HANG', mode: 'edit' }, {});
+  await new Promise((r) => setTimeout(r, 260));
+  const spoken = told.filter((x) => x.t === null && /still|Bear with me/i.test(x.v));
+  assert.ok(spoken.length >= 2, 'progress lines were spoken'); assert.match(spoken[0].v, /^Still on it\. Pi's 0 steps in\.$/);
+  pi.stop(); await settled();
+  // briefings: due once a day, in their window, built from the day's records
+  const at = (h, m) => new Date(2026, 10, 12, h, m);
+  assert.equal(pi.briefing(at(8, 59)), null);
+  const morning = pi.briefing(at(9, 0));
+  assert.equal(morning.kind, 'morning'); assert.match(morning.note, /morning briefing.*What pi was asked yesterday:\n- nothing$/s);
+  assert.equal(pi.briefing(at(13, 1)), null, 'four hours on, the morning one has lapsed');
+  pi.briefing.done('morning', at(9, 0));
+  assert.equal(pi.briefing(at(9, 5)), null, 'given once');
+  const today = new Date(); const evening = pi.briefing(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 19, 0));
+  assert.equal(evening.kind, 'evening'); assert.match(evening.note, /Daily log \d{4}-\d\d-\d\d.*What pi was asked today:\n- \d\d:\d\d \(read only, done\): /s);
+  assert.ok(pi.tasksOn(today).some((t) => t.prompt === 'auto one' && t.status === 'done'));
 }
 { // the undo snapshot: everything as it was, kept as a ref, with the branch, the index and the files untouched
   const repo = path.join(home, 'Documents', 'repo'); fs.mkdirSync(repo);

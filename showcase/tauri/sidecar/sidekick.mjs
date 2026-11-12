@@ -284,7 +284,9 @@ const pi = createPi({
     if (r.status === 'stopped') { say(r.shown); voiceLine(r.shown); return; }
     if (VOICE_ON()) {
       const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
-      await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice, in character: one to three short spoken sentences, as you'd tell a friend what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. If pi asked them a question, put that question to them plainly.)`);
+      // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
+      const asks = /\?\s*$/.test(r.reply ?? '');
+      await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice, in character: one to three short spoken sentences, as you'd tell a friend what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
     }
     say(r.shown, r.status === 'error' ? 'concerned' : 'happy');
   },
@@ -405,6 +407,7 @@ Rules of this build, which come before everything else above and below:
 - Apps: open an app only when ${userName} names it. Click or type in an app only when they ask, and only in the app in front.
 - pi: the app shows pi's steps and puts its full reply on screen. When a system note says pi has finished, tell ${userName} the gist in your own voice, briefly and naturally, the way you'd pass on what a colleague found; apart from that, don't retell or comment on pi's reply unless they ask. When pi asked a question, their answer goes back to pi with ask_pi and follow_up true.
 - While pi is working you only talk, keep the to-do list and notes, or stop pi.
+- Routines: the <live-state> block lists routines ${userName} set up. When they say a routine's name (or close to it), carry out its steps in order with your tools, exactly as if they had said each step themselves, with the same rules and confirmations; say in a few words what you're doing, and stop at the first step that fails or is refused.
 When they mention a specific app ("my browser", "this form", "Figma"), screenshot that app, not the whole screen.
 Show, don't just tell. When they ask how to do something in an app (${process.platform === 'darwin' ? '"how do I add a layer mask"' : 'a how-to'}), walk them through it with draw: one beat per step in one call, each marking the control with a target and wait 'click'. When they ask what they're looking at or where something is, mark it on screen with draw (ring, frame, label, point) instead of describing where it is. When they ask you to explain, compare or teach something, draw it without being asked: the picture goes on cards beside their window while you say the short version. Pick the card by the question. How something works or happens: a model with moving parts for a physical thing (an engine, a piston, a heart, a pulley), with a flow beside it only when it also runs in stages; a flow for a process, a chain of causes or a decision (how a bill becomes law, what happens when a page loads). Comparing two or more things: table. How many, how much, biggest or fastest: bars (graph for a curve or a change over time). Where a place is: map. When, in what order, the history of something: timeline. Solving or working out maths: math, a step per line (geometry for a figure with angles or lengths). The parts of a thing ("the parts of a guitar"): see_photo, then a photo with labels. "Test me" or "quiz me": quiz (they answer by clicking and you're told how they did with their next message, so never ask them to tell you their answers or score). A compound: molecule. One or two cards per answer, the ones that carry it, and never the same content again as "- " points. Don't draw for a quick fact (a date, a capital, a score, a definition in a sentence), an opinion or advice, small talk, a yes or no, anything they asked for in one line or one sentence, or when they say not to: those are just said. Before you call draw, write one short line first: the answer to anything they said or asked besides the drawing ("I'm good, thanks!"), or what you're about to show. It's said while the drawing is made, so they hear you straight away and in order. Each beat's line is spoken and captioned while its marks draw, so your reply after draw never repeats or rephrases them (no restating the steps): add one short new line (a question, what comes next) or nothing. Use a fresh look for each request (earlier marks clear by themselves); to change something already drawn ("make that red", "move it", "never mind"), edit it by its part id.
 Be fast: every tool call is a round trip, so use as few as the task needs. To point at or click something whose exact words you know (the user said them, or you've seen them), use draw or act_in_app click_text with that text right away, with no read_window or screenshot first. Don't guess words: for "the version number" or "the settings icon" you don't know what's written, so look first. Put several steps in one act_in_app call. Forms: one act_in_app call with a fill step per field (field = its label or placeholder as shown), choose for dropdowns, fill for typed dates; a field that opens a calendar is clicked, then its month arrows and day are clicked with click_text. Check the field values in the result before saying it's done. When act_in_app shows the page after a click, use that instead of reading again. read_window and act_in_app results include the text on screen, so read pages from them; screenshot only when you need to see something words can't tell you (images, layout, colours).
@@ -1863,3 +1866,16 @@ if (config.onboarded && (config.setupVersion ?? 0) < SETUP_VERSION) {
   config.onboarded = false; config.onboardStep = 1; saveConfig();
 }
 if (!config.onboarded) send({ type: 'onboarding' });
+
+// Local-only build: the briefings set up in ~/Documents/roamies-pi/settings.json ("briefings"). Checked once a minute;
+// given when nothing else is going on, once a day each.
+setInterval(() => {
+  try {
+    if (busy || queued || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
+    const b = pi.briefing();
+    if (!b) return;
+    pi.briefing.done(b.kind);
+    logLine('briefing', { kind: b.kind });
+    enqueue(b.note);
+  } catch (e) { console.error('briefing', e); }
+}, 60_000);

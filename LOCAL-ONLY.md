@@ -13,7 +13,7 @@ after you approve it. Made against upstream commit `fa798b4` (app version 0.1.34
 | Click and type in an app | Only when you ask, only in the app in front, and only with "Allow File Edits & Commands" on |
 | Keep the to-do list and reminders | As before |
 | Keep notes in your Obsidian vault | Writes only when you ask; can add to a note, never change or delete one |
-| Hand a task to pi | Only after you say send |
+| Hand a task to pi | Read-only tasks after a short countdown you can stop; tasks that can edit only after you say send |
 
 Its own file and command tools (`read_file`, `list_files`, `search_files`, `write_file`, `run_command`) and
 `fetch_url` are removed. The limits themselves are enforced in code: apps only, the front app only, the switch for
@@ -25,7 +25,9 @@ or named an app) is a rule in its instructions, which the model follows but the 
 1. You ask Roamies for something that needs a file ("ask pi to explain segment.py").
 2. A bubble shows exactly what will be sent, the folder, and the mode, with **Send** and **Don't send**. With spoken
    replies on, it is read out too.
-3. Nothing is sent until you click Send, press Y, or say "send". Saying anything else, or Don't send, cancels it.
+3. A task that can edit is sent only when you click Send, press Y, or say "send". A read-only task goes by itself
+   after a few seconds (`autoSendReadOnly`), so you only act to stop it: click Don't send, or say anything other than
+   "send". Starting to talk pauses the countdown.
 4. pi starts in the background, in the project folder, as `pi --mode json`. What it's doing ("Pi's reading
    segment.py…") shows in a bubble, at most one every few seconds.
 5. When pi finishes, Roamies tells you the gist in its own voice (with spoken replies on), and then pi's full reply,
@@ -53,6 +55,10 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
   "pi": "pi",
   "maxMinutes": 60,
   "keepLogsDays": 30,
+  "autoSendReadOnly": 5,
+  "progressSeconds": 90,
+  "routines": { "start a research session": ["open Zotero", "switch project to cell-segmentation", "ask pi to read TODO.md and tell me where I left off"] },
+  "briefings": { "morning": "09:00", "evening": "18:30" },
   "neverLook": ["1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Passwords", "Messages"],
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
@@ -70,6 +76,13 @@ your login shell so `pi` and `node` are found. The model and thinking level are 
 - `pi`: the command that starts pi. If Roamies says it couldn't start pi, put the full path here (run `which pi`).
 - `maxMinutes`: a task running longer than this is stopped.
 - `keepLogsDays`: hand-off records older than this are deleted when a new hand-off starts. `0` keeps them all.
+- `autoSendReadOnly`: seconds before a read-only hand-off sends itself. `0` makes every hand-off wait for Send.
+- `progressSeconds`: on a long task, how often Roamies says pi is still working (spoken replies only). `0` is never.
+- `routines`: phrases that run a list of steps. Say the phrase and Roamies does each step in order with its usual
+  tools, rules and confirmations, stopping at the first one that fails or is refused.
+- `briefings`: times, as `"HH:MM"`, for a morning rundown (your to-dos, and what pi was asked yesterday) and an
+  end-of-day summary (saved to the vault as "Daily log <date>"). Each is given once a day, when Roamies is idle: the
+  morning one within four hours of its time, the evening one any time after it. Leave a time out to switch it off.
 - `neverLook`: apps Roamies never screenshots, reads or works in (see Safeguards). `[]` switches the check off.
 - `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
@@ -83,6 +96,15 @@ are deleted.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
+
+## Talking with it
+
+- **Answering without a key.** With "Auto Listen" on (the menu, or the panel's Voice page), the microphone opens by
+  itself after Roamies asks you something. That now includes questions pi sends back: Roamies ends its spoken gist
+  with pi's question and listens for your answer.
+- **Long tasks.** While pi works, Roamies says now and then that it's still going and what it's on.
+- **Read-only trust.** A read-only pi can still read any file it can reach, and what it reads goes to pi's AI
+  provider. If a project holds things you'd rather approve each time, set `autoSendReadOnly` to `0`.
 
 ## Safeguards
 

@@ -76,7 +76,7 @@ export function forVoice(text) {
 const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
 const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages']; // guard.mjs
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in.
-const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK });
+const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK });
 
 /** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. */
 export function loadSettings(home) {
@@ -101,7 +101,13 @@ export function loadSettings(home) {
   const vault = expand(str(raw.vault) || '~/Documents/roamies-vault', home); // the Obsidian vault Roamies keeps notes in (notes.mjs)
   const neverLook = Array.isArray(raw.neverLook) ? raw.neverLook.map(str).filter(Boolean) : [...NEVER_LOOK];
   const keep = Number(raw.keepLogsDays);
-  return { dir, file, raw, project, projects, vault, neverLook, keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  const num = (v, d) => (v === undefined || v === null || !(Number(v) >= 0) ? d : Number(v));
+  // routines: { "what you say": ["step", "step"] }; briefings: { "morning": "09:00", "evening": "18:30" }
+  const routines = raw.routines && typeof raw.routines === 'object' && !Array.isArray(raw.routines)
+    ? Object.entries(raw.routines).map(([name, steps]) => ({ name: str(name), steps: (Array.isArray(steps) ? steps : [steps]).map(str).filter(Boolean) })).filter((r) => r.name && r.steps.length) : [];
+  const clock = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(str(v)); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
+  const briefings = raw.briefings && typeof raw.briefings === 'object' ? { morning: clock(raw.briefings.morning), evening: clock(raw.briefings.evening) } : { morning: null, evening: null };
+  return { dir, file, raw, project, projects, vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
 }
 
 /** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
@@ -165,28 +171,33 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   const stamp = (d = new Date(now())) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
 
   /** Shows the hand-off and waits for Send (a click, the Y key, or the word "send"). */
-  async function approve({ prompt, mode, project, followUp, dir, notes = [] }, signal) {
+  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0 }, signal) {
     const where = tilde(project, home);
-    const head = `Send to pi?  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}${notes.map((n) => `\n${n}`).join('')}`;
+    // auto: a read-only task is sent after this many seconds unless it's stopped. One that can edit always waits for Send.
+    const head = `${auto ? `Asking pi in ${auto} s` : 'Send to pi?'}  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}${notes.map((n) => `\n${n}`).join('')}`;
     let body = prompt;
     const pendingFile = path.join(dir, 'pending.txt');
     if (prompt.length > SHOW_MAX) {
       fs.writeFileSync(pendingFile, `${head}\n\n${prompt}\n`);
       body = `${prompt.slice(0, SHOW_MAX - 100)}… (the whole text is in ${tilde(pendingFile, home)})`;
     }
-    tell(null, `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}${followUp ? ', continuing the last task' : ''}. ${forVoice(prompt)} Say send to send it.`);
+    tell(null, auto ? `Asking pi: ${forVoice(prompt)}` : `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}${followUp ? ', continuing the last task' : ''}. ${forVoice(prompt)} Say send to send it.`);
     const closing = new AbortController();
     const signals = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
     let by = 'click';
     const voiced = new Promise((resolve) => { approval = { listening: false, answer: (text) => { by = 'voice'; resolve(isSend(text)); } }; });
     // Once the user has started talking, the answer is what they say: a bubble that closes meanwhile isn't a "no".
-    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: ['Send', "Don't send"] }, signals).then((a) => (a == null && approval?.listening ? new Promise(() => {}) : isSend(a)));
+    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: [auto ? 'Send now' : 'Send', "Don't send"] }, signals).then((a) => (a == null && approval?.listening ? new Promise(() => {}) : isSend(a)));
+    // The countdown. Once the user starts talking it no longer counts: what they say decides.
+    let timer = null;
+    const timed = auto ? new Promise((resolve) => { timer = setTimeout(() => { if (approval?.listening) return; by = 'auto'; resolve(true); }, auto * 1000); }) : new Promise(() => {});
     try {
-      const ok = await Promise.race([clicked, voiced]);
+      const ok = await Promise.race([clicked, voiced, timed]);
       return { ok, by };
     } finally {
+      clearTimeout(timer);
       approval = null;
-      closing.abort(); // closes the bubble if it was answered by voice
+      closing.abort(); // closes the bubble if it was answered by voice or went by itself
       fs.rmSync(pendingFile, { force: true });
     }
   }
@@ -247,12 +258,16 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       }
     });
     child.stderr.on('data', (d) => { j.stderr = (j.stderr + d.toString('utf8')).slice(-4000); });
+    // Every so often on a long task, a spoken line so the silence isn't a mystery (only with spoken replies on).
+    let told = 0;
+    const lines = [(n, w) => `Still on it. Pi's ${n} step${n === 1 ? '' : 's'} in${w}.`, (n, w) => `Pi's still working${w}. ${n} step${n === 1 ? '' : 's'} so far.`, (n, w) => `Bear with me, pi's not done yet${w}.`];
+    const progress = settings.progressSeconds > 0 ? setInterval(() => { if (job === j) tell(null, lines[told++ % lines.length](j.steps, stepText ? `, ${stepText.replace(/^Pi's /, '').replace(/…$/, '')} right now` : '')); }, settings.progressSeconds * 1000) : null;
     const timer = setTimeout(() => { j.problem = `it ran for over ${settings.maxMinutes} minutes, so I stopped it`; j.stopped = 'timeout'; child.kill(); }, settings.maxMinutes * 60_000);
     let finished = false;
     const finish = (code, spawnError) => {
       if (finished) return;
       finished = true;
-      clearTimeout(timer); clearTimeout(stepTimer);
+      clearTimeout(timer); clearTimeout(stepTimer); clearInterval(progress);
       const errText = spawnError ? spawnError.message : j.stderr.trim().split('\n').filter(Boolean).slice(-3).join(' ');
       let status = 'done';
       if (j.stopped === true) status = 'stopped';
@@ -286,7 +301,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   const tools = [
     {
       name: 'ask_pi',
-      description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. Nothing is sent until ${userName} has seen the exact prompt and said send; pi then works in the background and the app shows its steps. Don't wait for it: you're told when pi has finished.`,
+      description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. ${userName} always sees the exact prompt first: a read-only task then goes by itself after a few seconds unless they stop it, and one that can edit goes only when they say send. pi then works in the background and the app shows its steps. Don't wait for it: you're told when pi has finished.`,
       parameters: z.object({ prompt: z.string(), mode: z.enum(['read', 'edit']), follow_up: z.boolean().optional() }),
       executionMode: 'sequential', timeoutMs: 10 * 60_000, // time to read the prompt and answer; pi itself runs in the background
       execute: async ({ prompt, mode, follow_up: followUp }, ctx) => {
@@ -311,7 +326,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
           snap = snapshot(settings.project, stamp(), { init: settings.project === path.join(settings.dir, 'workspace') });
           notes.push(snap.ref ? 'Undo snapshot taken.' : `No undo snapshot (${snap.why}).`);
         }
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes }, ctx?.signal);
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: m === 'read' ? settings.autoSendReadOnly : 0 }, ctx?.signal);
         if (!ok) { log('pi_declined', { mode: m }); throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`); }
         start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap });
         return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
@@ -352,6 +367,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     try { s = loadSettings(home); } catch (e) { return `- pi: its settings file has a problem (${e.message}).`; }
     const others = s.projects.filter((p) => p.dir !== s.project).map((p) => p.name);
     const lines = [`- pi works in: ${tilde(s.project, home)}${others.length ? `. Other projects ${userName} listed: ${others.join(', ')}` : ''}.`];
+    for (const r of s.routines.slice(0, 12)) lines.push(`- Routine "${r.name}": ${r.steps.map((x, i) => `${i + 1}) ${x}`).join('  ')}`);
     if (job) lines.push(`- pi is WORKING now (${job.mode === 'edit' ? 'editing allowed' : 'read only'}) on: "${clip(job.prompt, 300)}". Until it replies you can only talk, keep the to-do list and notes, or stop_pi.`);
     else if (last && last.project === s.project) {
       const said = last.reply ? ` pi's reply (the app puts it on screen for ${userName} in full): <<<${clip(last.reply, LIVE_MAX)}>>>` : '';
@@ -360,8 +376,49 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     return lines.join('\n');
   }
 
+  /** What was handed to pi on a day (a Date): [{ time, mode, prompt, status }], oldest first, from the records. */
+  function tasksOn(day) {
+    const out = [];
+    try {
+      const s = loadSettings(home), prefix = stamp(day).slice(0, 10);
+      for (const f of fs.readdirSync(path.join(s.dir, 'log')).filter((n) => n.startsWith(prefix) && n.endsWith('.jsonl')).sort()) {
+        const rows = fs.readFileSync(path.join(s.dir, 'log', f), 'utf8').split('\n').filter(Boolean);
+        let first, lastRow; try { first = JSON.parse(rows[0]); lastRow = JSON.parse(rows.at(-1)); } catch { continue; }
+        if (first?.type !== 'roamies_handoff') continue;
+        out.push({ time: `${f.slice(11, 13)}:${f.slice(13, 15)}`, mode: first.mode, prompt: clip(String(first.prompt ?? ''), 160), status: lastRow?.type === 'roamies_result' ? lastRow.status : 'unfinished' });
+      }
+    } catch { /* no records */ }
+    return out;
+  }
+
+  /** The briefing that's due now, if any: { kind, note } (note is the system note for the model). A morning one is
+   *  due from its time for four hours, an evening one from its time until midnight, each once a day. done(kind)
+   *  marks it given. */
+  function briefing(d = new Date(now())) {
+    let s; try { s = loadSettings(home); } catch { return null; }
+    const mins = d.getHours() * 60 + d.getMinutes(), today = stamp(d).slice(0, 10);
+    let given = {}; try { given = JSON.parse(fs.readFileSync(path.join(s.dir, 'state.json'), 'utf8')).briefings ?? {}; } catch { /* none yet */ }
+    const list = (tasks) => (tasks.length ? tasks.map((t) => `- ${t.time} (${t.mode === 'edit' ? 'could edit' : 'read only'}, ${t.status}): ${t.prompt}`).join('\n') : '- nothing');
+    const due = (kind, until) => s.briefings[kind] !== null && mins >= s.briefings[kind] && mins < until && given[kind] !== today;
+    if (due('morning', s.briefings.morning + 240)) {
+      const y = new Date(d); y.setDate(y.getDate() - 1);
+      return { kind: 'morning', note: `(System, not ${userName}: it's time for the morning briefing they set up. In a few short spoken sentences, in character: greet them, say what's on their to-do list and what's due today (call list_commitments first; no other tool), and what pi worked on yesterday, from this list. Don't read the list out line by line.)\nWhat pi was asked yesterday:\n${list(tasksOn(y))}` };
+    }
+    if (due('evening', 24 * 60)) {
+      return { kind: 'evening', note: `(System, not ${userName}: it's time for the end-of-day summary they set up. Save a note titled "Daily log ${today}" with write_note (append true): a short Markdown summary of what pi was asked today, from this list, and of their to-do list (call list_commitments first). Then tell them in one or two spoken sentences that the day's log is saved and what stood out. No other tools.)\nWhat pi was asked today:\n${list(tasksOn(d))}` };
+    }
+    return null;
+  }
+  briefing.done = (kind, d = new Date(now())) => {
+    try {
+      const s = loadSettings(home), file = path.join(s.dir, 'state.json');
+      let state = {}; try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new */ }
+      fs.writeFileSync(file, `${JSON.stringify({ ...state, briefings: { ...(state.briefings ?? {}), [kind]: stamp(d).slice(0, 10) } }, null, 2)}\n`);
+    } catch { /* best effort */ }
+  };
+
   return {
-    tools, live, stop,
+    tools, live, stop, tasksOn, briefing,
     busy: () => !!job,
     /** Something said while a Send bubble is open answers it ("send" sends, anything else doesn't). True if it did. */
     heard(text) { if (!approval) return false; approval.answer(text); return true; },
