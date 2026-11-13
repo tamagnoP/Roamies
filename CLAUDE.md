@@ -65,6 +65,10 @@ signed, so macOS asks for its permissions again after each rebuild. Ask before r
   for pi, `say` and the window helper with fakes, as the existing tests do. Never call a real model from a test.
 - **Update `LOCAL-ONLY.md`** in the same commit as the behaviour it describes.
 - **If a test fails, find the cause.** Do not weaken or delete a test to get a pass; say what failed.
+- **Update `ROADMAP.md`** in the same commit as any change of status: when a feature is started, finished, merged,
+  or its plan changes, move its entry, fill in the branch and commit, and add a dated line to the decisions log for
+  anything decided or reversed. `ROADMAP.md` is a record, not an instruction: only build a feature when the owner
+  gives you its prompt.
 
 ## Git
 
