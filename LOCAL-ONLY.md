@@ -63,7 +63,7 @@ settings or trust files; not your other projects; not a `readOnly` folder. A `re
 that sits inside the current project stays unwritable.
 
 **What pi can read.** Outside your home folder, everything it could before: the system, Homebrew, conda, Node, and
-pi's own installation. Inside your home folder, nothing except:
+pi's own installation, but not external drives (below). Inside your home folder, nothing except:
 
 - the current project, the other folders under `projects`, and the folders under `readOnly`;
 - its own folder, `~/.pi`;
@@ -80,13 +80,22 @@ So Documents, Desktop, Downloads, Pictures, Movies, Music, cloud-synced folders 
 links to it such as `~/gdrive`), the rest of `~/Library`, shell histories and every other folder in your home are
 unreadable unless you list them. A listed folder includes everything beneath it, and may be a link to a folder.
 
+**External drives.** Nothing under `/Volumes` can be read or listed, except a folder there that you list under
+`projects` or `readOnly` (or `toolFolders`), with everything beneath it. The folders above a listed one can be seen
+to exist, so its path can be walked, but not listed or read. The startup disk also appears under `/Volumes`, as a
+link (`/Volumes/Macintosh HD`): a path written through that link keeps working, under the same rules as the path
+without it. A folder on an external drive can be listed and read, but the current project still has to be inside
+your home folder.
+
 **Always blocked**, for reading and writing, even inside a folder you listed:
 
 - `~/Documents/roamies-pi/settings.json`, `state.json` and the hand-off records in `log`;
 - `~/.ssh`, `~/.gnupg`, `~/.gg`, `~/.claude`, the keychains (`~/Library/Keychains`, `/Library/Keychains`);
 - `~/Library/Application Support/superProductivity`;
 - `~/.config/gh`, the Hugging Face token (`~/.cache/huggingface/token`, `stored_tokens`), and OrbStack's keys and
-  configuration (`~/.orbstack/ssh`, `~/.orbstack/config`).
+  configuration (`~/.orbstack/ssh`, `~/.orbstack/config`);
+- cargo's and git's saved sign-ins (`~/.cargo/credentials.toml`, `~/.cargo/credentials`,
+  `~/.config/git/credentials`), which sit inside readable tool folders.
 
 **Also denied:** running `/usr/bin/security`, `/usr/bin/osascript` and `/usr/bin/open`, and sending Apple Events,
 so pi can't ask the keychain for a password or ask another app to act for it.
@@ -94,7 +103,8 @@ so pi can't ask the keychain for a password or ask another app to act for it.
 **Docker and OrbStack.** A container can mount any folder on the Mac, so reaching Docker is a way out of every
 rule above. It is denied by default: pi can't connect to the Docker or OrbStack sockets
 (`~/.orbstack/run`, `~/.docker/run`, `/var/run/docker.sock`). List a project under `docker` to allow it there; pi
-can then also read `~/.docker`, `~/.orbstack/bin` and `~/.orbstack/run`, and the Send bubble adds "Docker allowed:
+can then also read `~/.docker`, `~/.orbstack/bin`, `~/.orbstack/run` and `~/.orbstack/shell` (so the line in your
+`~/.bash_profile` that loads OrbStack's shell setup works there), and the Send bubble adds "Docker allowed:
 containers can reach folders outside this project." **A project with Docker allowed is not fully confined**: what
 pi does through a container happens outside the sandbox, with OrbStack's access to your files, not pi's.
 `~/.docker/config.json` is where `docker login` keeps registry credentials, and becomes readable there.
@@ -112,8 +122,8 @@ runs until you click Send. Each hand-off's record says `"sandbox": "on"`, `"off"
 - pi can't refresh its saved model catalogue (`~/.pi/agent/models-store.json`); it carries on with the one it has.
   Running pi in Terminal refreshes it.
 - Programs that run with another user's rights (`sudo`, `ps`, `top`) don't run inside a sandbox.
-- A line in your `~/.bash_profile` that reads a file from a folder pi can't read (OrbStack's `~/.orbstack/shell`)
-  is skipped with an error the shell ignores.
+- A line in your `~/.bash_profile` that reads a file from a folder pi can't read is skipped with an error the
+  shell ignores. OrbStack's `~/.orbstack/shell` is one, in every project not listed under `docker`.
 - Tools that put themselves in a sandbox fail, because a sandbox can't be started inside one: `swift build`
   and `xcodebuild`, for example.
 - `git push` over SSH fails (no `~/.ssh`). The keychain service itself is not blocked, only the `security`

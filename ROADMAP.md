@@ -24,7 +24,7 @@ Last updated: 2026-11-13.
 | 8 | Safeguards: workspace, undo snapshots, never-look list, log retention | Done | `feb212b` |
 | 9 | Fluidity: read-only trust, hands-free follow-ups, progress, routines, briefings | Done | `dff3fe6` |
 | 10 | `settings.json` written only by the owner | Built, not merged | `pi-sandbox` `2ac8919`, `add0dd3` |
-| 11 | pi confined by a macOS sandbox | Built, three fixes pending | `pi-sandbox` `0213e20` |
+| 11 | pi confined by a macOS sandbox | Built, three fixes done, not merged | `pi-sandbox` `0213e20` and the fixes commit |
 | 12 | Home position on the desktop | Queued (Prompt A) | |
 | 13 | Calendar blocks in Super Productivity | Queued (Prompt D) | |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
@@ -67,9 +67,9 @@ New settings: `sandbox`, `readOnly`, `toolFolders` (adds to the built-in list), 
 
 **Pending before merge:**
 
-- [ ] Add `~/.cargo/credentials.toml`, `~/.cargo/credentials` and `~/.config/git/credentials` to the blocked list.
-- [ ] Deny reading under `/Volumes` unless a folder there is listed.
-- [ ] In Docker-allowed projects, allow reading `~/.orbstack/shell`.
+- [x] Add `~/.cargo/credentials.toml`, `~/.cargo/credentials` and `~/.config/git/credentials` to the blocked list.
+- [x] Deny reading under `/Volumes` unless a folder there is listed.
+- [x] In Docker-allowed projects, allow reading `~/.orbstack/shell`.
 - [ ] Re-review of the branch, then `git checkout local-only && git merge --ff-only pi-sandbox && git push`, rebuild.
 
 **To do in `settings.json` after the merge:** add the literature tool folders to `toolFolders`

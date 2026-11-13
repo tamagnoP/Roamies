@@ -64,9 +64,17 @@ put(H('.config', 'git', 'ignore')); put(H('.config', 'zotero-mcp', 'key')); put(
 put(H('.cargo', 'bin', 'tool')); put(H('.matplotlib', 'rc')); put(H('mytools', 'lib.txt')); put(H('.toolrc'));
 put(H('.pi', 'agent', 'auth.json'), '{}'); put(H('.pi', 'agent', 'models.json'), '{}'); put(H('.pi', 'agent', 'settings.json'), '{}'); put(H('.pi', 'agent', 'trust.json'), '{}'); put(H('.pi', 'agent', 'APPEND_SYSTEM.md')); put(H('.pi', 'agent', 'SYSTEM.md'));
 put(H('.pi', 'agent', 'skills', 's', 'SKILL.md')); put(H('.pi', 'agent', 'bin', 'rg')); put(H('.pi', 'agent', 'sessions', 'old.jsonl'));
-put(H('.docker', 'config.json'), '{}'); put(H('.orbstack', 'ssh', 'id')); fs.mkdirSync(H('.orbstack', 'run'), { recursive: true });
+put(H('.cargo', 'credentials.toml')); put(H('.cargo', 'credentials')); put(H('.config', 'git', 'credentials'));
+put(H('.docker', 'config.json'), '{}'); put(H('.orbstack', 'ssh', 'id')); put(H('.orbstack', 'shell', 'init.bash'), ''); fs.mkdirSync(H('.orbstack', 'run'), { recursive: true });
 fs.symlinkSync(ref, H('Documents', 'ref-link')); // a listed folder given through a symbolic link
 const tmpFile = path.join(os.tmpdir(), `sbx-test-${process.pid}.txt`);
+// The pretend external drives (/Volumes is the system's): two drives, and the startup disk as a link to "/".
+const vols = fs.realpathSync(fs.mkdtempSync(path.join(here, '.vol-')));
+process.on('exit', () => fs.rmSync(vols, { recursive: true, force: true }));
+const V = (...p) => path.join(vols, ...p);
+put(V('Drive', 'data', 'listed', 'l.txt')); put(V('Drive', 'data', 'private.txt')); put(V('Drive', 'proj', 'p.txt')); put(V('Drive', 'top.txt')); put(V('Other', 'o.txt'));
+fs.symlinkSync('/', V('Startup'));
+process.env.GIT_CEILING_DIRECTORIES = `${home}${path.delimiter}${vols}`; // it is inside this repository too
 
 // Docker stands in as a socket where OrbStack keeps its own.
 const sock = H('.orbstack', 'run', 'docker.sock');
@@ -128,7 +136,9 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
   assert.equal(sandboxProblem(profile), '', 'the system accepts it');
   const lines = profile.trim().split('\n');
   assert.match(lines.at(-1), /^\(deny file-read\* file-write\* /, 'the blocked paths are the last rule, so nothing overrides them');
-  for (const p of [path.join(dir, 'settings.json'), path.join(dir, 'state.json'), path.join(dir, 'log'), H('.ssh'), H('.gnupg'), H('.gg'), H('.claude'), H('Library', 'Keychains'), '/Library/Keychains', H('Library', 'Application Support', 'superProductivity'), H('.config', 'gh')]) assert.ok(lines.at(-1).includes(`"${p}")`), `blocked: ${p}`);
+  for (const p of [path.join(dir, 'settings.json'), path.join(dir, 'state.json'), path.join(dir, 'log'), H('.ssh'), H('.gnupg'), H('.gg'), H('.claude'), H('Library', 'Keychains'), '/Library/Keychains', H('Library', 'Application Support', 'superProductivity'), H('.config', 'gh'), H('.cargo', 'credentials.toml'), H('.cargo', 'credentials'), H('.config', 'git', 'credentials')]) assert.ok(lines.at(-1).includes(`"${p}")`), `blocked: ${p}`);
+  assert.ok(profile.includes('(deny file-read* (subpath "/Volumes"))') && profile.includes('(literal "/Volumes")'), 'external drives are closed; the drives folder can be walked');
+  assert.ok(profile.indexOf('(deny file-read* (subpath "/Volumes"))') < profile.indexOf('(allow file-read* (subpath'), 'a listed folder is allowed after the drives are denied');
   assert.ok(profile.includes(`(subpath "${ref}")`) && !/subpath "[^"]*ref-link/.test(profile), 'folders by their real paths, not the links to them');
   assert.ok(profile.includes(`(literal "${H('Documents', 'ref-link')}")`), 'the link itself can be read, so the path as written works');
   assert.ok(profile.includes('(deny appleevent-send)') && profile.includes('(deny process-exec* (literal "/usr/bin/security") (literal "/usr/bin/osascript") (literal "/usr/bin/open"))'));
@@ -198,6 +208,12 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
     ['read Super Productivity', 'read', H('Library', 'Application Support', 'superProductivity', 'data')],
     ['read the Hugging Face token', 'read', H('.cache', 'huggingface', 'token')],
     ['read OrbStack\'s keys', 'read', H('.orbstack', 'ssh', 'id')],
+    ['read cargo\'s sign-in (credentials.toml), inside the tool folder ~/.cargo', 'read', H('.cargo', 'credentials.toml')],
+    ['read cargo\'s sign-in (credentials), inside the tool folder ~/.cargo', 'read', H('.cargo', 'credentials')],
+    ['read git\'s saved passwords, inside the tool folder ~/.config/git', 'read', H('.config', 'git', 'credentials')],
+    ['write cargo\'s sign-in', 'append', H('.cargo', 'credentials.toml')],
+    ['read the rest of ~/.cargo', 'read', H('.cargo', 'bin', 'tool')],
+    ['read the rest of ~/.config/git', 'read', H('.config', 'git', 'ignore')],
     // pi's own folder: readable, and writable only where pi has to write
     ['read pi\'s sign-in', 'read', H('.pi', 'agent', 'auth.json')],
     ['read pi\'s skills', 'read', H('.pi', 'agent', 'skills', 's', 'SKILL.md')],
@@ -226,10 +242,10 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
   const allowed = new Set(['write in a subfolder of the project', 'change a file in the project', 'write in a temporary folder',
     'read the project', 'read another project', 'read a readOnly folder', 'read a readOnly folder through its link', 'read a readOnly folder inside the project',
     'read a built-in tool folder', 'read a tool folder from the settings', 'read a tool file from the settings', 'read a model cache', 'see that Documents exists',
-    'read a file beside the settings (the folder is readOnly)', 'read the rest of ~/.config, listed as a tool folder', 'read pi\'s sign-in', 'read pi\'s skills', 'write a pi session', 'write pi\'s sign-in', 'take pi\'s sign-in lock', 'take pi\'s settings lock', 'take pi\'s trust lock', 'run an ordinary program']);
+    'read a file beside the settings (the folder is readOnly)', 'read the rest of ~/.config, listed as a tool folder', 'read the rest of ~/.cargo', 'read the rest of ~/.config/git', 'read pi\'s sign-in', 'read pi\'s skills', 'write a pi session', 'write pi\'s sign-in', 'take pi\'s sign-in lock', 'take pi\'s settings lock', 'take pi\'s trust lock', 'run an ordinary program']);
   const refusedAs = { 'write outside the project, by a command pi runs': 'exit 1' }; // the shell reports its own failed write
   for (const [what, result] of Object.entries(got)) assert.equal(result, allowed.has(what) ? 'ok' : refusedAs[what] ?? DENIED, what);
-  for (const asked of ['write outside the project', 'write in a project that is not the current one', 'write in a readOnly folder', 'read an unlisted folder under Documents', 'read settings.json, inside a readable folder', 'write in a subfolder of the project']) assert.ok(asked in got, asked);
+  for (const asked of ['read cargo\'s sign-in (credentials.toml), inside the tool folder ~/.cargo', 'read cargo\'s sign-in (credentials), inside the tool folder ~/.cargo', 'read git\'s saved passwords, inside the tool folder ~/.config/git', 'write outside the project', 'write in a project that is not the current one', 'write in a readOnly folder', 'read an unlisted folder under Documents', 'read settings.json, inside a readable folder', 'write in a subfolder of the project']) assert.ok(asked in got, asked);
   // ...and on disk, from outside: what was refused did not happen
   assert.equal(fs.readFileSync(path.join(cells, 'sub', 'deeper', 'new.txt'), 'utf8'), 'written by pi\n');
   for (const p of [H('out.txt'), H('out2.txt'), path.join(other, 'w.txt'), path.join(ref, 'w.txt'), path.join(cells, 'frozen', 'w.txt'), path.join(cells, 'nested', 'w.txt'), path.join(cells, 'stolen.txt'), path.join(cells, 'linked.txt'), path.join(dir, 'log', 'forged.jsonl'), H('.pi', 'agent', 'skills', 'evil')]) assert.ok(!fs.existsSync(p), `not made: ${p}`);
@@ -266,14 +282,58 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
   assert.match(asked.at(-1), /Sandboxed: pi can read 2 folders and write only in this project\./);
 }
 
+// ---- external drives: nothing under the drives folder can be read, but a folder there that is listed
+{
+  const onDrives = make({ volumes: vols });
+  const driveOps = [
+    ['read a readOnly folder on a drive', 'read', V('Drive', 'data', 'listed', 'l.txt')],
+    ['write in a readOnly folder on a drive', 'write', V('Drive', 'data', 'listed', 'w.txt')],
+    ['read a project on a drive', 'read', V('Drive', 'proj', 'p.txt')],
+    ['write in a project on a drive', 'write', V('Drive', 'proj', 'w.txt')],
+    ['see that the folders above a listed one exist', 'stat', V('Drive', 'data')],
+    ['see that the drive exists', 'stat', V('Drive')],
+    ['see that the drives folder exists', 'stat', vols],
+    ['read beside a listed folder', 'read', V('Drive', 'data', 'private.txt')],
+    ['list the folder above a listed one', 'list', V('Drive', 'data')],
+    ['read the top of the drive', 'read', V('Drive', 'top.txt')],
+    ['list the drive', 'list', V('Drive')],
+    ['list the drives', 'list', vols],
+    ['read another drive', 'read', V('Other', 'o.txt')],
+    ['see that another drive exists', 'stat', V('Other')],
+    ['read the system through the startup disk\'s link', 'read', V('Startup', 'etc', 'hosts')],
+    ['run a program through the startup disk\'s link', 'run', V('Startup', 'usr', 'bin', 'true')],
+    ['read the project through the startup disk\'s link', 'read', path.join(V('Startup'), cells, 'a.py')],
+    ['read an unlisted folder through the startup disk\'s link', 'read', path.join(V('Startup'), H('Documents', 'private', 'p.txt'))],
+  ];
+  const walk = ['see that the folders above a listed one exist', 'see that the drive exists', 'see that the drives folder exists'];
+  const startup = ['read the system through the startup disk\'s link', 'run a program through the startup disk\'s link', 'read the project through the startup disk\'s link'];
+  const expect = (ok) => Object.fromEntries(driveOps.map(([what]) => [what, ok.includes(what) ? 'ok' : DENIED]));
+  set(); // nothing on a drive is listed
+  assert.deepEqual(await attempt(driveOps, onDrives), expect(['see that the drives folder exists', ...startup]));
+  set({ projects: [...base.projects, V('Drive', 'proj')], readOnly: [...base.readOnly, V('Drive', 'data', 'listed')] });
+  assert.deepEqual(await attempt(driveOps, onDrives), expect(['read a readOnly folder on a drive', 'read a project on a drive', ...walk, ...startup]));
+  assert.match(asked.at(-1), /Sandboxed: pi can read 8 folders and write only in this project\./);
+  for (const p of [V('Drive', 'data', 'listed', 'w.txt'), V('Drive', 'proj', 'w.txt')]) assert.ok(!fs.existsSync(p), `not made: ${p}`);
+  // a listed folder written through the startup disk's link is the folder itself
+  set({ readOnly: [path.join(V('Startup'), H('Documents', 'private'))] });
+  assert.deepEqual(await attempt([['read it as it was written', 'read', path.join(V('Startup'), H('Documents', 'private', 'p.txt'))], ['read it by its own path', 'read', H('Documents', 'private', 'p.txt')], ['read the Desktop through the link', 'read', path.join(V('Startup'), H('Desktop', 'd.txt'))]], onDrives),
+    { 'read it as it was written': 'ok', 'read it by its own path': 'ok', 'read the Desktop through the link': DENIED });
+  // the system's own drives folder, with the pi the app makes: closed, and the startup disk's link there still works
+  set();
+  const real = fs.readdirSync('/Volumes').map((n) => path.join('/Volumes', n)).find((p) => { try { return fs.lstatSync(p).isSymbolicLink() && fs.realpathSync(p) === '/'; } catch { return false; } });
+  const got = await attempt([['list /Volumes', 'list', '/Volumes'], ['see that /Volumes exists', 'stat', '/Volumes'], ['run an ordinary program', 'run', '/usr/bin/true'],
+    ...(real ? [['read the system through the startup disk\'s link', 'read', path.join(real, 'etc', 'hosts')], ['read an unlisted folder through the startup disk\'s link', 'read', path.join(real, H('Documents', 'private', 'p.txt'))]] : [])]);
+  assert.deepEqual(got, { 'list /Volumes': DENIED, 'see that /Volumes exists': 'ok', 'run an ordinary program': 'ok', ...(real ? { 'read the system through the startup disk\'s link': 'ok', 'read an unlisted folder through the startup disk\'s link': DENIED } : {}) });
+}
+
 // ---- Docker: denied unless the current project is in "docker"
 {
-  const dockerOps = [['connect to Docker', 'connect', sock], ['read docker\'s config', 'read', H('.docker', 'config.json')], ['read OrbStack\'s keys', 'read', H('.orbstack', 'ssh', 'id')], ['write outside the project', 'write', H('out.txt')]];
+  const dockerOps = [['connect to Docker', 'connect', sock], ['read docker\'s config', 'read', H('.docker', 'config.json')], ['read OrbStack\'s shell setup', 'read', H('.orbstack', 'shell', 'init.bash')], ['read OrbStack\'s keys', 'read', H('.orbstack', 'ssh', 'id')], ['write outside the project', 'write', H('out.txt')]];
   set({ docker: ['~/Documents/other'] }); // allowed for another project, not this one
-  assert.deepEqual(await attempt(dockerOps), { 'connect to Docker': DENIED, 'read docker\'s config': DENIED, 'read OrbStack\'s keys': DENIED, 'write outside the project': DENIED });
+  assert.deepEqual(await attempt(dockerOps), { 'connect to Docker': DENIED, 'read docker\'s config': DENIED, 'read OrbStack\'s shell setup': DENIED, 'read OrbStack\'s keys': DENIED, 'write outside the project': DENIED });
   assert.ok(!asked.at(-1).split('\n\n')[0].includes('Docker'));
   set({ docker: ['~/Documents/cells'] });
-  assert.deepEqual(await attempt(dockerOps), { 'connect to Docker': 'ok', 'read docker\'s config': 'ok', 'read OrbStack\'s keys': DENIED, 'write outside the project': DENIED });
+  assert.deepEqual(await attempt(dockerOps), { 'connect to Docker': 'ok', 'read docker\'s config': 'ok', 'read OrbStack\'s shell setup': 'ok', 'read OrbStack\'s keys': DENIED, 'write outside the project': DENIED });
   assert.match(asked.at(-1), /\nSandboxed: pi can read 6 folders and write only in this project\.\nDocker allowed: containers can reach folders outside this project\.\n\n/);
   assert.equal(lastRecord().docker, true);
 }
@@ -320,5 +380,5 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
 }
 
 server.close();
-fs.rmSync(home, { recursive: true, force: true });
+fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(vols, { recursive: true, force: true });
 console.log('sandbox tests: passed');

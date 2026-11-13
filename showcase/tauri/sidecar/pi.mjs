@@ -105,7 +105,11 @@ const BLOCKED = (h, r) => [
   ['subpath', `${h}/Library/Application Support/superProductivity`],
   ['subpath', `${h}/.config/gh`], ['literal', `${h}/.cache/huggingface/token`], ['subpath', `${h}/.cache/huggingface/stored_tokens`],
   ['subpath', `${h}/.orbstack/ssh`], ['subpath', `${h}/.orbstack/config`],
+  // saved sign-ins that sit inside readable tool folders (~/.cargo, ~/.config/git)
+  ['literal', `${h}/.cargo/credentials.toml`], ['literal', `${h}/.cargo/credentials`], ['literal', `${h}/.config/git/credentials`],
 ];
+// Where external drives are mounted. Nothing under it is readable but the folders the owner listed.
+const VOLUMES = '/Volumes';
 // Programs that reach outside the sandbox by asking the system or another app to act.
 const NO_EXEC = ['/usr/bin/security', '/usr/bin/osascript', '/usr/bin/open'];
 
@@ -125,12 +129,12 @@ const inside = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? di
 /** The sandbox profile for a hand-off in `project`: { profile, reads, docker }. reads is how many of the owner's
  *  folders pi can read (the project, the other "projects" and "readOnly"); docker is whether this project is in "docker".
  *  In the profile a later rule wins over an earlier one, so the order is the policy: the blocked paths come last. */
-export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir() }) {
+export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir(), volumes = VOLUMES }) {
   const q = (p) => { if (/[\0\n\r]/.test(p)) throw new Error(`a folder name with a line break in it (${JSON.stringify(p)})`); return `"${p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`; };
   const rule = ([kind, p]) => `(${kind} ${q(p)})`;
   const sub = (list) => list.map((p) => rule(['subpath', p])).join(' ');
   const uniq = (list) => [...new Set(list)];
-  const h = realPath(home), proj = realPath(project), roamies = realPath(settings.dir);
+  const h = realPath(home), proj = realPath(project), roamies = realPath(settings.dir), vol = realPath(volumes);
   const others = uniq(settings.projects.map((p) => realPath(p.dir))).filter((p) => p !== proj);
   const readOnly = uniq((settings.readOnly ?? []).map(realPath)).filter((p) => p !== proj);
   const tools = uniq((settings.toolFolders ?? []).map(realPath));
@@ -141,21 +145,28 @@ export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir() }
   // the tool folders, the folder an absolute "pi" command sits in, and (with Docker allowed) what docker reads.
   const own = [realPath(path.join(home, '.pi')), ...STARTUP.map((f) => path.join(h, f)), ...tools];
   if (path.isAbsolute(settings.pi)) own.push(path.dirname(realPath(settings.pi)), path.dirname(path.resolve(settings.pi)));
-  const dockerReads = [`${h}/.docker`, `${h}/.orbstack/bin`, `${h}/.orbstack/run`];
+  const dockerReads = [`${h}/.docker`, `${h}/.orbstack/bin`, `${h}/.orbstack/run`, `${h}/.orbstack/shell`];
   const dockerSockets = `(subpath ${q(`${h}/.orbstack/run`)}) (subpath ${q(`${h}/.docker/run`)}) (literal "/private/var/run/docker.sock") (literal "/var/run/docker.sock")`;
   const listed = uniq([proj, ...others, ...readOnly]);
   // A folder listed through a symbolic link (~/gdrive) is allowed by its real path; the link itself has to be readable
   // too, for the path as the owner wrote it to work.
   const links = [];
+  const below = (at, top) => inside(at, top) && at !== top;
   for (const p of [project, ...settings.projects.map((x) => x.dir), ...(settings.readOnly ?? []), ...(settings.toolFolders ?? [])]) {
-    for (let at = path.resolve(String(p)); inside(at, path.resolve(home)) && at !== path.resolve(home); at = path.dirname(at)) {
+    for (let at = path.resolve(String(p)); below(at, path.resolve(home)) || below(at, path.resolve(volumes)); at = path.dirname(at)) {
       try { if (fs.lstatSync(at).isSymbolicLink()) links.push(path.join(realPath(path.dirname(at)), path.basename(at))); } catch { /* not there */ }
     }
   }
+  // The startup disk also appears among the external drives, as a link to "/". The link stays readable, so a path
+  // written through it works; what it leads to is under the other rules.
+  let startup = [];
+  try { startup = fs.readdirSync(vol).map((n) => path.join(vol, n)).filter((p) => { try { return fs.lstatSync(p).isSymbolicLink() && fs.realpathSync(p) === path.parse(p).root; } catch { return false; } }); } catch { /* no such folder */ }
   const readable = uniq([...own, ...(docker ? dockerReads : []), ...listed]);
-  // The folders above a readable one can be seen to exist (so a path can be walked), but not listed or read.
-  const above = new Set();
-  for (const p of [...readable, ...links]) for (let up = path.dirname(p); inside(up, h); up = path.dirname(up)) { above.add(up); if (up === h) break; }
+  // The folders above a readable one can be seen to exist (so a path can be walked), but not listed or read. The
+  // same goes for the drives folder itself, and the folders above a listed folder on an external drive.
+  const above = new Set([vol]);
+  const climb = (p, top) => { for (let up = path.dirname(p); inside(up, top); up = path.dirname(up)) { above.add(up); if (up === top) break; } };
+  for (const p of [...readable, ...links]) { climb(p, h); climb(p, vol); }
   // Listed folders pi must not write: every one but the project. One that holds the project is left to the
   // deny-everything rule; one inside the project, or anywhere else, is denied after the project is allowed, so
   // "readOnly" and other projects win over the project they sit in.
@@ -171,9 +182,11 @@ export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir() }
     ...(noWrite.length ? [`(deny file-write* ${sub(noWrite)})`] : []),
     ';; reading: nothing in the home folder, but pi\'s own folder, start-up files, tool folders and the listed folders',
     `(deny file-read* (subpath ${q(h)}))`,
+    ';; nor on an external drive, but in a listed folder there',
+    `(deny file-read* (subpath ${q(vol)}))`,
     `(allow file-read-metadata ${[...above].map((p) => rule(['literal', p])).join(' ')})`,
     `(allow file-read* ${sub(readable)})`,
-    ...(links.length ? [`(allow file-read* ${uniq(links).map((p) => rule(['literal', p])).join(' ')})`] : []),
+    ...(links.length || startup.length ? [`(allow file-read* ${uniq([...links, ...startup]).map((p) => rule(['literal', p])).join(' ')})`] : []),
     ';; programs that act outside the sandbox, Apple Events, and Docker',
     `(deny process-exec* ${NO_EXEC.map((p) => rule(['literal', p])).join(' ')})`,
     '(deny appleevent-send)',
@@ -301,7 +314,7 @@ export function snapshot(project, stampText, { init = false } = {}) {
   } catch (e) { return { why: e.message }; }
 }
 
-export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, now = () => Date.now() } = {}) {
+export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now() } = {}) {
   let job = null; // the hand-off pi is working on
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
   let approval = null; // an approval waiting for Send: { answer(text) }
@@ -477,7 +490,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         if (!settings.sandbox) notes.push('⚠ Sandbox is off: pi is not confined.');
         else {
           let why;
-          try { box = sandboxProfile({ home, project: settings.project, settings }); why = sandboxProblem(box.profile, sandboxExec); } catch (e) { why = e.message; }
+          try { box = sandboxProfile({ home, project: settings.project, settings, volumes }); why = sandboxProblem(box.profile, sandboxExec); } catch (e) { why = e.message; }
           if (why) { box = null; unconfined = true; notes.push(`⚠ The sandbox could not be applied (${why}). If you send, pi runs unconfined.`); }
           else {
             notes.push(`Sandboxed: pi can read ${box.reads} folder${box.reads === 1 ? '' : 's'} and write only in this project.`);

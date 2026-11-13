@@ -19,5 +19,6 @@ node_modules/
 .vscode/
 .idea/
 
-# Local-only build: the pretend home folder the sandbox tests make and remove
+# Local-only build: the pretend home and drives folders the sandbox tests make and remove
 showcase/tauri/sidecar/test/.sbx-*/
+showcase/tauri/sidecar/test/.vol-*/
