@@ -25,12 +25,12 @@ Last updated: 2026-11-13.
 | 9 | Fluidity: read-only trust, hands-free follow-ups, progress, routines, briefings | Done | `dff3fe6` |
 | 10 | `settings.json` written only by the owner | Done | `2ac8919`, `add0dd3` |
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
-| 12 | Home position on the desktop | Queued (Prompt A) | |
+| 12 | Home position on the desktop | Built, not merged; to be confirmed on screen | `home-position` |
 | 13 | Calendar blocks in Super Productivity | Queued (Prompt D) | |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
 | 16 | Natural local voice (Kokoro or Piper) | Later | |
-| 17 | Double clap, then speak (hands-free wake) | Later, last | |
+| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Later, last | |
 
 ## 1. Done
 
@@ -57,20 +57,32 @@ stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answ
 
 ## 2. In progress
 
-Nothing. Next is feature 12 (section 3).
+### 12. Home position (branch `home-position`)
+
+Built by Claude Code on the Mac from Prompt A, 2026-11-13. Not merged: the owner confirms it on screen first.
+
+- New setting `home`: `"bottom-left"` (default), `"bottom-right"`, `"top-left"`, `"top-right"`, or `{ "x", "y" }`
+  in screen points. Read only, like the rest of `settings.json`.
+- In the default and small sizes the character is on screen all the time at its home, clear of the Dock and the
+  menu bar. It leaves only as a drawing's pointer or to work in another app, and goes back afterwards. Bubbles
+  open beside it, whole on screen. The cursor size and "Type to ask" are unchanged.
+- A drag moves it until it next goes home; the setting never changes.
+- At rest the overlay page stops drawing altogether. Esc is no longer held from other apps while it only rests.
+- No change to the Rust shell or the Swift helpers: it rests at the home corner of whichever display the overlay
+  is on.
+- Tests: `home.test.mjs` covers the positioning rule, the setting, and the overlay's behaviour run without a
+  screen. How it looks is not tested.
+
+**Pending before merge:**
+
+- [ ] The owner looks at the screen: the list is in the report for this branch.
+- [ ] Review of the branch, then `git checkout local-only && git merge --ff-only home-position && git push`, rebuild.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
 parent folders of research work and data; list the OrbStack app's project under `docker`.
 
 ## 3. Queued, in this order
-
-### 12. Home position (Prompt A)
-
-The character rests at a fixed place on the desktop and leaves only while pointing something out or explaining.
-
-- Decided: lower left; setting `home` with corner names or coordinates; cursor size unchanged.
-- Builder: Claude Code, branch `home-position`. Needs the owner to look at the screen to confirm.
 
 ### 13. Calendar blocks in Super Productivity (Prompt D)
 
@@ -119,7 +131,7 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 | Idea | State | Notes |
 | --- | --- | --- |
 | Natural local voice | Later | Kokoro or Piper as a second voice engine; fits in 16 GB. Needs a tool install and a model download once. |
-| Double clap, then speak | Later, last | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. Open: whether a name ("Jarvis") must follow the clap. |
+| Double clap, then "Jarvis", then speak | Later, last | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word. |
 | Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
 | Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
 | Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
@@ -157,9 +169,17 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
   double clap as a wake gesture, as an idea only; no code copied. Hands-free wake will be a double clap followed by
   speech, never a word alone; this replaces the wake-word idea. Not taken: its cloud voice (ElevenLabs) and opening
   music or websites. Routines stay as they are, started by saying their name; no automatic triggers.
+- **2026-11-13.** Home position: the character is always on screen at home in the default and small sizes and
+  never hides when idle; the cursor size keeps upstream's behaviour. A drag moves it only until it next goes home
+  and never changes the setting. Work in another app counts as pointing something out. The voice bars stay at the
+  pointer. No change to the Rust shell: home is the corner of whichever display the overlay is on. At rest nothing
+  is drawn or animated, so the character doesn't blink and JARVIS doesn't turn while it rests.
+- **2026-11-13.** Hands-free wake is three steps: a double clap, then the wake name "Jarvis", then the request.
+  Neither the clap alone nor the name alone starts a conversation.
 
 ## 6. Still to test
 
+- [ ] Home position on screen: resting at each corner, bubbles, the trip out to a drawing and back, a second display.
 - [ ] Spoken progress on a long pi task.
 - [ ] Evening briefing and its "Daily log" note; morning briefing.
 - [ ] pi's sign-in refresh under the sandbox, after a day or two of use.
@@ -177,6 +197,8 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 - The never-look list goes by app name; a web page in a browser is just the browser.
 - The sandbox can't filter the network by site; pi must reach its provider.
 - The app is ad-hoc signed, so macOS asks for its permissions again after each rebuild.
+- With a home, the character covers a patch of the desktop that can't be clicked through (165 points across; 83 in
+  the small size), and "Ask About an Area" captures it if the area includes it.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange
   indicator throughout. Loud noises can set it off by mistake, which is why a clap only starts listening.
 

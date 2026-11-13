@@ -133,6 +133,15 @@
     let SAFE = R.safe;
     // The visible screen: overlay minus menu bar / Dock / taskbar.
     const bounds = () => ({ l: SAFE.left, t: SAFE.top, r: W - SAFE.right, b: H - SAFE.bottom });
+    // Local-only build: the home position (home.js). Once the host has sent the "home" setting, the default and small
+    // sizes rest at that spot, always on screen, and leave it only as a drawing's pen or to work in another app; they
+    // never pop up beside the cursor, follow it, step out of its way or hide when idle. The cursor size keeps
+    // upstream's behaviour throughout. on: the setting has arrived. r: the body's radius in its own size (as the pen
+    // it is cursor-sized). away: dragged off home, until it next goes back. dismissed: sent away with the summon
+    // key, until it's next shown. calm: seconds it has been still at rest. look: its gaze easing back to straight ahead.
+    const den = { on: false, at: 'bottom-left', r: 0, away: false, intro: false, dismissed: false, gone: 0, calm: 0, look: [0, 0], was: false };
+    const homing = () => den.on && !!R.homeSpot && k.userForm !== 'cursor';
+    const homeSpot = () => R.homeSpot(den.at, bounds(), den.r || k.R, R.origin);
 
     // Station: the sidekick keeps a home spot and idles around it. When the cursor works nearby it
     // scoots to the closest spot that's clear of the cursor; dropping it somewhere makes that home.
@@ -167,7 +176,7 @@
       if (fromX != null && spotOK(fromX, fromY)) return [fromX, fromY];
       return [(S.l + S.r) / 2, (S.t + S.b) / 2];
     };
-    const setStation = (x, y, byCursor = null) => { station.x = x; station.y = y; station.byCursor = byCursor; m.anchor = { x, y, r: k.R * 0.35 }; };
+    const setStation = (x, y, byCursor = null) => { station.x = x; station.y = y; station.byCursor = byCursor; m.anchor = { x, y, r: homing() ? 0 : k.R * 0.35 }; }; // Local-only build: at home it doesn't shuffle about
     // Pop up right beside the cursor, like a buddy at your elbow: to its right and a little below the tip
     // (the arrow's body points down-right), else its left, else above or below. Bubbles then open on the
     // side away from the cursor, so whatever it's pointing at stays visible.
@@ -316,7 +325,7 @@
     // A new request (talking, typing, summoning): come over to the cursor if it's somewhere else now.
     const comeToCursor = () => {
       const p = presence.ptr;
-      if (!p || !visible() || pen.held || m.dragging || m.flung) return;
+      if (!p || !visible() || pen.held || m.dragging || m.flung || homing()) return; // Local-only build: it stays at home
       if (station.byCursor && Math.hypot(p[0] - station.byCursor[0], p[1] - station.byCursor[1]) < k.R * 2.5) return;
       const [x, y] = besideCursor(fol.keep && fol.side < 0 ? 'left' : 'right');
       setStation(x, y, p.slice()); m.goTo(x, y);
@@ -331,6 +340,8 @@
     // Appear beside the cursor. With the cursor on another screen: at home, unless the cursor is there
     // now, then at the nearest spot that's clear of it.
     const spot = () => {
+      // Local-only build: with a home, that's where it appears.
+      if (homing()) { const p = homeSpot(); setStation(p[0], p[1]); den.away = false; return p; }
       const near = besideCursor();
       if (near) { setStation(near[0], near[1], presence.ptr.slice()); station.quietUntil = now + 4; return near; }
       const [cx, cy] = presence.cursor ?? [null, null];
@@ -341,6 +352,7 @@
       return p;
     };
     const ensureShown = () => {
+      den.dismissed = false; R.wake?.(); // Local-only build: something to do, so the frame loop runs again (core.js)
       presence.lastActive = now;
       if (visible()) return;
       fol.keep = false; // a new appearance picks its side afresh
@@ -785,7 +797,8 @@
     const hitBubble = (bb, x, y) => bb && !bb.closing && x >= bb.x.x && x <= bb.x.x + bb.w.x && y >= bb.y.x && y <= bb.y.x + bb.h.x;
 
     // Back beside the cursor wherever it is now (they may have moved on meanwhile), else where it was when taken.
-    const penHome = () => (presence.ptr && besideCursor(fol.side < 0 ? 'left' : 'right', presence.ptr)) ?? pen.home ?? [m.x, m.y];
+    // Local-only build: with a home, back there.
+    const penHome = () => (homing() ? homeSpot() : null) ?? (presence.ptr && besideCursor(fol.side < 0 ? 'left' : 'right', presence.ptr)) ?? pen.home ?? [m.x, m.y];
     // Working in another app (act_in_app): it turns into its cursor and blinks from spot to spot as the helper reports
     // them, then back beside the user's cursor. Held like a drawing's pen, so it no longer chases the real cursor when
     // a step borrows it. Clicks don't wait for it: when spots come faster than it hops, it skips to the newest one.
@@ -824,16 +837,27 @@
       // Act out an emote (wave, hype, upset, remind, motivate). Skipped while a tool is on stage.
       act: (name) => { if (tool) return false; ensureShown(); actUntil = now + (k.presence === 'in' ? 4.2 : 3.3); k.startAct(name); return true; },
       show: ({ summoned = false, variant } = {}) => {
+        den.dismissed = false; R.wake?.();
         presence.lastActive = now; presence.summoned = summoned;
         if (visible()) { if (summoned) comeToCursor(); return false; }
         const [x, y] = spot();
         return k.appear(variant ?? entrance(), x, y);
       },
-      hide: ({ instant = false, variant } = {}) => {
+      hide: ({ instant = false, variant, dismiss = false } = {}) => {
+        R.wake?.();
+        const penned = pen.held;
         if (pen.held) penRelease();
         if (b) close(b);
         if (tool) tool.finish(true);
         presence.summoned = false;
+        // Local-only build: with a home it stays on screen. What it was doing ends as above (let go as the pen, it
+        // goes back home); only the summon key (dismiss) or the host (instant: the overlay is changing screens)
+        // takes it off.
+        if (homing() && !instant && !dismiss) {
+          if (penned) { den.away = false; if (k.userForm && k.userForm !== k.form) k.morph?.(k.userForm); }
+          return false;
+        }
+        den.dismissed = dismiss && homing();
         return k.vanish(instant ? null : variant ?? nextVariant(), instant);
       },
       toggle: () => (visible() ? api.hide() : api.show({ summoned: true })),
@@ -847,6 +871,7 @@
         const reach = clamp((x - px) / r, -1.2, 1.2);
         if (visible()) k.vanish(null, true);
         setStation(px, py);
+        den.away = den.intro = true; // Local-only build: it goes home once it has said its hello
         presence.summoned = true; presence.lastActive = now;
         k.appear('drop', px, py);
         return api.say(text, { mood: 'happy', point: [reach, -1.75] });
@@ -904,6 +929,7 @@
           if (!pen.held) return;
           penRelease();
           api.place(hx, hy);
+          den.away = false; // Local-only build: home again (penHome), whatever it was dragged to before
           // It was following the cursor before the drawing: carry on, or it treats the cursor as in its way and hops off.
           if (pen.follow && presence.ptr) station.byCursor = presence.ptr.slice();
           presence.lastActive = now;
@@ -919,9 +945,17 @@
       },
       // Make (x, y) home and move there now, e.g. to restore where the user last left it.
       place: (x, y) => {
+        R.wake?.();
         setStation(x, y); m.x = x; m.y = y; m.vx = m.vy = 0; m.mode = 'rest'; m.rest = 1;
         station.moving = false; station.flee = 0; station.quietUntil = now + 1;
       },
+      // Local-only build: the "home" setting (a corner, or { x, y } in screen points), from the host.
+      setHome: (v) => { den.at = R.homeSetting ? R.homeSetting(v) : den.at; den.on = true; R.wake?.(); },
+      get homing() { return homing(); },
+      // At home with nothing to say or do: not something Esc should be held for (host.js).
+      get resting() { return homing() && visible() && !b && !tool && !pen.held; },
+      // Still, and has been for a second: nothing will change on screen until something wakes it (core.js).
+      atRest: () => den.calm > 1,
       setAuto: (on, idle) => { presence.auto = !!on; if (idle) presence.idle = idle; presence.lastActive = now; },
       get visible() { return visible(); },
       // The speech bubble is still typing its words out.
@@ -1023,7 +1057,7 @@
 
     const plugin = {
       api,
-      busy: () => !!(b || tool || pen.held),
+      busy: () => !!(b || tool || pen.held) || homing(), // Local-only build: no idle acts of its own while it rests at home
       // Held as the pen: clicks go through it to the app underneath (it may be parked right on the thing to click).
       ghost: () => pen.held,
       // A bubble is up: emotes keep their gestures but drop icons and particles, so the text stays readable.
@@ -1101,6 +1135,10 @@
       update: (dt, env) => {
         now += dt; W = env.w; H = env.h; SAFE = env.safe ?? R.safe;
         pen.reduced = !!env.reduced;
+        // Local-only build: the home position.
+        if (k.form === k.userForm) den.r = k.R;
+        const hm = homing();
+        if (hm !== den.was) { den.was = hm; den.away = false; presence.lastActive = now; if (hm) { station.byCursor = null; fol.on = false; } }
         if (pen.held) {
           presence.lastActive = now;
           const tw = pen.tw[0];
@@ -1120,7 +1158,11 @@
         presence.ptr = mx != null && mx >= 0 && my >= 0 && mx <= W && my <= H ? [mx, my] : null;
         if (popping) { if (presence.ptr) follow(env, dt); else { m.drive = null; fol.on = false; } }
         const onStage = stage();
-        if (presence.auto) {
+        // Local-only build: at home it's on screen all the time. It never leaves for being idle, and comes (back) on
+        // by itself: at the start, and after the overlay has changed screens.
+        den.gone = hm && k.presence === 'hidden' && !den.dismissed ? den.gone + dt : 0;
+        if (den.gone > 0.4) { den.gone = 0; const [x, y] = spot(); k.appear(entrance(), x, y); }
+        if (presence.auto && !hm) {
           const hover = env.mouse?.active && Math.hypot(env.mouse.x - m.x, env.mouse.y - m.y) < k.R * 1.5;
           const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;
           if (busyNow) presence.lastActive = now;
@@ -1128,6 +1170,7 @@
           if (k.presence === 'shown' && now - presence.lastActive > idleFor) { presence.summoned = false; k.vanish(nextVariant()); }
         }
         if (!onStage) {
+          den.calm = 0;
           // Bubbles closed by hide() still need to finish dissolving (unseen) so their promises settle.
           for (let i = dying.length - 1; i >= 0; i--) { dying[i].closing += dt; if (dying[i].closing > 0.35) { dying[i].closed.resolve(); dying.splice(i, 1); } }
           return;
@@ -1141,6 +1184,7 @@
           // A plain click (press without moving it) isn't a move.
           if (station.held && !held && station.from && Math.hypot(m.x - station.from[0], m.y - station.from[1]) > k.R * 0.5) {
             setStation(m.x, m.y); station.quietUntil = now + 2.5; station.moving = false;
+            if (hm) den.away = true; // Local-only build: it stays where it was dropped until it next goes home
           }
           station.held = held;
           // Popped up beside the cursor: it goes where the cursor goes (until it's dragged somewhere).
@@ -1149,7 +1193,8 @@
           else { fol.on = false; m.drive = null; }
           nativeStep(dt, self);
           // While drawing, stay put: the user's cursor is supposed to come over here.
-          if (!held && env.mouse && !pen.held && !station.byCursor) {
+          // Local-only build: at home it holds its spot, whatever the cursor does around it.
+          if (!held && env.mouse && !pen.held && !station.byCursor && !hm) {
             const cx = env.mouse.x, cy = env.mouse.y, dBody = Math.hypot(cx - m.x, cy - m.y);
             // Pointing right at it or its bubble means "I want this"; hovering around it means "you're in my way".
             const onIt = dBody < m.radius * 1.1 || (b && hitBubble(b, cx, cy));
@@ -1164,6 +1209,17 @@
               k.stopAct?.(); setStation(x, y); m.goTo(x, y);
               station.moving = true; station.flee = 0; k.S('hop'); k.sq.kick(4);
             }
+          }
+          // Local-only build: home is where it belongs unless it was dragged off. It glides there when it isn't (the
+          // Dock moved, its size changed, it was let go as the pen somewhere else, its hello is over).
+          if (hm && den.intro && !b) { den.intro = false; den.away = false; }
+          if (hm && !held && !pen.held && !den.away && !station.moving) {
+            const [hx, hy] = homeSpot();
+            if (station.x !== hx || station.y !== hy || station.byCursor) setStation(hx, hy);
+            const far = Math.hypot(m.x - hx, m.y - hy);
+            // Far off: the quick trip upstream uses to cross the screen, which ends near the spot. The last few px: a plain glide.
+            if (far > k.R * 0.4) { m.goTo(hx, hy); station.moving = true; station.rush = far > k.R * 6; station.flee = 0; }
+            else if (far > 6 && m.mode !== 'go') m.goTo(hx, hy);
           }
           if (station.moving && Math.hypot(m.x - station.x, m.y - station.y) < k.R * 0.4) { station.moving = station.rush = false; m.mode = 'rest'; m.rest = 0.6; }
         }
@@ -1203,6 +1259,13 @@
           step(dying[i], dt, env);
           if (dying[i].closing > 0.35) { dying[i].closed.resolve(); dying.splice(i, 1); }
         }
+        // Local-only build: resting at home with nothing going on, it looks straight ahead rather than at the cursor,
+        // and once it has been still for a second the frame loop stops until something wakes it (core.js).
+        const idle = hm && k.presence === 'shown' && !b && !dying.length && !tool && !pen.held && !m.dragging && !m.flung && !station.moving && now >= actUntil;
+        if (idle) { den.look = [R.damp(den.look[0], 0, 6, dt), R.damp(den.look[1], 0, 6, dt)]; face.lookX = den.look[0]; face.lookY = den.look[1]; }
+        else den.look = [face.lookX, face.lookY];
+        const still = idle && !!k.calmBody?.() && k.form === k.userForm && face.blinkT < 0 && m.speed < 2 && Math.abs(den.look[0]) < 0.02 && Math.abs(den.look[1]) < 0.02;
+        den.calm = still ? den.calm + dt : 0;
       },
       gridOver: () => {},
       // The area drawn off the grid (bubbles, their tails, the task tag), so the patch on screen covers it.

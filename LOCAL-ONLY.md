@@ -165,6 +165,7 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
   "toolFolders": ["~/.streamlit"],
   "toolFoldersOff": ["~/.npm"],
   "docker": ["~/Documents/cell-segmentation"],
+  "home": "bottom-left",
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
   "vault": "~/Documents/roamies-vault"
@@ -200,6 +201,10 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
   fully confined.
 - These five are read from this file only, which pi can neither read nor write. A file from before they existed
   works as if it had the defaults.
+- `home`: where the character rests on the desktop in its default and small sizes (see "Where the character
+  sits"): `"bottom-left"`, `"bottom-right"`, `"top-left"`, `"top-right"`, or a point such as
+  `{ "x": 300, "y": 700 }` in screen points, counted from the top-left corner of the main display. Default
+  `"bottom-left"`; anything else written there means the default. An edit shows from your next request.
 - `neverLook`: apps Roamies never screenshots, reads or works in (see Safeguards). `[]` switches the check off.
 - `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
@@ -217,6 +222,50 @@ briefings were given. Deleting it is safe.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
+
+## Where the character sits
+
+In its default and small sizes the character has a home: one fixed spot on the desktop, set by `home` in
+`settings.json`, where it is on screen all the time. Upstream's character was hidden until needed, popped up beside
+the pointer, followed it, and hopped out of its way; in these two sizes it now does none of that.
+
+- **It stays at home.** It doesn't hide when idle, come over to the pointer, follow it, or step aside when the
+  pointer comes near. Replies, questions, the listening bubble, the Send bubble and the task tag all open beside it
+  there, whole on the screen.
+- **It leaves only to point something out**: while it draws or explains on screen, and while it works in another
+  app for you, it turns into its small pointer and goes where that is. When that ends it goes back home and to its
+  own size. A drawing cut short (Esc, a new request) sends it home too.
+- **Dragging** moves it, and it stays where you drop it, also while it talks. It goes back home after its next
+  drawing, pointing or work in another app, when Roamies is restarted, or when the overlay changes display. A drag
+  never changes the setting.
+- **Dock and menu bar.** A corner is a corner of the visible desktop: inside the Dock, wherever it is, and under
+  the menu bar. A point that falls under either, or off the screen, is moved the least it takes to keep the whole
+  character visible. When the Dock moves or changes size, so does home.
+- **Displays.** There is one overlay, and it moves to the display your pointer is on when you ask for something, as
+  before. The character rests at the home corner of whichever display the overlay is on. A point is in screen
+  points across all displays; when the overlay is on a display that doesn't contain it, the character rests at the
+  nearest edge of that display.
+- **Clicks.** Only the character takes clicks, so it can be dragged: a circle around its centre, 165 points across
+  in the default size and 83 in the small one, a little wider than the body you see. A click or scroll there
+  doesn't reach what is underneath. Everything else on the desktop is clicked straight through, as before, and so
+  is the character itself while it is pointing something out.
+- **At rest nothing runs.** Once it has been still at home for a second, the page stops drawing altogether: no
+  frames, no animation, and its eyes look straight ahead rather than at the pointer. So at rest it doesn't blink,
+  and JARVIS doesn't turn. It doesn't doze off, yawn or snore, and plays no idle gestures of its own. It starts
+  again for a message from Roamies, the pointer on its body, a change of Dock or display, and stops again when it is
+  still. What keeps running is what ran before while it was hidden: the app reading the pointer's position, which is
+  how it knows a click is on the character, and a check every 150 ms of whether Esc should be held.
+- **Esc** is held from other apps only while there is something to stop or close, not while the character just
+  rests. Esc closes what it is saying; it no longer sends the character away.
+- **The show/hide key** (⌃⌥S unless you changed it) still sends it away and brings it back; "Show …" in the menu
+  brings it back too. Sent away, it also comes back for the next thing it has to say.
+- **Voice.** While you talk, the voice bars show beside the pointer as before; the answer appears at home.
+- **Type to ask** opens beside the pointer, as before.
+- **The cursor size** is unchanged: hidden until needed, beside the pointer, following it.
+- **Screenshots.** Nothing changes about when the screen is captured. Screenshots of the whole screen leave every
+  Roamies window out (macOS 14 and later), and a screenshot of a window shows only that window, so the character at
+  home is in neither. "Ask About an Area" uses macOS's own crosshair, which captures what you see: if the area you
+  drag includes the character, it is in the picture.
 
 ## Talking with it
 
@@ -297,11 +346,15 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
 - `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging.
-- `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question.
+- `showcase/roamies/home.js` (new): where the home spot is.
+- `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question; the home position.
+- `showcase/roamies/core.js`: the frame loop stops while the character rests at home; no dozing off there.
+- `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests.
+- `showcase/desktop.html`: loads `home.js`.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs` (new), `package.json`: tests.
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs` (new), `package.json`: tests.
 
 ## Build (macOS)
 

@@ -209,9 +209,10 @@ export function sandboxProblem(profile, exec = SANDBOX_EXEC) {
 
 // voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
 const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
+const HOME_CORNERS = ['bottom-left', 'bottom-right', 'top-left', 'top-right']; // the first is the default
 const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages']; // guard.mjs
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in.
-const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK, sandbox: true, readOnly: [], toolFolders: [], toolFoldersOff: [], docker: [] });
+const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK, sandbox: true, readOnly: [], toolFolders: [], toolFoldersOff: [], docker: [], home: 'bottom-left' });
 
 /** What Roamies itself keeps in ~/Documents/roamies-pi/state.json: the project chosen with switch_project, and the
  *  days the briefings were given. {} when there's none or it can't be read. */
@@ -262,7 +263,16 @@ export function loadSettings(home) {
   const folders = (v) => (Array.isArray(v) ? v.map(str).filter(Boolean).map((p) => expand(p, home)) : []);
   const off = new Set(folders(raw.toolFoldersOff));
   const toolFolders = [...new Set([...TOOL_FOLDERS.map((p) => expand(p, home)).filter((p) => !off.has(p)), ...folders(raw.toolFolders)])];
-  return { dir, file, raw, project, fileProject, projects, sandbox: raw.sandbox !== false, readOnly: folders(raw.readOnly), toolFolders, docker: folders(raw.docker), vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
+  // or { x, y } in screen points. Anything else is the default corner.
+  const corner = str(raw.home).toLowerCase(), point = raw.home && typeof raw.home === 'object' && Number.isFinite(raw.home.x) && Number.isFinite(raw.home.y) && typeof raw.home.x === 'number' && typeof raw.home.y === 'number';
+  const homeSpot = point ? { x: raw.home.x, y: raw.home.y } : HOME_CORNERS.includes(corner) ? corner : HOME_CORNERS[0];
+  return { dir, file, raw, home: homeSpot, project, fileProject, projects, sandbox: raw.sandbox !== false, readOnly: folders(raw.readOnly), toolFolders, docker: folders(raw.docker), vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+}
+
+/** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
+export function homeFor(home = os.homedir()) {
+  try { return loadSettings(home).home; } catch { return HOME_CORNERS[0]; }
 }
 
 /** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */

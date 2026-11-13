@@ -549,6 +549,7 @@
       W = innerWidth; H = innerHeight; dpr = Math.min(2, devicePixelRatio || 1);
       cw = ch = 0;
       for (const o of list) { o.env.w = W; o.env.h = H; o.env.dpr = dpr; o.c.resize?.(o.env); }
+      R.wake?.(); // Local-only build: the frame loop may be stopped (a roamie at rest at home, below)
     };
     addEventListener('resize', resize);
     resize();
@@ -576,7 +577,10 @@
         if (!pointer.active || nowMs - pointer.last > 250) setPointer(x, y);
         pointer.active = true; pointer.last = nowMs;
       } else if (x !== pointer.x || y !== pointer.y) setPointer(x, y);
-      return !!down || list.some((o) => o.c.mover.dragging || o.c.hit?.(x, y)) || !!hitAt(x, y) || !!R.panelHit?.(x, y) || !!R.askBarHit?.(x, y) || !!R.inkHit?.(x, y);
+      // Local-only build: the cursor on something of ours starts the frame loop again if it was stopped (below).
+      const on = !!down || list.some((o) => o.c.mover.dragging || o.c.hit?.(x, y)) || !!hitAt(x, y) || !!R.panelHit?.(x, y) || !!R.askBarHit?.(x, y) || !!R.inkHit?.(x, y);
+      if (on) R.wake?.();
+      return on;
     };
     // Linux hosts shape the window's click area from these instead of following the cursor (host.js): ptr's answer
     // for a point without moving the pointer, and the patch of screen the canvas covers now (null: nothing drawn).
@@ -592,6 +596,7 @@
     }, { passive: false });
     addEventListener('pointerdown', (e) => {
       if (!ours(e)) return;
+      R.wake?.(); // Local-only build: a press starts the frame loop again if it was stopped (below)
       const b = list.find((q) => q.c.hit?.(e.clientX, e.clientY));
       if (b) { b.c.press?.(e.clientX, e.clientY); return; }
       const o = hitAt(e.clientX, e.clientY);
@@ -616,7 +621,15 @@
     canvas.addEventListener('pointercancel', () => { if (down) down.o.c.mover.dragging = false; down = null; });
 
     let last = performance.now(), skip = false, blank = false, nap = 0, lastSig = '';
-    R.wake = () => { if (nap) { clearTimeout(nap); nap = 0; requestAnimationFrame(frame); } };
+    // Local-only build: rested: the frame loop is stopped altogether, because the only thing on screen is a roamie
+    // resting at its home (agent.js atRest) and its picture is already painted. Nothing runs until wake(): a message
+    // from the host, the cursor or a press on something of ours, a resize, or the agent being given something to do.
+    let rested = false;
+    R.wake = () => {
+      if (nap) { clearTimeout(nap); nap = 0; requestAnimationFrame(frame); }
+      else if (rested) { rested = false; last = performance.now(); requestAnimationFrame(frame); }
+    };
+    R.rested = () => rested;
     const replay = (now, dt) => {
       if (!trail.length) return;
       const at = now - LAG;
@@ -654,7 +667,9 @@
       blank = gone;
       for (const o of list) {
         const { env, c } = o, m = c.mover;
-        env.t += dt; env.reduced = reducedMQ.matches; env.sleepy = idle > 12 ? 1 : 0;
+        // Local-only build: a roamie with a home is on screen all day, so it doesn't doze off (and yawn and snore)
+        // whenever the cursor has been still for a while.
+        env.t += dt; env.reduced = reducedMQ.matches; env.sleepy = idle > 12 && !c.agent?.homing ? 1 : 0;
         env.mouse.active = pointer.active && idle < 6;
         env.mouse.x = pointer.x; env.mouse.y = pointer.y; env.mouse.vx = pointer.vx; env.mouse.vy = pointer.vy;
         env.mouse.inside = env.mouse.active && pointer.x >= 0 && pointer.y >= 0 && pointer.x <= W && pointer.y <= H;
@@ -693,6 +708,8 @@
       }
       // Nothing on screen (drawn natively, or off it): just the bookkeeping, 30 times a second, off the display clock.
       if (!shown && !list.some((o) => o.c.mover.dragging)) { nap = setTimeout(() => { nap = 0; requestAnimationFrame(frame); }, 33); return; }
+      // Local-only build: everyone at rest at home and the canvas already showing exactly this: stop here (see rested).
+      if (same && !down && list.every((o) => o.c.agent?.atRest?.())) { rested = true; return; }
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

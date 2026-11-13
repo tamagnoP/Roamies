@@ -37,7 +37,7 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, gateTools, voiceFor } from './pi.mjs';
+import { createPi, gateTools, homeFor, voiceFor } from './pi.mjs';
 import { createNotes } from './notes.mjs';
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
@@ -820,6 +820,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   menu();
   controller = new AbortController();
   agent.setSignal(controller.signal);
+  ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: an edit of "home" in settings.json shows from the next request
   ui({ kind: 'agent', e: { type: 'start' } });
   // Voice: the socket opens now, while the model thinks; sentences are spoken as soon as each is ready.
   if (VOICE_ON()) speech.setVoice(lookVoice()); // local-only build: picks up a voice changed in the settings file
@@ -1762,6 +1763,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     retired.then((notes) => { if (notes.length) { retired = Promise.resolve([]); say(`${notes.join(' ')} Do it on the Model page in ${PANEL}.`, 'concerned'); } });
     ui({ kind: 'sound', on: config.sound });
     ui({ kind: 'size', size: sizeNow() });
+    ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
     if (config.onboarded) ui({ kind: 'greet' });
   } else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));

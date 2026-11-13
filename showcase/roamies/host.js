@@ -11,7 +11,10 @@
   if (Roamie.ink) { Roamie.ink.send = send; Roamie.ink.invoke = (cmd, args) => invoke(cmd, args).catch(() => {}); }
   window.__roamieClick = (x, y) => Roamie.ink?.click(x, y);
 
-  window.__roamieSafe = (s) => Roamie.setSafe?.(s);
+  // Local-only build: a change (the Dock moved, another screen) starts the frame loop again if it was stopped, so a
+  // Sidekick resting at home moves to where home is now (core.js, agent.js).
+  let safeWas = '';
+  window.__roamieSafe = (s) => { Roamie.setSafe?.(s); const now = JSON.stringify(s ?? null); if (now !== safeWas) { safeWas = now; Roamie.wake?.(); } };
   // macOS: the voice helper can draw the cursor-form sidekick while it just follows the cursor (agent.js nativeStep,
   // voice/buddy.swift). Not available (Windows, helper not running): the page keeps drawing it.
   let buddyOff = /Mac/.test(navigator.platform) ? 0 : Infinity;
@@ -408,6 +411,8 @@
     if (held) { held.q.push(m); return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
     if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }
+    // Local-only build: where it rests in its default and small sizes (the "home" setting; home.js, agent.js).
+    if (m.kind === 'home') { getAgent()?.setHome?.(m.home); return; }
     if (m.kind === 'look') {
       for (const t of Roamie.tiles ?? []) t.creature.setLook?.(m.look);
       field.setAttribute('aria-label', `Message for ${NAMES[m.look] ?? NAMES.classic}`);
@@ -433,7 +438,7 @@
       // ⌃⌥S toggles; the menu's Show Sidekick only ever shows.
       const a = getAgent();
       if (m.show || !a.visible) { if (a.show({ summoned: true })) a.act('wave'); }
-      else a.hide();
+      else a.hide({ dismiss: true }); // Local-only build: the key still sends it away, also from its home
       return;
     }
     if (m.kind === 'say') { if (!ask || ask.bar) getAgent().say(m.text, { mood: m.mood ?? null }); } // the field leaves the bubble free
@@ -451,7 +456,8 @@
   // way out once the Roamie has gone). Cards left on screen have their own close button and don't hold Esc. The
   // reminders card does while it shows (it goes by itself in a few seconds).
   // A voice turn counts too: on macOS the sidekick steps away while the mic is on and until the answer shows.
-  const up = () => !!(getAgent()?.visible || ask || Roamie.panel?.isOpen || Roamie.ink?.playing || Roamie.ink?.loose || Roamie.ink?.reminding || hearing || waveTurn || Roamie.voiceOut?.playing());
+  // Local-only build: resting at its home with nothing to say or do doesn't count, or Esc would be held all day.
+  const up = () => !!((getAgent()?.visible && !getAgent()?.resting) || ask || Roamie.panel?.isOpen || Roamie.ink?.playing || Roamie.ink?.loose || Roamie.ink?.reminding || hearing || waveTurn || Roamie.voiceOut?.playing());
   function onEsc() {
     dropAutoListen();
     const a = getAgent();
