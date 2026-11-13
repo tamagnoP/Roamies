@@ -23,14 +23,14 @@ Last updated: 2026-11-13.
 | 7 | Natural pi relay (spoken gist, full reply on screen) | Done | `0263f83` |
 | 8 | Safeguards: workspace, undo snapshots, never-look list, log retention | Done | `feb212b` |
 | 9 | Fluidity: read-only trust, hands-free follow-ups, progress, routines, briefings | Done | `dff3fe6` |
-| 10 | `settings.json` written only by the owner | Built, not merged | `pi-sandbox` `2ac8919`, `add0dd3` |
-| 11 | pi confined by a macOS sandbox | Built, three fixes done, not merged | `pi-sandbox` `0213e20` and the fixes commit |
+| 10 | `settings.json` written only by the owner | Done | `2ac8919`, `add0dd3` |
+| 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Queued (Prompt A) | |
 | 13 | Calendar blocks in Super Productivity | Queued (Prompt D) | |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
 | 16 | Natural local voice (Kokoro or Piper) | Later | |
-| 17 | Wake word | Later, last | |
+| 17 | Double clap, then speak (hands-free wake) | Later, last | |
 
 ## 1. Done
 
@@ -44,37 +44,24 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `0263f83` | 2026-11-11 | Notes vault (`~/Documents/roamies-vault`): create, append, search, read; never change or delete. pi's steps worded naturally; with spoken replies, Roamies gives the gist and pi's full reply then goes on screen. |
 | `feb212b` | 2026-11-12 | pi's default project moved to `roamies-pi/workspace`; the settings folder can't be a project. Git undo snapshot before every hand-off that can edit. Warnings in the Send bubble. Never-look list. Hand-off records deleted after 30 days. |
 | `dff3fe6` | 2026-11-12 | Read-only hand-offs send themselves after a countdown. Microphone opens for answers to pi's questions (with Auto Listen on). Spoken progress on long tasks. Routines. Morning and evening briefings. `CLAUDE.md` added. |
+| `2ac8919` | 2026-11-12 | `switch_project` stores its choice in `state.json`; a test fails on any write to `settings.json` after first-time creation. |
+| `add0dd3` | 2026-11-12 | A hand edit of `"project"` in `settings.json` wins over an earlier voice switch. |
+| `0213e20` | 2026-11-12 | pi, its login shell and everything they start run under `sandbox-exec`. Writes only in the project, temp folders, and pi's sessions, sign-in file and lock folders. Reads in the home folder only for pi's own folder, start-up files, tool folders, and the folders listed under `projects` and `readOnly`. Always-blocked list. `security`, `osascript` and `open` can't be run. Docker and OrbStack sockets blocked unless the project is listed under `docker`. New settings: `sandbox`, `readOnly`, `toolFolders` (adds to the built-in list), `toolFoldersOff`, `docker`. Two real hand-offs (read-only and edit) passed under it. |
+| `1dc723c` | 2026-11-13 | The three fixes from the review of 2026-11-12: `~/.cargo/credentials.toml`, `~/.cargo/credentials` and `~/.config/git/credentials` on the blocked list; reading under `/Volumes` denied unless a folder there is listed; `~/.orbstack/shell` readable in Docker-allowed projects. |
+
+Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
+`local-only` by fast-forward on 2026-11-13.
 
 Confirmed working on the MacBook Air (M3): voice in and out, Send by click and by voice, notes, pi relay, countdown,
 stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answers, undo snapshots.
 
 ## 2. In progress
 
-### pi sandbox and owner-only settings (branch `pi-sandbox`)
+Nothing. Next is feature 12 (section 3).
 
-Built by Claude Code on the Mac. Reviewed 2026-11-12; approved subject to three fixes.
-
-- `2ac8919`: `switch_project` stores its choice in `state.json`; a test fails on any write to `settings.json`
-  after first-time creation.
-- `add0dd3`: a hand edit of `"project"` in `settings.json` wins over an earlier voice switch.
-- `0213e20`: pi, its login shell and everything they start run under `sandbox-exec`. Writes only in the project,
-  temp folders, and pi's sessions, sign-in file and lock folders. Reads in the home folder only for pi's own
-  folder, start-up files, tool folders, and the folders listed under `projects` and `readOnly`. Always-blocked list.
-  `security`, `osascript` and `open` can't be run. Docker and OrbStack sockets blocked unless the project is listed
-  under `docker`. Two real hand-offs (read-only and edit) passed under it.
-
-New settings: `sandbox`, `readOnly`, `toolFolders` (adds to the built-in list), `toolFoldersOff`, `docker`.
-
-**Pending before merge:**
-
-- [x] Add `~/.cargo/credentials.toml`, `~/.cargo/credentials` and `~/.config/git/credentials` to the blocked list.
-- [x] Deny reading under `/Volumes` unless a folder there is listed.
-- [x] In Docker-allowed projects, allow reading `~/.orbstack/shell`.
-- [ ] Re-review of the branch, then `git checkout local-only && git merge --ff-only pi-sandbox && git push`, rebuild.
-
-**To do in `settings.json` after the merge:** add the literature tool folders to `toolFolders`
-(`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the parent folders
-of research work and data; list the OrbStack app's project under `docker`.
+**To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
+`toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
+parent folders of research work and data; list the OrbStack app's project under `docker`.
 
 ## 3. Queued, in this order
 
@@ -132,7 +119,7 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 | Idea | State | Notes |
 | --- | --- | --- |
 | Natural local voice | Later | Kokoro or Piper as a second voice engine; fits in 16 GB. Needs a tool install and a model download once. |
-| Wake word | Later, last | "Jarvis, …" with no keys. On-device only; means an always-listening microphone and new Swift code. |
+| Double clap, then speak | Later, last | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. Open: whether a name ("Jarvis") must follow the clap. |
 | Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
 | Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
 | Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
@@ -166,6 +153,10 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 - **2026-11-12.** Search mode approved in principle, as an isolated mode (Prompt C).
 - **2026-11-13.** Brave profile: the middle option (search-site cookies kept, the rest wiped per session, weekly
   renewal). Calendar: no gap between blocks; working day extendable. Order of work: A, D, B, then search mode.
+- **2026-11-13.** Reviewed `hectorg2211/jarvis` (a Windows double-clap script, no licence file). Taken from it: the
+  double clap as a wake gesture, as an idea only; no code copied. Hands-free wake will be a double clap followed by
+  speech, never a word alone; this replaces the wake-word idea. Not taken: its cloud voice (ElevenLabs) and opening
+  music or websites. Routines stay as they are, started by saying their name; no automatic triggers.
 
 ## 6. Still to test
 
@@ -186,6 +177,8 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 - The never-look list goes by app name; a web page in a browser is just the browser.
 - The sandbox can't filter the network by site; pi must reach its provider.
 - The app is ad-hoc signed, so macOS asks for its permissions again after each rebuild.
+- Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange
+  indicator throughout. Loud noises can set it off by mistake, which is why a clap only starts listening.
 
 ---
 
