@@ -196,7 +196,8 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 - A project with Docker allowed is not fully confined.
 - The never-look list goes by app name; a web page in a browser is just the browser.
 - The sandbox can't filter the network by site; pi must reach its provider.
-- The app is ad-hoc signed, so macOS asks for its permissions again after each rebuild.
+- The app is ad-hoc signed, so after each rebuild its screen recording and Accessibility permissions show as on but
+  don't apply; the install step resets both (`tccutil reset`) and the owner grants them again.
 - With a home, the character covers a patch of the desktop that can't be clicked through (165 points across; 83 in
   the small size), and "Ask About an Area" captures it if the area includes it.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange

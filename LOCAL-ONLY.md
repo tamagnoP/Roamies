@@ -374,8 +374,16 @@ cargo install tauri-cli --version "^2" --locked
 open src-tauri/target/release/bundle/macos
 ```
 
-Drag `Roamies.app` to Applications. The app is ad-hoc signed, so macOS asks for its permissions again after each
-rebuild.
+Drag `Roamies.app` to Applications. The app is ad-hoc signed, so after each rebuild macOS keeps the old permission:
+System Settings shows it as on, but it no longer applies. Before opening the new build, reset both:
+
+```bash
+tccutil reset ScreenCapture com.kenkai.roamies
+tccutil reset Accessibility com.kenkai.roamies
+```
+
+Then grant both again in System Settings > Privacy & Security (Screen & System Audio Recording, and Accessibility)
+and reopen Roamies.
 
 ## The voice
 

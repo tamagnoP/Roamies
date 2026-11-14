@@ -51,8 +51,21 @@ Run from `showcase/tauri`.
 ./build.sh                      # full app build, output in src-tauri/target/release/bundle/macos
 ```
 
-To install a build: quit Roamies, replace `/Applications/Roamies.app` with the built one, reopen. The app is ad-hoc
-signed, so macOS asks for its permissions again after each rebuild. Ask before reinstalling.
+To install a build (ask before reinstalling):
+
+1. Quit Roamies and replace `/Applications/Roamies.app` with the built one.
+2. Reset its two screen permissions:
+
+   ```bash
+   tccutil reset ScreenCapture com.kenkai.roamies
+   tccutil reset Accessibility com.kenkai.roamies
+   ```
+
+3. Tell the owner to grant both again (System Settings > Privacy & Security > Screen & System Audio Recording, and
+   Accessibility) and to reopen Roamies.
+
+The app is ad-hoc signed, so a rebuilt app keeps a stale grant: macOS shows the switch as on but does not apply it.
+The reset is what makes macOS ask again.
 
 ## How to make a change
 
