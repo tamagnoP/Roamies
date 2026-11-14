@@ -8,7 +8,7 @@ rules for working on it; this file tracks the work itself.
 same commit: move it between sections, fill in the branch and commit, and add a dated line to the decisions log when
 something is decided or reversed.
 
-Last updated: 2026-11-13.
+Last updated: 2026-11-14.
 
 ## Status at a glance
 
@@ -25,12 +25,18 @@ Last updated: 2026-11-13.
 | 9 | Fluidity: read-only trust, hands-free follow-ups, progress, routines, briefings | Done | `dff3fe6` |
 | 10 | `settings.json` written only by the owner | Done | `2ac8919`, `add0dd3` |
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
-| 12 | Home position on the desktop | Built, not merged; to be confirmed on screen | `home-position` |
+| 12 | Home position on the desktop | Done | `f8ad515` |
 | 13 | Calendar blocks in Super Productivity | Queued (Prompt D) | |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
 | 16 | Natural local voice (Kokoro or Piper) | Later | |
-| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Later, last | |
+| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Later | |
+| 18 | Daily note (plan, log, review) | Queued (Prompt E), after 13 | |
+| 19 | Roles for pi: coder and reviewer | Queued (Prompt F, draft), after 14 | |
+| 20 | Literature toolbox and roles | Held, not designed | |
+| 21 | One orb as the only look | Idea, not designed | |
+
+Build order: 13, 18, 14, 19, 16, 17, 15, then 20 and 21.
 
 ## 1. Done
 
@@ -49,43 +55,32 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `0213e20` | 2026-11-12 | pi, its login shell and everything they start run under `sandbox-exec`. Writes only in the project, temp folders, and pi's sessions, sign-in file and lock folders. Reads in the home folder only for pi's own folder, start-up files, tool folders, and the folders listed under `projects` and `readOnly`. Always-blocked list. `security`, `osascript` and `open` can't be run. Docker and OrbStack sockets blocked unless the project is listed under `docker`. New settings: `sandbox`, `readOnly`, `toolFolders` (adds to the built-in list), `toolFoldersOff`, `docker`. Two real hand-offs (read-only and edit) passed under it. |
 | `1dc723c` | 2026-11-13 | The three fixes from the review of 2026-11-12: `~/.cargo/credentials.toml`, `~/.cargo/credentials` and `~/.config/git/credentials` on the blocked list; reading under `/Volumes` denied unless a folder there is listed; `~/.orbstack/shell` readable in Docker-allowed projects. |
 
+| `f8ad515` | 2026-11-13 | Feature 12, home position. New setting `home`: `"bottom-left"` (default), `"bottom-right"`, `"top-left"`, `"top-right"`, or `{ "x", "y" }` in screen points. In the default and small sizes the character is on screen all the time at its home, clear of the Dock and the menu bar; it leaves only as a drawing's pointer or to work in another app, and goes back afterwards. Bubbles open beside it, whole on screen. The cursor size and "Type to ask" are unchanged. A drag moves it until it next goes home; the setting never changes. At rest the overlay page stops drawing altogether, and Esc is no longer held from other apps. No change to the Rust shell or the Swift helpers. `home.test.mjs` covers the positioning rule, the setting, and the overlay's behaviour run without a screen. |
+| `c23db76` | 2026-11-13 | Never-look fix: the "what's in front" line is hidden by the front app's name alone. Before, a word in the line's own fixed wording ("messages") hid every app. |
+| `85a86c5` | 2026-11-13 | Install step: after a build is copied to `/Applications`, the ScreenCapture and Accessibility permissions are reset with `tccutil` and the owner grants both again. |
+| `7a48e05` | 2026-11-13 | Settings reference: `settings.default.json` is written beside `settings.json` at start-up (every setting with its default, and under `reference` what stays in code) and never read; missing or unusable settings are named once per start-up in a bubble; the sizes, times and counts became settings under `limits`. |
+
 Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
 `local-only` by fast-forward on 2026-11-13.
+
+Feature 12 was built on `home-position` by Claude Code on the Mac from Prompt A, and merged into `local-only` by
+fast-forward on 2026-11-14 with the owner's approval. The never-look fix, the permission reset in the install step
+and the settings reference file were added on the same branch, each as its own commit, and merged with it.
 
 Confirmed working on the MacBook Air (M3): voice in and out, Send by click and by voice, notes, pi relay, countdown,
 stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answers, undo snapshots.
 
 ## 2. In progress
 
-### 12. Home position (branch `home-position`)
-
-Built by Claude Code on the Mac from Prompt A, 2026-11-13. Not merged: the owner confirms it on screen first.
-
-- New setting `home`: `"bottom-left"` (default), `"bottom-right"`, `"top-left"`, `"top-right"`, or `{ "x", "y" }`
-  in screen points. Read only, like the rest of `settings.json`.
-- In the default and small sizes the character is on screen all the time at its home, clear of the Dock and the
-  menu bar. It leaves only as a drawing's pointer or to work in another app, and goes back afterwards. Bubbles
-  open beside it, whole on screen. The cursor size and "Type to ask" are unchanged.
-- A drag moves it until it next goes home; the setting never changes.
-- At rest the overlay page stops drawing altogether. Esc is no longer held from other apps while it only rests.
-- No change to the Rust shell or the Swift helpers: it rests at the home corner of whichever display the overlay
-  is on.
-- Tests: `home.test.mjs` covers the positioning rule, the setting, and the overlay's behaviour run without a
-  screen. How it looks is not tested.
-
-Also on this branch, each its own commit and not part of feature 12: the never-look fix (`c23db76`), the install
-step (`85a86c5`), and the settings reference (`settings.default.json`, the `limits` settings and the start-up bubble).
-
-**Pending before merge:**
-
-- [ ] The owner looks at the screen: the list is in the report for this branch.
-- [ ] Review of the branch, then `git checkout local-only && git merge --ff-only home-position && git push`, rebuild.
+Nothing is in progress.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
 parent folders of research work and data; list the OrbStack app's project under `docker`.
 
 ## 3. Queued, in this order
+
+Build order: 13, 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
 
 ### 13. Calendar blocks in Super Productivity (Prompt D)
 
@@ -99,6 +94,15 @@ Roamies keeps its own to-do list and uses Super Productivity only as the calenda
 - Before it can work: enable Settings > Misc > Enable local REST API in Super Productivity.
 - Builder: Claude Code, branch `sp-calendar`.
 
+### 18. Daily note (Prompt E)
+
+One note per day at Daily/YYYY-MM-DD.md in the vault, built by code and only ever added to. Three parts: Plan
+(morning: tasks scheduled or due today, plus tasks that need a new time), Log (a line when a task is finished and
+when a note is taken, with notes filed under their task), Review (evening: each planned task as done, missed or
+still open, plus a two-sentence summary). In the evening Roamies asks, for each missed task, when to do it instead;
+it never picks a time itself. Reminders, timers and check-ins are not tasks. pi's activity is left out; it stays in
+the records folder. Replaces the "Daily log" note.
+
 ### 14. Roamies reads files in permitted folders (Prompt B)
 
 Read-only access for Roamies inside the folders listed under `projects` and `readOnly`: read, list, find by name,
@@ -109,7 +113,17 @@ search text. Includes reading a project's `TODO.md` on request; only pi writes t
 - Changes guarantee 2 in `CLAUDE.md`: Roamies still never changes files, but can read in permitted folders.
 - Builder: Claude Code, branch `roamies-read`.
 
+### 19. Roles for pi (Prompt F, draft)
+
+A role is pi started with its own instructions and skills, its own permissions and its own thinking level. Roamies
+picks the role; the Send bubble names it. Two to start: coder (the owner's Python skills, can edit, high thinking)
+and reviewer (the owner's review skills, fresh session, cannot write). Anything else goes to pi as today. After the
+coder finishes, Roamies offers a review, and a yes brings a second Send bubble. Roles never start each other.
+Prompt F is a draft until the owner has shown the skills.
+
 ### 15. Search mode (Prompt C, draft, still being discussed)
+
+Built after 16 and 17.
 
 Roamies researches on the web in a browser of its own, visibly, and saves findings as new notes in the vault.
 
@@ -127,14 +141,16 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 - Changes guarantee 1 in `CLAUDE.md`: in search mode, queries and page visits leave the Mac.
 - Still to discuss: how a search is started and steered by voice; what a saved finding looks like in Obsidian;
   which sites are allowed; whether to install Little Snitch rules for the browser first.
-- Builder: Claude Code, branch `search-mode`, after Prompt B.
+- Builder: Claude Code, branch `search-mode`, after the natural voice (16) and the hands-free wake (17).
 
 ## 4. Later and parked
 
+Features 16 and 17 are built before search mode (15); 20 and 21 come last.
+
 | Idea | State | Notes |
 | --- | --- | --- |
-| Natural local voice | Later | Kokoro or Piper as a second voice engine; fits in 16 GB. Needs a tool install and a model download once. |
-| Double clap, then "Jarvis", then speak | Later, last | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word. |
+| 16. Natural local voice | Later | Kokoro or Piper as a second voice engine; fits in 16 GB. Needs a tool install and a model download once. |
+| 17. Double clap, then "Jarvis", then speak | Later | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word. |
 | Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
 | Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
 | Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
@@ -142,6 +158,18 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
 | Write access to more than one project per task | Not needed | Writes stay in the current project and its subfolders. |
 | Local model for Roamies | Tested, set aside | See the decisions log, 2026-11-11. |
 | Hard lock on `settings.json` (`chflags uchg`) | Known, not used | Optional extra; the code change and sandbox are the real protection. |
+
+### 20. Literature toolbox and roles
+
+Held until everything else is done, then designed. The owner's scripts (GROBID in OrbStack for parsing PDFs,
+semantic database, RAG, knowledge graph, keyword search) become tools that one or more literature roles call. Open:
+how many roles, and which work is a tool and which is a role.
+
+### 21. One orb as the only look
+
+Replace the characters with a single ring of particles that responds to state (resting, listening, thinking,
+speaking, pi working), and rework the look of the app around it. An original design. Would also settle how much of
+the screen blocks clicks.
 
 ## 5. Decisions log
 
@@ -187,6 +215,16 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
   the owner grants again.
 - **2026-11-13.** Hands-free wake is three steps: a double clap, then the wake name "Jarvis", then the request.
   Neither the clap alone nor the name alone starts a conversation.
+- **2026-11-13.** Daily note: named Daily/YYYY-MM-DD; missed tasks are rescheduled only by the owner's answer each
+  evening; pi's activity is not in the note.
+- **2026-11-14.** Build order changed: search mode moves after the natural voice and the hands-free wake.
+- **2026-11-14.** pi gets roles instead of one general agent, starting with coder and reviewer. Work with a fixed
+  shape (calendar, daily note) stays as code inside Roamies and is not a role. Roles never start each other; every
+  hand-off still needs the owner's send.
+- **2026-11-14.** No setting has a value the owner cannot see: settings.default.json is the reference, missing
+  settings are announced at start-up, and the sandbox's blocked list stays in code.
+- **2026-11-14.** Home position test 9 (clicks near the character are blocked) accepted by the owner, pending the
+  orb redesign.
 
 ## 6. Still to test
 
@@ -213,6 +251,8 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
   don't apply; the install step resets both (`tccutil reset`) and the owner grants them again.
 - With a home, the character covers a patch of the desktop that can't be clicked through (165 points across; 83 in
   the small size), and "Ask About an Area" captures it if the area includes it.
+- Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Not yet known whether
+  upstream has the same growth. Quitting and reopening Roamies clears it. Needs a diagnosis.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange
   indicator throughout. Loud noises can set it off by mistake, which is why a clap only starts listening.
 
