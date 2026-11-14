@@ -26,7 +26,7 @@ import {
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
 import { EMOTES, EchoFilter, ReplyStream } from './reply.mjs';
 import { downloadModel, isReady, modelDir, sizeLabel, totalBytes } from './voicemodel.mjs';
-import { createTools, expand, fitImage, imageBlock, winOpen } from './tools.mjs';
+import { createTools, expand, fitImage, frontLine, imageBlock, run as runHelper, winOpen } from './tools.mjs'; // Local-only build: frontLine and run, for whereFront
 import { describeMarks } from './marks.mjs';
 import { faviconFor } from './draw.mjs';
 import { QUESTIONS, openNote, answerTurn, wantsSkip, endsChat, splitTurn, plain, stripNote, tourBeats, goalFrom, showcaseBeats } from './intro.mjs';
@@ -249,7 +249,7 @@ const userName = (() => {
 // ---------- tools ----------
 // The open request's voice, if replies are spoken: draw's beat lines are said on it, in order with the reply.
 let turnVoice = null;
-const { tools, hands, whereNow, ink, nextTurn } = createTools({
+const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: whereNow is not used here; whereFront takes its place
   allowActions: () => config.allowActions, ui, ask, openUrl, userName,
   speak: (line) => { if (!turnVoice) return false; turnVoice.say(line); return true; },
   onHandoff: (task) => { activity.handoff(task); panel(); },
@@ -422,7 +422,7 @@ The <live-state> block at the top of the user's newest message is the current st
 
 // Made once per request. `context` (the latest user message) picks which facts are relevant. → { turn, memory }
 let lastFactIds = [];
-let frontNow = ''; // set just before each request (whereNow)
+let frontNow = ''; // set just before each request (whereFront)
 const livePrompt = (context = '') => {
   const facts = pickFacts(context, 40), total = listFacts().length;
   lastFactIds = facts.map((f) => f.id);
@@ -807,6 +807,15 @@ async function readyAgent() {
 function warmUp() {
   running = running.then(async () => { if (!busy && !(await readyAgent())) agent?.warm?.(); }).catch(() => {});
 }
+// Local-only build: what's in front, from one call to the helper: the line for the live state (frontLine's wording) and
+// the app's name for the never-look list, so both describe the same moment. Quick and never fails: '' for both if the
+// helper is missing, slow or denied.
+async function whereFront() {
+  const helper = process.env.ROAMIES_HANDS || '';
+  if (!helper) return { line: '', app: '' };
+  const r = await runHelper(helper.endsWith('.mjs') ? process.execPath : helper, helper.endsWith('.mjs') ? [helper, 'front'] : ['front'], { timeout: 900 });
+  try { const f = JSON.parse(r.stdout.trim().split('\n').pop() || '{}'); return { line: frontLine(f, userName), app: String(f?.app ?? '') }; } catch { return { line: '', app: '' }; }
+}
 // The front window, looked up when the talk keys are let go: the words take a moment more to arrive.
 let frontSoon = null;
 // Auto-listen: the turn whose reply ended on a question, until the overlay says it's been typed out and said.
@@ -857,8 +866,8 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
     const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
     const soon = frontSoon; frontSoon = null;
-    frontNow = soon && Date.now() - soon.at < 8000 ? await soon.p : await whereNow();
-    frontNow = guard.front(frontNow); // local-only build: an app on the never-look list isn't named
+    const where = soon && Date.now() - soon.at < 8000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
+    frontNow = guard.front(where.line, where.app); // Local-only build: an app on the never-look list isn't named; its name decides
     const quiz = takeQuizNote();
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
     // An area snap rides along as an image in the same message.
@@ -1392,7 +1401,7 @@ function onVoice(m) {
     if (pi.listening()) speech.stop(); // local-only build: a Send bubble is open; talking answers it instead of cancelling the request
     else { interruptQuietly(); speech.stop(); warmUp(); } // talking over it stops it
   }
-  else if (m.type === 'voice_state' && m.state === 'processing') frontSoon = { at: Date.now(), p: whereNow() };
+  else if (m.type === 'voice_state' && m.state === 'processing') frontSoon = { at: Date.now(), p: whereFront() }; // Local-only build: whereFront, not whereNow
   else if (m.type === 'voice' && m.text?.trim()) {
     // Key release to the words arriving (mic tail and the recogniser finishing), to see what that step costs.
     if (typeof m.ms === 'number') logLine('voice_final', { ms: m.ms, via: String(m.via ?? ''), chars: m.text.trim().length });

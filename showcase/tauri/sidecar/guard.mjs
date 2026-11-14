@@ -2,12 +2,15 @@
 // managers and Messages, unless the list says otherwise) are never captured, read or worked:
 //   - a screenshot or a read of that app, or of the front window when that app is in front, is refused;
 //   - a whole-screen screenshot is refused while any such app has a window open, since it could be in the picture;
-//   - list_windows leaves those windows out, and the "what's in front" line sent with each request hides them.
+//   - list_windows leaves those windows out, and the "what's in front" line sent with each request hides them
+//     (by the front app's name alone, never by a word in a title, an address or the line itself).
 // It fails closed: if the open windows can't be listed, nothing is captured.
 import os from 'node:os';
 import { loadSettings } from './pi.mjs';
 
 export const DEFAULT_NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages'];
+
+const HIDDEN = 'In front: an app on the never-look list (its name and window are hidden).';
 
 export function createGuard({ home = os.homedir(), windows }) {
   const names = () => { try { return loadSettings(home).neverLook.map((n) => n.toLowerCase()); } catch { return DEFAULT_NEVER_LOOK.map((n) => n.toLowerCase()); } };
@@ -50,8 +53,14 @@ export function createGuard({ home = os.homedir(), windows }) {
     });
   }
 
-  /** The "what's in front" line for the model: hidden when it names an app on the list. */
-  const front = (line) => { const l = String(line ?? ''), low = l.toLowerCase(); return l && names().some((n) => low.includes(n)) ? 'In front: an app on the never-look list (its name and window are hidden).' : l; };
+  /** The "what's in front" line for the model: hidden when `app`, the front app's name, is on the list. Only the name
+   *  decides, matched as check() does: the window title, the address and the line's own wording never hide or unhide
+   *  an app. It fails closed: a line that comes without an app name is hidden. */
+  const front = (line, app) => {
+    const l = String(line ?? ''), list = names();
+    if (!l || !list.length) return l;
+    return !String(app ?? '').trim() || hit(app, list) ? HIDDEN : l;
+  };
 
   return { check, wrap, front };
 }

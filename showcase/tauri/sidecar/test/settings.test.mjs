@@ -99,7 +99,7 @@ for (const t of gateTools([{ name: 'show_list', execute: async () => 'list' }], 
 const notes = createNotes({ home, userName: 'Tiago' }), note = (n) => notes.tools.find((t) => t.name === n);
 await note('write_note').execute({ title: 'A note', content: 'hello' }, {}); await note('search_notes').execute({ query: 'hello' }, {}); await note('read_note').execute({ title: 'A note' }, {});
 const watch = guard.createGuard({ home, windows: async () => [{ id: 1, app: 'Safari', title: 'x', frontApp: true }] });
-await watch.wrap([{ name: 'take_screenshot', execute: async () => 'shot' }])[0].execute({}); watch.front('In front: Safari');
+await watch.wrap([{ name: 'take_screenshot', execute: async () => 'shot' }])[0].execute({}); watch.front('In front: Safari', 'Safari');
 
 assert.deepEqual(touched, [], `settings.json was written after its creation, by: ${touched.join(', ')}`);
 assert.equal(fs.readFileSync(file, 'utf8'), owners, 'byte for byte as the owner left it');

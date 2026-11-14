@@ -298,6 +298,11 @@ that was you or something else), or pi is started with a command other than `pi`
 app, or of the front window while it is in front, is refused. A whole-screen screenshot is refused while one has a
 window open, because it could be in the picture. Its windows are left out of window lists, and its name and window
 title are hidden from what is sent with each request. If the open windows can't be listed, nothing is captured.
+
+Only the app's name decides. A window title, a web address or any other wording never hides or unhides an app:
+Safari showing a page titled "Messages" is still Safari. What is in front is asked once per request, and the line
+sent to the AI and the name checked against the list come from that one answer. If the name is missing, the line is
+hidden.
 "Ask About an Area", where you draw the box yourself, is not covered.
 
 ## Notes
@@ -343,7 +348,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
-- `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches.
+- `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches;
+  its own look-up of what is in front (`whereFront`), giving the never-look list the app's name.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
 - `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging.
 - `showcase/roamies/home.js` (new): where the home spot is.
