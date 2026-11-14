@@ -73,6 +73,9 @@ Built by Claude Code on the Mac from Prompt A, 2026-11-13. Not merged: the owner
 - Tests: `home.test.mjs` covers the positioning rule, the setting, and the overlay's behaviour run without a
   screen. How it looks is not tested.
 
+Also on this branch, each its own commit and not part of feature 12: the never-look fix (`c23db76`), the install
+step (`85a86c5`), and the settings reference (`settings.default.json`, the `limits` settings and the start-up bubble).
+
 **Pending before merge:**
 
 - [ ] The owner looks at the screen: the list is in the report for this branch.
@@ -174,11 +177,21 @@ Roamies researches on the web in a browser of its own, visibly, and saves findin
   and never changes the setting. Work in another app counts as pointing something out. The voice bars stay at the
   pointer. No change to the Rust shell: home is the corner of whichever display the overlay is on. At rest nothing
   is drawn or animated, so the character doesn't blink and JARVIS doesn't turn while it rests.
+- **2026-11-13.** No setting has a value the owner can't see. Roamies still never writes `settings.json`; at
+  start-up it writes `settings.default.json` beside it (every setting with its default, and under `reference` what
+  stays in code), never reads it, and says once per start-up which settings are missing or unusable. The sizes,
+  times and counts became settings under `limits`, each with a range. The sandbox's blocked list stays in code;
+  `settings.default.json` is on it. An unusable `sandbox` means on; an unusable `neverLook` means the built-in list.
+- **2026-11-13.** The never-look list hides the "what's in front" line by the front app's name alone.
+- **2026-11-13.** Installing a build resets the ScreenCapture and Accessibility permissions (`tccutil reset`), which
+  the owner grants again.
 - **2026-11-13.** Hands-free wake is three steps: a double clap, then the wake name "Jarvis", then the request.
   Neither the clap alone nor the name alone starts a conversation.
 
 ## 6. Still to test
 
+- [ ] The start-up settings bubble on screen (a `settings.json` without `limits`), and that it waits for the setup
+  guide to close.
 - [ ] Home position on screen: resting at each corner, bubbles, the trip out to a drawing and back, a second display.
 - [ ] Spoken progress on a long pi task.
 - [ ] Evening briefing and its "Daily log" note; morning briefing.

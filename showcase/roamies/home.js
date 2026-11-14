@@ -8,6 +8,8 @@
   // hands, ears and glow. EDGE: the closest a home given as coordinates may come (the body stays whole).
   const CORNER = { side: 2.4, top: 2.4, bottom: 1.9 }, EDGE = { side: 1.6, top: 1.8, bottom: 1.5 };
   const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  // For settings.default.json, which shows these to the owner (the sidecar's test checks its copy against them).
+  R.homeFacts = { corners: CORNERS, corner: CORNER, edge: EDGE };
 
   /** The setting as written, made safe: one of the four corners, or { x, y } in screen points. Anything else is
    *  the default, "bottom-left". */

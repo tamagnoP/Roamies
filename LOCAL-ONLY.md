@@ -89,7 +89,7 @@ your home folder.
 
 **Always blocked**, for reading and writing, even inside a folder you listed:
 
-- `~/Documents/roamies-pi/settings.json`, `state.json` and the hand-off records in `log`;
+- `~/Documents/roamies-pi/settings.json`, `settings.default.json`, `state.json` and the hand-off records in `log`;
 - `~/.ssh`, `~/.gnupg`, `~/.gg`, `~/.claude`, the keychains (`~/Library/Keychains`, `/Library/Keychains`);
 - `~/Library/Application Support/superProductivity`;
 - `~/.config/gh`, the Hugging Face token (`~/.cache/huggingface/token`, `stored_tokens`), and OrbStack's keys and
@@ -146,6 +146,27 @@ runs until you click Send. Each hand-off's record says `"sandbox": "on"`, `"off"
 `settings.json` is yours alone. Roamies makes it once, with the defaults, when it doesn't exist, and never writes it
 again: it only reads it. What Roamies needs to remember goes in `state.json` (below).
 
+**No setting has a value you can't see.** Each time Roamies starts it writes `settings.default.json` beside
+`settings.json`:
+
+- every setting with its default, under the same names, so a line can be copied into `settings.json`;
+- under `reference`, what is fixed in the app and can't be changed from settings: the sandbox's lists (built-in tool
+  folders, blocked folders and files, start-up files, what pi may write in its own folder, the programs it can't
+  run, the external drives folder, the Docker paths, what is always readable and writable), the allowed range of
+  each limit, the tools taken out and the ones that work while pi is busy, the words that count as "send", the
+  corner names and home margins, the file names in this folder, and the voice program and sample rate.
+
+Roamies never reads that file: editing it changes nothing, and it is replaced at the next start. It is readable by
+you only, and pi can't read it.
+
+If `settings.json` lacks a setting, Roamies uses the default and says so once per start, in a bubble, for as long as
+it is missing: "settings.json doesn't have: home, limits. I'm using the values in settings.default.json until you
+add them." A value it can't use gets its own line: "settings.json has a value I can't use for: maxMinutes. I'm
+using 60." In a list (`readOnly`, `projects`, `routines` and the like) the entries it can use are kept, the others
+left out, and the line says what is used. Two settings fall back to the safe side: anything but `true` or `false`
+for `sandbox` leaves the sandbox on, and a `neverLook` that isn't a list of names means the built-in list. If the
+setup guide is open, the bubble waits until it closes.
+
 `settings.json`:
 
 ```json
@@ -168,14 +189,32 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
   "home": "bottom-left",
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
-  "vault": "~/Documents/roamies-vault"
+  "vault": "~/Documents/roamies-vault",
+  "limits": {
+    "approvalBubbleChars": 600,
+    "promptChars": 8000,
+    "piReplyChars": 3000,
+    "stepBubbleSeconds": 4,
+    "answerWaitMinutes": 10,
+    "gitTimeoutSeconds": 30,
+    "morningBriefingWindowHours": 4,
+    "snapshotMaxFileMB": 2,
+    "snapshotMaxFiles": 5000,
+    "routinesShown": 12,
+    "noteMaxChars": 20000,
+    "notesSearched": 5000,
+    "noteTitleOnlyBytes": 300000,
+    "frontLookupMs": 900,
+    "frontReuseSeconds": 8
+  }
 }
 ```
 
 - `project`: the folder pi starts in (its working directory), until you tell Roamies to switch (see `projects`). The
   default is the `workspace` folder inside `roamies-pi`. The `roamies-pi` folder itself, or any folder that contains it, can't be a project, so pi is never
   started where it could rewrite these settings; a settings file that still names it means `workspace`.
-- `projects`: the folders you can switch between by telling Roamies ("work on cell-segmentation"). Each is named by
+- `projects`: the folders you can switch between by telling Roamies ("work on cell-segmentation"). The default is an
+  empty list: the current project is always on it, whatever it holds. Each is named by
   its last part; write `{"name": "folder"}` instead of a list to choose the names. Only you add to this list: Roamies
   can switch between listed projects, after a yes, and nothing more. A switch is remembered in `state.json`, not
   here. It holds while that folder is still in this list and you haven't changed `project` since the switch: edit
@@ -190,7 +229,7 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
   tools, rules and confirmations, stopping at the first one that fails or is refused.
 - `briefings`: times, as `"HH:MM"`, for a morning rundown (your to-dos, and what pi was asked yesterday) and an
   end-of-day summary (saved to the vault as "Daily log <date>"). Each is given once a day, when Roamies is idle: the
-  morning one within four hours of its time, the evening one any time after it. Leave a time out to switch it off.
+  morning one within four hours of its time (`limits.morningBriefingWindowHours`), the evening one any time after it. Leave a time out to switch it off.
 - `sandbox`: `true` unless you write `false`. Switch it off only if it breaks pi; the Send bubble then warns on
   every hand-off (see "The sandbox pi runs in").
 - `readOnly`: folders pi may read but never write, in every project. Default: none.
@@ -200,7 +239,7 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
 - `docker`: the projects in which pi may reach Docker and OrbStack. Default: none. A project listed here is not
   fully confined.
 - These five are read from this file only, which pi can neither read nor write. A file from before they existed
-  works as if it had the defaults.
+  works as if it had the defaults, and the start-up bubble names what it lacks.
 - `home`: where the character rests on the desktop in its default and small sizes (see "Where the character
   sits"): `"bottom-left"`, `"bottom-right"`, `"top-left"`, `"top-right"`, or a point such as
   `{ "x": 300, "y": 700 }` in screen points, counted from the top-left corner of the main display. Default
@@ -210,6 +249,29 @@ again: it only reads it. What Roamies needs to remember goes in `state.json` (be
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
 - `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
   `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
+- `limits`: the sizes, times and counts. Each is a number in the range below; one that is missing or outside its
+  range uses its default and is named in the start-up bubble. Leaving `limits` out altogether counts as one missing
+  setting. An edit counts from the next request, except `answerWaitMinutes`, which is read when Roamies starts.
+
+  | Limit | Default | Allowed | What it is |
+  | --- | --- | --- | --- |
+  | `approvalBubbleChars` | 600 | 200 to 5000, whole | Characters of a prompt the Send bubble shows; a longer one is also saved whole to `pending.txt`. |
+  | `promptChars` | 8000 | 500 to 100000, whole | The longest prompt that can be handed to pi. |
+  | `piReplyChars` | 3000 | 200 to 50000, whole | Characters of pi's last reply Roamies' own model is given. |
+  | `stepBubbleSeconds` | 4 | 0.5 to 60 | Seconds between the bubbles that show pi's steps. |
+  | `answerWaitMinutes` | 10 | 1 to 120 | Minutes a Send bubble waits for your answer. |
+  | `gitTimeoutSeconds` | 30 | 5 to 600 | Seconds each git command of an undo snapshot may take. |
+  | `morningBriefingWindowHours` | 4 | 0.25 to 24 | Hours after its time that the morning briefing is still given. |
+  | `snapshotMaxFileMB` | 2 | 0.1 to 100 | A new file bigger than this is left out of an undo snapshot. |
+  | `snapshotMaxFiles` | 5000 | 1 to 100000, whole | New files in one undo snapshot. |
+  | `routinesShown` | 12 | 1 to 100, whole | Routines the model is told about. |
+  | `noteMaxChars` | 20000 | 1000 to 1000000, whole | Characters of a note written or read in one go. |
+  | `notesSearched` | 5000 | 10 to 100000, whole | Notes looked through in a search. |
+  | `noteTitleOnlyBytes` | 300000 | 1000 to 10000000, whole | A note bigger than this is searched by its title only. |
+  | `frontLookupMs` | 900 | 100 to 5000, whole | Milliseconds the look-up of the app in front may take. |
+  | `frontReuseSeconds` | 8 | 1 to 60 | Seconds the look-up made when you stop talking stays good. |
+
+`settings.default.json`: the reference described above. Written by Roamies at every start, never read by it.
 
 `log/`: one `.jsonl` file per hand-off, named by date, time and mode. The first line is what was sent (prompt,
 folder, mode, whether you approved by click or by voice, and the undo snapshot if there is one), then pi's events as
@@ -347,12 +409,14 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
+- `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches;
-  its own look-up of what is in front (`whereFront`), giving the never-look list the app's name.
+  its own look-up of what is in front (`whereFront`), giving the never-look list the app's name; the start-up
+  settings bubble.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
 - `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging.
-- `showcase/roamies/home.js` (new): where the home spot is.
+- `showcase/roamies/home.js` (new): where the home spot is, and its margins for the reference file.
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question; the home position.
 - `showcase/roamies/core.js`: the frame loop stops while the character rests at home; no dozing off there.
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests.
@@ -360,7 +424,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs` (new), `package.json`: tests.
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs` (new),
+  `package.json`: tests.
 
 ## Build (macOS)
 

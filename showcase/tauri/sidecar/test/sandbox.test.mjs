@@ -55,7 +55,7 @@ process.env.PATH = `${path.dirname(process.execPath)}${path.delimiter}${process.
 
 // ---- the pretend home
 loadSettings(home); // makes roamies-pi, its log and workspace, and settings.json
-put(path.join(dir, 'state.json'), '{}\n'); put(path.join(dir, 'log', 'old.jsonl'), '{}\n'); put(path.join(dir, 'workspace', 'in-workspace.txt'));
+put(path.join(dir, 'state.json'), '{}\n'); put(path.join(dir, 'settings.default.json'), '{}\n'); put(path.join(dir, 'log', 'old.jsonl'), '{}\n'); put(path.join(dir, 'workspace', 'in-workspace.txt'));
 put(path.join(cells, 'a.py')); put(path.join(cells, 'frozen', 'f.txt')); put(path.join(cells, 'nested', 'n.txt'));
 put(path.join(other, 'o.txt')); put(path.join(ref, 'r.txt')); put(H('Documents', 'private', 'p.txt')); put(H('Desktop', 'd.txt')); put(H('Library', 'CloudStorage', 'Drive', 'c.txt'));
 put(H('.ssh', 'id')); put(H('.gnupg', 'key')); put(H('.gg', 'g')); put(H('.claude', 'c')); put(H('Library', 'Keychains', 'login.keychain-db'));
@@ -136,7 +136,7 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
   assert.equal(sandboxProblem(profile), '', 'the system accepts it');
   const lines = profile.trim().split('\n');
   assert.match(lines.at(-1), /^\(deny file-read\* file-write\* /, 'the blocked paths are the last rule, so nothing overrides them');
-  for (const p of [path.join(dir, 'settings.json'), path.join(dir, 'state.json'), path.join(dir, 'log'), H('.ssh'), H('.gnupg'), H('.gg'), H('.claude'), H('Library', 'Keychains'), '/Library/Keychains', H('Library', 'Application Support', 'superProductivity'), H('.config', 'gh'), H('.cargo', 'credentials.toml'), H('.cargo', 'credentials'), H('.config', 'git', 'credentials')]) assert.ok(lines.at(-1).includes(`"${p}")`), `blocked: ${p}`);
+  for (const p of [path.join(dir, 'settings.json'), path.join(dir, 'settings.default.json'), path.join(dir, 'state.json'), path.join(dir, 'log'), H('.ssh'), H('.gnupg'), H('.gg'), H('.claude'), H('Library', 'Keychains'), '/Library/Keychains', H('Library', 'Application Support', 'superProductivity'), H('.config', 'gh'), H('.cargo', 'credentials.toml'), H('.cargo', 'credentials'), H('.config', 'git', 'credentials')]) assert.ok(lines.at(-1).includes(`"${p}")`), `blocked: ${p}`);
   assert.ok(profile.includes('(deny file-read* (subpath "/Volumes"))') && profile.includes('(literal "/Volumes")'), 'external drives are closed; the drives folder can be walked');
   assert.ok(profile.indexOf('(deny file-read* (subpath "/Volumes"))') < profile.indexOf('(allow file-read* (subpath'), 'a listed folder is allowed after the drives are denied');
   assert.ok(profile.includes(`(subpath "${ref}")`) && !/subpath "[^"]*ref-link/.test(profile), 'folders by their real paths, not the links to them');
@@ -193,6 +193,8 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
     ['read a file beside the settings (the folder is readOnly)', 'read the rest of ~/.config, listed as a tool folder', 'read', path.join(dir, 'workspace', 'in-workspace.txt')],
     ['read settings.json, inside a readable folder', 'read', settingsFile],
     ['write settings.json', 'append', settingsFile],
+    ['read settings.default.json, inside a readable folder', 'read', path.join(dir, 'settings.default.json')],
+    ['write settings.default.json', 'append', path.join(dir, 'settings.default.json')],
     ['read state.json', 'read', path.join(dir, 'state.json')],
     ['write state.json', 'append', path.join(dir, 'state.json')],
     ['list the hand-off records', 'list', path.join(dir, 'log')],
@@ -245,12 +247,13 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
     'read a file beside the settings (the folder is readOnly)', 'read the rest of ~/.config, listed as a tool folder', 'read the rest of ~/.cargo', 'read the rest of ~/.config/git', 'read pi\'s sign-in', 'read pi\'s skills', 'write a pi session', 'write pi\'s sign-in', 'take pi\'s sign-in lock', 'take pi\'s settings lock', 'take pi\'s trust lock', 'run an ordinary program']);
   const refusedAs = { 'write outside the project, by a command pi runs': 'exit 1' }; // the shell reports its own failed write
   for (const [what, result] of Object.entries(got)) assert.equal(result, allowed.has(what) ? 'ok' : refusedAs[what] ?? DENIED, what);
-  for (const asked of ['read cargo\'s sign-in (credentials.toml), inside the tool folder ~/.cargo', 'read cargo\'s sign-in (credentials), inside the tool folder ~/.cargo', 'read git\'s saved passwords, inside the tool folder ~/.config/git', 'write outside the project', 'write in a project that is not the current one', 'write in a readOnly folder', 'read an unlisted folder under Documents', 'read settings.json, inside a readable folder', 'write in a subfolder of the project']) assert.ok(asked in got, asked);
+  for (const asked of ['read cargo\'s sign-in (credentials.toml), inside the tool folder ~/.cargo', 'read cargo\'s sign-in (credentials), inside the tool folder ~/.cargo', 'read git\'s saved passwords, inside the tool folder ~/.config/git', 'write outside the project', 'write in a project that is not the current one', 'write in a readOnly folder', 'read an unlisted folder under Documents', 'read settings.json, inside a readable folder', 'read settings.default.json, inside a readable folder', 'write settings.default.json', 'write in a subfolder of the project']) assert.ok(asked in got, asked);
   // ...and on disk, from outside: what was refused did not happen
   assert.equal(fs.readFileSync(path.join(cells, 'sub', 'deeper', 'new.txt'), 'utf8'), 'written by pi\n');
   for (const p of [H('out.txt'), H('out2.txt'), path.join(other, 'w.txt'), path.join(ref, 'w.txt'), path.join(cells, 'frozen', 'w.txt'), path.join(cells, 'nested', 'w.txt'), path.join(cells, 'stolen.txt'), path.join(cells, 'linked.txt'), path.join(dir, 'log', 'forged.jsonl'), H('.pi', 'agent', 'skills', 'evil')]) assert.ok(!fs.existsSync(p), `not made: ${p}`);
   assert.equal(fs.readFileSync(path.join(other, 'o.txt'), 'utf8'), 'secret\n'); assert.equal(fs.readFileSync(path.join(ref, 'r.txt'), 'utf8'), 'secret\n');
   assert.equal(fs.readFileSync(settingsFile, 'utf8'), JSON.stringify(base));
+  assert.equal(fs.readFileSync(path.join(dir, 'settings.default.json'), 'utf8'), '{}\n', 'the reference file is as it was');
   fs.rmSync(tmpFile, { force: true });
   // the Send bubble said so, in one line, and the record has it
   assert.match(asked.at(-1), /^Send to pi\?  CAN EDIT files and run commands · in ~\/Documents\/cells\n⚠ pi is started with: \S+\nNo undo snapshot \(not a git repository\)\.\nSandboxed: pi can read 6 folders and write only in this project\.\n\n\[\[/);

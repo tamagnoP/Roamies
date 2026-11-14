@@ -37,7 +37,8 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, gateTools, homeFor, voiceFor } from './pi.mjs';
+import { createPi, gateTools, homeFor, limitsFor, voiceFor } from './pi.mjs';
+import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
@@ -293,6 +294,13 @@ const pi = createPi({
   log: (kind, data) => logLine(kind, data),
   onChange: () => menu(),
 });
+// Local-only build: at start-up settings.default.json is written beside the owner's settings.json (every setting with
+// its default, and what stays in code), and what settings.json lacks or has wrong is said once, in a bubble. The
+// bubble is held until the overlay can show it: the overlay is up, and the setup guide isn't in the way (it's closed,
+// or was finished on an earlier run).
+let uiReady = false, guideClosed = false;
+const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('settings_notice', { chars: text.length }); say(text, 'concerned'); });
+const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
 // Apps on the never-look list are checked before any screen tool runs.
@@ -809,11 +817,12 @@ function warmUp() {
 }
 // Local-only build: what's in front, from one call to the helper: the line for the live state (frontLine's wording) and
 // the app's name for the never-look list, so both describe the same moment. Quick and never fails: '' for both if the
-// helper is missing, slow or denied.
+// helper is missing, slow or denied. How long it may take and how long an early look-up stays good are settings
+// (limits.frontLookupMs, limits.frontReuseSeconds).
 async function whereFront() {
   const helper = process.env.ROAMIES_HANDS || '';
   if (!helper) return { line: '', app: '' };
-  const r = await runHelper(helper.endsWith('.mjs') ? process.execPath : helper, helper.endsWith('.mjs') ? [helper, 'front'] : ['front'], { timeout: 900 });
+  const r = await runHelper(helper.endsWith('.mjs') ? process.execPath : helper, helper.endsWith('.mjs') ? [helper, 'front'] : ['front'], { timeout: limitsFor(HOME).frontLookupMs });
   try { const f = JSON.parse(r.stdout.trim().split('\n').pop() || '{}'); return { line: frontLine(f, userName), app: String(f?.app ?? '') }; } catch { return { line: '', app: '' }; }
 }
 // The front window, looked up when the talk keys are let go: the words take a moment more to arrive.
@@ -866,7 +875,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
     const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
     const soon = frontSoon; frontSoon = null;
-    const where = soon && Date.now() - soon.at < 8000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
+    const where = soon && Date.now() - soon.at < limitsFor(HOME).frontReuseSeconds * 1000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
     frontNow = guard.front(where.line, where.app); // Local-only build: an app on the never-look list isn't named; its name decides
     const quiz = takeQuizNote();
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
@@ -1697,7 +1706,7 @@ async function filesStatus(request) {
 let keysBefore = null;
 async function onGuide(m) {
   if (m.type === 'ob_hello') { onboarding = true; await refreshAuth(); await fishKeyLoaded; obState(); }
-  else if (m.type === 'ob_closed') { onboarding = false; endIntro(); stopShowcase(); if (tourPending) setTimeout(playTour, 800); }
+  else if (m.type === 'ob_closed') { onboarding = false; guideClosed = true; endIntro(); stopShowcase(); if (tourPending) setTimeout(playTour, 800); offerSettingsNotice(); } // Local-only build: the held settings notice
   else if (m.type === 'ob_showcase') playShowcase();
   else if (m.type === 'ob_showcase_warm') warmShowcase();
   else if (m.type === 'ob_showcase_stop') stopShowcase();
@@ -1775,6 +1784,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
     if (config.onboarded) ui({ kind: 'greet' });
+    uiReady = true; offerSettingsNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
   else if (m.type?.startsWith('voice')) onVoice(m);
   else if (m.type === 'snap') areaSnap();

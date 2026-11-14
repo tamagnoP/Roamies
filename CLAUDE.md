@@ -11,7 +11,9 @@ These are the reasons the fork exists. A change that weakens one needs the owner
 1. **Nothing leaves the Mac except the conversation with the AI provider.** No update checks, telemetry, web
    fetches, card image lookups or cloud voices. Do not add a network call, a new dependency, or a download.
 2. **Roamies does not touch files or run commands itself.** File work is handed to pi (`pi.mjs`). The only files it
-   writes are notes inside the Obsidian vault (`notes.mjs`), where it can create and append but never change or delete.
+   writes are notes inside the Obsidian vault (`notes.mjs`), where it can create and append but never change or delete,
+   and its own files in `~/Documents/roamies-pi` (`state.json`, the records in `log`, `pending.txt`, and
+   `settings.default.json`). It never writes `settings.json` after making it, and never reads `settings.default.json`.
 3. **A hand-off that can edit is sent only after the owner says send.** Read-only hand-offs may send themselves after
    the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first.
 4. **An undo snapshot is taken before any hand-off that can edit** (git ref under `refs/roamies/`).
@@ -30,6 +32,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/pi.mjs` | Ours. Hand-off to pi, Send approval, background job, records, settings loader, `gateTools`. |
 | `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
+| `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |
 | `showcase/tauri/sidecar/test/` | One test file per module, plain `node:assert`, no framework. |
 | `showcase/roamies/` | The overlay (character, bubbles), browser JavaScript drawn on a canvas. |
@@ -39,6 +42,13 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 Settings the owner edits live outside the repo, in `~/Documents/roamies-pi/settings.json`, read by `loadSettings`
 in `pi.mjs`. Add new settings there, with a default that keeps existing files working, and document them in
 `LOCAL-ONLY.md`.
+
+**No setting has a value that lives only in code.** Every new setting goes into `settings.default.json` in the same
+commit: its default in `DEFAULTS` (or `LIMITS`, for a size, time or count) and its check in `CLEAN`, both in
+`pi.mjs`, which is all `loadSettings` and the reference file are built from. A guard or fixed fact that stays in
+code is shown under `reference` (`codeReference` in `pi.mjs`), generated from the constant itself. The sandbox's
+blocked list stays in code and no setting reaches it. `test/reference.test.mjs` fails if `loadSettings` reads a
+setting the reference file lacks, or if anything reads `settings.default.json`.
 
 ## Commands
 

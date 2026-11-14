@@ -22,16 +22,18 @@ import path from 'node:path';
 import { z } from 'zod';
 
 const READ_TOOLS = 'read,grep,find,ls';
-const SHOW_MAX = 600; // characters of a prompt the approval bubble holds; longer ones are also saved to pending.txt
-const STEP_GAP = 4000; // ms between step bubbles: a burst of steps shows as one line, the latest
-const LIVE_MAX = 3000; // characters of pi's last reply the model is given
+// The sizes, times and counts are settings ("limits" in settings.json, see LIMITS below); none lives only here.
+// The folder Roamies keeps beside the owner's settings, and what is in it.
+const PATHS = { folder: path.join('Documents', 'roamies-pi'), settings: 'settings.json', reference: 'settings.default.json', state: 'state.json', log: 'log', workspace: 'workspace', pending: 'pending.txt' };
 
 // Tools taken out of Roamies: files and commands are pi's job.
 export const REMOVED = new Set(['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'run_command', 'fetch_url']);
 // What still works while pi is busy.
 const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note']);
 
-export const isSend = (text) => /^\s*(send|send it|yes|yeah|yep|yup|ok|okay|go|go ahead|do it|approve|approved|confirm)\b/i.test(String(text ?? ''));
+const SEND_WORDS = ['send', 'send it', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'go', 'go ahead', 'do it', 'approve', 'approved', 'confirm'];
+const SEND = new RegExp(`^\\s*(${SEND_WORDS.join('|')})\\b`, 'i');
+export const isSend = (text) => SEND.test(String(text ?? ''));
 
 const tilde = (p, home) => (p === home ? '~' : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const expand = (p, home) => path.resolve(String(p).replace(/^~(?=$|\/)/, home));
@@ -99,7 +101,7 @@ const STARTUP = ['.bash_profile', '.bashrc', '.bash_login', '.profile', '.zshenv
 const PI_WRITES = [['subpath', 'sessions'], ['literal', 'auth.json'], ['subpath', 'auth.json.lock'], ['subpath', 'settings.json.lock'], ['subpath', 'trust.json.lock']];
 // Never readable or writable, wherever they sit and whatever lists a folder around them. (home, roamies-pi folder)
 const BLOCKED = (h, r) => [
-  ['literal', `${r}/settings.json`], ['literal', `${r}/state.json`], ['subpath', `${r}/log`],
+  ['literal', `${r}/${PATHS.settings}`], ['literal', `${r}/${PATHS.reference}`], ['literal', `${r}/${PATHS.state}`], ['subpath', `${r}/${PATHS.log}`],
   ['subpath', `${h}/.ssh`], ['subpath', `${h}/.gnupg`], ['subpath', `${h}/.gg`], ['subpath', `${h}/.claude`],
   ['subpath', `${h}/Library/Keychains`], ['subpath', '/Library/Keychains'],
   ['subpath', `${h}/Library/Application Support/superProductivity`],
@@ -112,6 +114,13 @@ const BLOCKED = (h, r) => [
 const VOLUMES = '/Volumes';
 // Programs that reach outside the sandbox by asking the system or another app to act.
 const NO_EXEC = ['/usr/bin/security', '/usr/bin/osascript', '/usr/bin/open'];
+// Always readable: pi's own folder (in the home folder). Always writable: devices and the temporary folders (the
+// user's own temporary folder and its cache folder are added when the profile is built).
+const PI_HOME = '.pi';
+const WRITE_ALWAYS = ['/dev'], TEMP = ['/private/tmp', '/private/var/tmp'];
+// With Docker allowed for the project: what docker reads in the home folder. Without it, the sockets pi can't reach.
+const DOCKER_READS = ['.docker', '.orbstack/bin', '.orbstack/run', '.orbstack/shell'];
+const DOCKER_SOCKETS = { home: ['.orbstack/run', '.docker/run'], system: ['/private/var/run/docker.sock', '/var/run/docker.sock'] };
 
 /** A path with its symbolic links resolved, as the sandbox sees it. One that doesn't exist (yet) is resolved as far
  *  as it does exist. */
@@ -139,14 +148,14 @@ export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir(), 
   const readOnly = uniq((settings.readOnly ?? []).map(realPath)).filter((p) => p !== proj);
   const tools = uniq((settings.toolFolders ?? []).map(realPath));
   const docker = (settings.docker ?? []).some((d) => realPath(d) === proj);
-  const agent = realPath(path.join(home, '.pi', 'agent'));
-  const temp = uniq(['/private/tmp', '/private/var/tmp', realPath(tmpdir)].flatMap((t) => (path.basename(t) === 'T' && t.startsWith('/private/var/folders/') ? [t, path.join(path.dirname(t), 'C')] : [t])));
+  const agent = realPath(path.join(home, PI_HOME, 'agent'));
+  const temp = uniq([...TEMP, realPath(tmpdir)].flatMap((t) => (path.basename(t) === 'T' && t.startsWith('/private/var/folders/') ? [t, path.join(path.dirname(t), 'C')] : [t])));
   // Readable inside the home folder, beyond the owner's listed folders: pi's own folder, the shell's start-up files,
   // the tool folders, the folder an absolute "pi" command sits in, and (with Docker allowed) what docker reads.
-  const own = [realPath(path.join(home, '.pi')), ...STARTUP.map((f) => path.join(h, f)), ...tools];
+  const own = [realPath(path.join(home, PI_HOME)), ...STARTUP.map((f) => path.join(h, f)), ...tools];
   if (path.isAbsolute(settings.pi)) own.push(path.dirname(realPath(settings.pi)), path.dirname(path.resolve(settings.pi)));
-  const dockerReads = [`${h}/.docker`, `${h}/.orbstack/bin`, `${h}/.orbstack/run`, `${h}/.orbstack/shell`];
-  const dockerSockets = `(subpath ${q(`${h}/.orbstack/run`)}) (subpath ${q(`${h}/.docker/run`)}) (literal "/private/var/run/docker.sock") (literal "/var/run/docker.sock")`;
+  const dockerReads = DOCKER_READS.map((d) => `${h}/${d}`);
+  const dockerSockets = [...DOCKER_SOCKETS.home.map((d) => rule(['subpath', `${h}/${d}`])), ...DOCKER_SOCKETS.system.map((d) => rule(['literal', d]))].join(' ');
   const listed = uniq([proj, ...others, ...readOnly]);
   // A folder listed through a symbolic link (~/gdrive) is allowed by its real path; the link itself has to be readable
   // too, for the path as the owner wrote it to work.
@@ -176,7 +185,7 @@ export function sandboxProfile({ home, project, settings, tmpdir = os.tmpdir(), 
     '(allow default)', // the network, processes and everything outside the rules below are left as they are
     ';; writing: nowhere, but temporary folders, what pi must write of its own, and the project',
     '(deny file-write* (subpath "/"))',
-    `(allow file-write* (subpath "/dev") ${sub(temp)})`,
+    `(allow file-write* ${sub([...WRITE_ALWAYS, ...temp])})`,
     `(allow file-write* ${PI_WRITES.map(([kind, f]) => rule([kind, path.join(agent, f)])).join(' ')})`,
     `(allow file-write* (subpath ${q(proj)}))`,
     ...(noWrite.length ? [`(deny file-write* ${sub(noWrite)})`] : []),
@@ -207,37 +216,135 @@ export function sandboxProblem(profile, exec = SANDBOX_EXEC) {
   } catch (e) { return e.message; }
 }
 
+// ---- the settings
+// Every setting has its default here and nowhere else, and every one is written to settings.default.json beside the
+// owner's settings.json at start-up (reference.mjs), so none has a value the owner can't see.
 // voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
 const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
 const HOME_CORNERS = ['bottom-left', 'bottom-right', 'top-left', 'top-right']; // the first is the default
-const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages']; // guard.mjs
-// pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in.
-const DEFAULTS = (dir) => ({ project: `${dir}/workspace`, projects: [`${dir}/workspace`], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: DEFAULT_VOICES, vault: '~/Documents/roamies-vault', neverLook: NEVER_LOOK, sandbox: true, readOnly: [], toolFolders: [], toolFoldersOff: [], docker: [], home: 'bottom-left' });
+// How far the character keeps from the screen's edges, in body radii: the same numbers as the overlay's home.js
+// (settings.test.mjs checks they match).
+const HOME_MARGINS = { corner: { side: 2.4, top: 2.4, bottom: 1.9 }, edge: { side: 1.6, top: 1.8, bottom: 1.5 } };
+export const NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages']; // guard.mjs
+/** The sizes, times and counts, set under "limits": each a number from min to max (whole: no fractions). One that is
+ *  missing or out of range uses its default and is named at start-up. */
+export const LIMITS = {
+  approvalBubbleChars: { default: 600, min: 200, max: 5000, whole: true }, // characters of a prompt the Send bubble holds; longer ones are also saved to pending.txt
+  promptChars: { default: 8000, min: 500, max: 100_000, whole: true }, // the longest prompt ask_pi takes
+  piReplyChars: { default: 3000, min: 200, max: 50_000, whole: true }, // characters of pi's last reply the model is given
+  stepBubbleSeconds: { default: 4, min: 0.5, max: 60 }, // between step bubbles: a burst of steps shows as one line, the latest
+  answerWaitMinutes: { default: 10, min: 1, max: 120 }, // how long a Send bubble waits for an answer (read when Roamies starts)
+  gitTimeoutSeconds: { default: 30, min: 5, max: 600 }, // each git command of an undo snapshot
+  morningBriefingWindowHours: { default: 4, min: 0.25, max: 24 }, // how long after its time the morning briefing is still given
+  snapshotMaxFileMB: { default: 2, min: 0.1, max: 100 }, // a new file bigger than this is left out of an undo snapshot
+  snapshotMaxFiles: { default: 5000, min: 1, max: 100_000, whole: true }, // new files in one undo snapshot
+  routinesShown: { default: 12, min: 1, max: 100, whole: true }, // routines the model is told about
+  noteMaxChars: { default: 20_000, min: 1000, max: 1_000_000, whole: true }, // characters of a note written or read in one go
+  notesSearched: { default: 5000, min: 10, max: 100_000, whole: true }, // notes looked through in a search
+  noteTitleOnlyBytes: { default: 300_000, min: 1000, max: 10_000_000, whole: true }, // a bigger note is searched by its title only
+  frontLookupMs: { default: 900, min: 100, max: 5000, whole: true }, // how long the look-up of the app in front may take
+  frontReuseSeconds: { default: 8, min: 1, max: 60 }, // how long the look-up made when you stop talking stays good
+};
+const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
+const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
+// pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
+// because the current project is always on the list, whatever it holds.
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], limits: limitDefaults() });
+/** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
+export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
+
+// What a setting may be, and what is used when it isn't. Each takes the value as written and the default, and gives
+// [the value used, whether that is what was written]. A value that can't be used gives the default; in a list, the
+// entries that can be used are kept and the rest left out. Either way the setting is named at start-up, with what is
+// used instead. The safety settings fall back to the safe side: the sandbox on, the built-in never-look list.
+const isStr = (v) => typeof v === 'string';
+const full = (v) => isStr(v) && !!v.trim();
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const strs = (v) => Array.isArray(v) && v.every(full);
+const clock = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(isStr(v) ? v.trim() : ''); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
+const when = (ok) => (v, d) => (ok(v) ? [v, true] : [d, false]);
+const number = (low) => (v, d) => ((typeof v === 'number' || full(v)) && Number.isFinite(Number(v)) && low(Number(v)) ? [Number(v), true] : [d, false]);
+const list = (v) => { const kept = Array.isArray(v) ? v.filter(full) : []; return [kept, Array.isArray(v) && kept.length === v.length]; };
+const CLEAN = {
+  project: when(full),
+  projects: (v) => {
+    if (Array.isArray(v)) return list(v);
+    if (!isObj(v)) return [[], false];
+    const kept = Object.entries(v).filter(([n, p]) => n.trim() && full(p));
+    return [Object.fromEntries(kept), kept.length === Object.keys(v).length];
+  },
+  pi: when(full),
+  maxMinutes: number((n) => n > 0),
+  keepLogsDays: number((n) => n >= 0),
+  autoSendReadOnly: number((n) => n >= 0),
+  progressSeconds: number((n) => n >= 0),
+  routines: (v, d) => {
+    if (!isObj(v)) return [d, false];
+    let ok = true;
+    const kept = Object.entries(v).map(([n, steps]) => { const all = Array.isArray(steps) ? steps : [steps], good = all.filter(full); if (good.length !== all.length) ok = false; return [n, good]; }).filter(([n, good]) => (n.trim() && good.length ? true : (ok = false)));
+    return [Object.fromEntries(kept), ok];
+  },
+  briefings: (v, d) => {
+    if (!isObj(v)) return [d, false];
+    const kept = {}; let ok = true;
+    for (const k of ['morning', 'evening']) { if (v[k] === undefined || v[k] === null || v[k] === '') continue; if (clock(v[k]) === null) ok = false; else kept[k] = v[k]; }
+    return [kept, ok];
+  },
+  voice: when(isStr),
+  voices: (v, d) => { if (!isObj(v)) return [d, false]; const kept = Object.entries(v).filter(([, name]) => isStr(name)); return [Object.fromEntries(kept), kept.length === Object.keys(v).length]; },
+  vault: when(full),
+  neverLook: when(strs),
+  sandbox: when((v) => typeof v === 'boolean'),
+  readOnly: list, toolFolders: list, toolFoldersOff: list, docker: list,
+  home: when((v) => (isStr(v) && HOME_CORNERS.includes(v.trim().toLowerCase())) || (isObj(v) && typeof v.x === 'number' && typeof v.y === 'number' && Number.isFinite(v.x) && Number.isFinite(v.y))),
+  limits: when(isObj),
+};
 
 /** What Roamies itself keeps in ~/Documents/roamies-pi/state.json: the project chosen with switch_project, and the
  *  days the briefings were given. {} when there's none or it can't be read. */
 function readState(dir) {
-  try { const s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; } catch { return {}; }
+  try { const s = JSON.parse(fs.readFileSync(path.join(dir, PATHS.state), 'utf8')); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; } catch { return {}; }
 }
-const writeState = (dir, state) => fs.writeFileSync(path.join(dir, 'state.json'), `${JSON.stringify(state, null, 2)}\n`);
+const writeState = (dir, state) => fs.writeFileSync(path.join(dir, PATHS.state), `${JSON.stringify(state, null, 2)}\n`);
 
 /** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. After that the file is
- *  the owner's alone: nothing here, or anywhere else in Roamies, writes it. */
+ *  the owner's alone: nothing here, or anywhere else in Roamies, writes it.
+ *  A setting the file lacks, or holds a value for that can't be used, takes its default: `missing` names the first
+ *  kind and `invalid` the second ({ name, using }), for the start-up bubble. Safety settings fall back to the safe
+ *  side: the sandbox on, the built-in never-look list. */
 export function loadSettings(home) {
-  const dir = path.join(home, 'Documents', 'roamies-pi'), file = path.join(dir, 'settings.json');
-  fs.mkdirSync(path.join(dir, 'log'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'workspace'), { recursive: true });
-  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(DEFAULTS(tilde(dir, home)), null, 2)}\n`);
+  const dir = path.join(home, PATHS.folder), file = path.join(dir, PATHS.settings);
+  fs.mkdirSync(path.join(dir, PATHS.log), { recursive: true });
+  fs.mkdirSync(path.join(dir, PATHS.workspace), { recursive: true });
+  const defaults = DEFAULTS(tilde(dir, home));
+  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(defaults, null, 2)}\n`);
   let raw;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`${tilde(file, home)} isn't valid JSON (${e.message}). Fix or delete it.`); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${tilde(file, home)} should be a JSON object.`);
+  // set: each setting as the file has it when it's there and usable, else its default.
+  const missing = [], invalid = [], set = {};
+  for (const name of Object.keys(defaults)) {
+    if (!Object.hasOwn(raw, name)) { missing.push(name); set[name] = defaults[name]; continue; }
+    const [value, asWritten] = CLEAN[name](raw[name], defaults[name]);
+    set[name] = value;
+    if (!asWritten) invalid.push({ name, using: value });
+  }
+  // limits: one by one. A file without "limits" at all lacks one setting, not fifteen.
+  const limits = limitDefaults();
+  if (set.limits !== defaults.limits) {
+    for (const name of Object.keys(LIMITS)) {
+      if (!Object.hasOwn(set.limits, name)) missing.push(`limits.${name}`);
+      else if (!limitOk(name, set.limits[name])) invalid.push({ name: `limits.${name}`, using: LIMITS[name].default });
+      else limits[name] = set.limits[name];
+    }
+  }
   // projects: a list of folders (named by their last part), or { name: folder }.
-  const list = Array.isArray(raw.projects) ? raw.projects.map((p) => [base(expand(p, home)), p]) : raw.projects && typeof raw.projects === 'object' ? Object.entries(raw.projects) : [];
+  const listed = Array.isArray(set.projects) ? set.projects.map((p) => [base(expand(p, home)), p]) : Object.entries(set.projects);
   // The settings folder itself used to be pi's default project. It no longer can be one (pi could rewrite these
   // settings), so it means its workspace subfolder now.
-  const moved = (p) => (p === dir ? path.join(dir, 'workspace') : p);
-  const projects = list.filter(([n, p]) => n && typeof p === 'string' && p.trim()).map(([name, p]) => { const d = moved(expand(p.trim(), home)); return { name: d === path.join(dir, 'workspace') ? 'workspace' : String(name), dir: d }; });
-  const fileProject = moved(expand(typeof raw.project === 'string' && raw.project.trim() ? raw.project.trim() : path.join(dir, 'workspace'), home));
+  const moved = (p) => (p === dir ? path.join(dir, PATHS.workspace) : p);
+  const projects = listed.map(([name, p]) => { const d = moved(expand(p.trim(), home)); return { name: d === path.join(dir, PATHS.workspace) ? PATHS.workspace : String(name), dir: d }; });
+  const fileProject = moved(expand(set.project.trim(), home));
   // The project chosen with switch_project (state.json) counts while it's still listed under "projects" and "project"
   // in the settings file is what it was when the switch was made. A "project" the owner has edited since wins.
   const state = readState(dir);
@@ -245,29 +352,22 @@ export function loadSettings(home) {
   const chosen = at(state.project);
   const project = chosen && at(state.projectWas) === fileProject && projects.some((p) => p.dir === chosen) ? chosen : fileProject;
   if (!projects.some((p) => p.dir === project)) projects.unshift({ name: base(project), dir: project });
-  const minutes = Number(raw.maxMinutes);
-  const str = (v) => (typeof v === 'string' ? v.trim() : '');
-  const voices = raw.voices && typeof raw.voices === 'object' && !Array.isArray(raw.voices) ? Object.fromEntries(Object.entries(raw.voices).map(([k, v]) => [k.toLowerCase(), str(v)]).filter(([, v]) => v)) : raw.voices === undefined ? { ...DEFAULT_VOICES } : {};
-  const vault = expand(str(raw.vault) || '~/Documents/roamies-vault', home); // the Obsidian vault Roamies keeps notes in (notes.mjs)
-  const neverLook = Array.isArray(raw.neverLook) ? raw.neverLook.map(str).filter(Boolean) : [...NEVER_LOOK];
-  const keep = Number(raw.keepLogsDays);
-  const num = (v, d) => (v === undefined || v === null || !(Number(v) >= 0) ? d : Number(v));
+  const voices = Object.fromEntries(Object.entries(set.voices).map(([k, v]) => [k.toLowerCase(), v.trim()]).filter(([, v]) => v)); // "" for a look: no voice of its own
+  const vault = expand(set.vault.trim(), home); // the Obsidian vault Roamies keeps notes in (notes.mjs)
+  const neverLook = set.neverLook.map((n) => n.trim());
   // routines: { "what you say": ["step", "step"] }; briefings: { "morning": "09:00", "evening": "18:30" }
-  const routines = raw.routines && typeof raw.routines === 'object' && !Array.isArray(raw.routines)
-    ? Object.entries(raw.routines).map(([name, steps]) => ({ name: str(name), steps: (Array.isArray(steps) ? steps : [steps]).map(str).filter(Boolean) })).filter((r) => r.name && r.steps.length) : [];
-  const clock = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(str(v)); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
-  const briefings = raw.briefings && typeof raw.briefings === 'object' ? { morning: clock(raw.briefings.morning), evening: clock(raw.briefings.evening) } : { morning: null, evening: null };
+  const routines = Object.entries(set.routines).map(([name, steps]) => ({ name: name.trim(), steps: (Array.isArray(steps) ? steps : [steps]).map((x) => x.trim()) }));
+  const briefings = { morning: clock(set.briefings.morning), evening: clock(set.briefings.evening) };
   // The sandbox (all four are read from this file only). sandbox: on unless it says false. readOnly: more folders pi
   // may read. toolFolders: more tool folders, added to the built-in ones; toolFoldersOff: built-in ones to drop.
   // docker: the projects where pi may reach Docker.
-  const folders = (v) => (Array.isArray(v) ? v.map(str).filter(Boolean).map((p) => expand(p, home)) : []);
-  const off = new Set(folders(raw.toolFoldersOff));
-  const toolFolders = [...new Set([...TOOL_FOLDERS.map((p) => expand(p, home)).filter((p) => !off.has(p)), ...folders(raw.toolFolders)])];
+  const folders = (v) => v.map((p) => expand(p.trim(), home));
+  const off = new Set(folders(set.toolFoldersOff));
+  const toolFolders = [...new Set([...TOOL_FOLDERS.map((p) => expand(p, home)).filter((p) => !off.has(p)), ...folders(set.toolFolders)])];
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
-  // or { x, y } in screen points. Anything else is the default corner.
-  const corner = str(raw.home).toLowerCase(), point = raw.home && typeof raw.home === 'object' && Number.isFinite(raw.home.x) && Number.isFinite(raw.home.y) && typeof raw.home.x === 'number' && typeof raw.home.y === 'number';
-  const homeSpot = point ? { x: raw.home.x, y: raw.home.y } : HOME_CORNERS.includes(corner) ? corner : HOME_CORNERS[0];
-  return { dir, file, raw, home: homeSpot, project, fileProject, projects, sandbox: raw.sandbox !== false, readOnly: folders(raw.readOnly), toolFolders, docker: folders(raw.docker), vault, neverLook, routines, briefings, autoSendReadOnly: num(raw.autoSendReadOnly, 5), progressSeconds: num(raw.progressSeconds, 90), keepLogsDays: keep >= 0 && raw.keepLogsDays !== undefined ? keep : 30, voice: str(raw.voice), voices, pi: typeof raw.pi === 'string' && raw.pi.trim() ? raw.pi.trim() : 'pi', maxMinutes: minutes > 0 ? minutes : 60 };
+  // or { x, y } in screen points.
+  const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
+  return { dir, file, raw, missing, invalid, limits, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes) };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -280,6 +380,11 @@ export function voiceFor(look, home = os.homedir()) {
   try { const s = loadSettings(home); return s.voices[String(look ?? '').toLowerCase()] || s.voice || ''; } catch { return ''; }
 }
 
+/** The sizes, times and counts ("limits") as they stand now. Never throws: the defaults if the settings can't be read. */
+export function limitsFor(home = os.homedir()) {
+  try { return loadSettings(home).limits; } catch { return limitDefaults(); }
+}
+
 /** Why a folder can't be pi's project, or '' when it can: it must exist, and be inside the home folder. */
 export function projectProblem(dir, home) {
   let real;
@@ -289,7 +394,7 @@ export function projectProblem(dir, home) {
   if (real === realHome) return 'The whole home folder can\'t be a project: pick a folder inside it.';
   if (!real.startsWith(realHome + path.sep)) return `${dir} is outside the home folder.`;
   // Not the settings folder, nor a folder with it inside: pi must not be started where it can rewrite its own settings.
-  let settingsDir; try { settingsDir = fs.realpathSync(path.join(home, 'Documents', 'roamies-pi')); } catch { settingsDir = null; }
+  let settingsDir; try { settingsDir = fs.realpathSync(path.join(home, PATHS.folder)); } catch { settingsDir = null; }
   if (settingsDir && (real === settingsDir || settingsDir.startsWith(real + path.sep))) return `${tilde(dir, home)} holds Roamies' own settings, so it can't be a project. Use a folder beside it or inside it, like ~/Documents/roamies-pi/workspace.`;
   return '';
 }
@@ -297,8 +402,8 @@ export function projectProblem(dir, home) {
 /** A snapshot of a project as it is now, kept as a git ref (refs/roamies/<stamp>) without touching the branch, the
  *  index or any file: the tracked files as they are, plus new files up to 2 MB each that .gitignore doesn't exclude.
  *  { ref } on success, { why } when there's none (not a git repository, git missing, or it failed). */
-export function snapshot(project, stampText, { init = false } = {}) {
-  const git = (args, opts = {}) => spawnSync('git', ['-c', 'user.name=Roamies', '-c', 'user.email=roamies@localhost', ...args], { cwd: project, encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024, ...opts });
+export function snapshot(project, stampText, { init = false, limits = limitDefaults() } = {}) {
+  const git = (args, opts = {}) => spawnSync('git', ['-c', 'user.name=Roamies', '-c', 'user.email=roamies@localhost', ...args], { cwd: project, encoding: 'utf8', timeout: limits.gitTimeoutSeconds * 1000, maxBuffer: 64 * 1024 * 1024, ...opts });
   try {
     let inside = git(['rev-parse', '--is-inside-work-tree']);
     if (inside.error) return { why: 'git isn\'t installed' };
@@ -312,7 +417,7 @@ export function snapshot(project, stampText, { init = false } = {}) {
       if (head && git(['read-tree', head], { env }).status !== 0) return { why: 'git couldn\'t read the last commit' };
       if (git(['add', '-u'], { env }).status !== 0) return { why: 'git couldn\'t record the changed files' };
       const fresh = git(['ls-files', '-o', '--exclude-standard', '-z'], { env }).stdout.split('\0').filter(Boolean)
-        .filter((f) => { try { const st = fs.lstatSync(path.join(project, f)); return st.isFile() && st.size <= 2 * 1024 * 1024; } catch { return false; } }).slice(0, 5000);
+        .filter((f) => { try { const st = fs.lstatSync(path.join(project, f)); return st.isFile() && st.size <= limits.snapshotMaxFileMB * 1024 * 1024; } catch { return false; } }).slice(0, limits.snapshotMaxFiles);
       if (fresh.length && git(['add', '--pathspec-from-file=-', '--pathspec-file-nul'], { env, input: fresh.join('\0') }).status !== 0) return { why: 'git couldn\'t record the new files' };
       const tree = git(['write-tree'], { env }).stdout.trim();
       if (!tree) return { why: 'git couldn\'t write the snapshot' };
@@ -336,15 +441,15 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   const stamp = (d = new Date(now())) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
 
   /** Shows the hand-off and waits for Send (a click, the Y key, or the word "send"). */
-  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0 }, signal) {
+  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0, limits = limitDefaults() }, signal) {
     const where = tilde(project, home);
     // auto: a read-only task is sent after this many seconds unless it's stopped. One that can edit always waits for Send.
     const head = `${auto ? `Asking pi in ${auto} s` : 'Send to pi?'}  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}${notes.map((n) => `\n${n}`).join('')}`;
     let body = prompt;
-    const pendingFile = path.join(dir, 'pending.txt');
-    if (prompt.length > SHOW_MAX) {
+    const pendingFile = path.join(dir, PATHS.pending);
+    if (prompt.length > limits.approvalBubbleChars) {
       fs.writeFileSync(pendingFile, `${head}\n\n${prompt}\n`);
-      body = `${prompt.slice(0, SHOW_MAX - 100)}… (the whole text is in ${tilde(pendingFile, home)})`;
+      body = `${prompt.slice(0, limits.approvalBubbleChars - 100)}… (the whole text is in ${tilde(pendingFile, home)})`;
     }
     tell(null, auto ? `Asking pi: ${forVoice(prompt)}` : `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}${followUp ? ', continuing the last task' : ''}. ${forVoice(prompt)} Say send to send it.`);
     const closing = new AbortController();
@@ -372,11 +477,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     // Old records go: keepLogsDays in the settings (30 unless it says otherwise; 0 keeps them all).
     if (settings.keepLogsDays > 0) {
       try {
-        const logs = path.join(settings.dir, 'log'), cutoff = t0 - settings.keepLogsDays * 864e5;
+        const logs = path.join(settings.dir, PATHS.log), cutoff = t0 - settings.keepLogsDays * 864e5;
         for (const f of fs.readdirSync(logs)) { const p = path.join(logs, f); if (f.endsWith('.jsonl') && fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true }); }
       } catch { /* best effort */ }
     }
-    const record = path.join(settings.dir, 'log', `${stamp()}_${String(id).padStart(3, '0')}_${mode}.jsonl`); // one file per hand-off
+    const record = path.join(settings.dir, PATHS.log, `${stamp()}_${String(id).padStart(3, '0')}_${mode}.jsonl`); // one file per hand-off
     const write = (o) => { try { fs.appendFileSync(record, `${typeof o === 'string' ? o : JSON.stringify(o)}\n`); } catch { /* the record is best effort */ } };
     const session = followUp ? sessions.get(project) : null;
     // "--" ends pi's options; a leading @ would attach a file, so it's kept off the front.
@@ -399,7 +504,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       const next = `Pi's ${line}…`;
       if (next === stepText) return; // the same thing again: nothing new to show
       stepText = next;
-      const wait = stepAt + STEP_GAP - now();
+      const wait = stepAt + settings.limits.stepBubbleSeconds * 1000 - now();
       if (wait <= 0) { stepAt = now(); say(stepText); } else if (!stepTimer) stepTimer = setTimeout(() => { stepTimer = null; stepAt = now(); if (job === j) say(stepText); }, wait);
     };
     const onEvent = (e) => {
@@ -471,13 +576,13 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       name: 'ask_pi',
       description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. ${userName} always sees the exact prompt first: a read-only task then goes by itself after a few seconds unless they stop it, and one that can edit goes only when they say send. pi then works in the background and the app shows its steps. Don't wait for it: you're told when pi has finished.`,
       parameters: z.object({ prompt: z.string(), mode: z.enum(['read', 'edit']), follow_up: z.boolean().optional() }),
-      executionMode: 'sequential', timeoutMs: 10 * 60_000, // time to read the prompt and answer; pi itself runs in the background
+      executionMode: 'sequential', timeoutMs: limitsFor(home).answerWaitMinutes * 60_000, // time to read the prompt and answer; pi itself runs in the background
       execute: async ({ prompt, mode, follow_up: followUp }, ctx) => {
         if (job) throw new Error('pi is still working on the last task. Wait for its reply, or stop it with stop_pi.');
         const text = String(prompt ?? '').trim();
         if (!text) throw new Error('The prompt is empty.');
-        if (text.length > 8000) throw new Error('The prompt is over 8000 characters. Make it shorter: name the files instead of pasting them.');
         const settings = loadSettings(home);
+        if (text.length > settings.limits.promptChars) throw new Error(`The prompt is over ${settings.limits.promptChars} characters. Make it shorter: name the files instead of pasting them.`);
         const problem = projectProblem(settings.project, home);
         if (problem) throw new Error(`${problem} Tell ${userName} to fix "project" in ${tilde(settings.file, home)}.`);
         const cont = !!followUp && sessions.has(settings.project);
@@ -491,7 +596,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         if (settings.pi !== 'pi') notes.push(`⚠ pi is started with: ${settings.pi}`);
         let snap = null;
         if (m === 'edit') {
-          snap = snapshot(settings.project, stamp(), { init: settings.project === path.join(settings.dir, 'workspace') });
+          snap = snapshot(settings.project, stamp(), { init: settings.project === path.join(settings.dir, PATHS.workspace), limits: settings.limits });
           notes.push(snap.ref ? 'Undo snapshot taken.' : `No undo snapshot (${snap.why}).`);
         }
         // The sandbox: built and tried before anything is shown, so the bubble says what will really happen. If it
@@ -507,7 +612,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
             if (box.docker) notes.push('Docker allowed: containers can reach folders outside this project.');
           }
         }
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: m === 'read' && !unconfined ? settings.autoSendReadOnly : 0 }, ctx?.signal);
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: m === 'read' && !unconfined ? settings.autoSendReadOnly : 0, limits: settings.limits }, ctx?.signal);
         if (!ok) { log('pi_declined', { mode: m }); throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`); }
         start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box });
         return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
@@ -549,10 +654,10 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     try { s = loadSettings(home); } catch (e) { return `- pi: its settings file has a problem (${e.message}).`; }
     const others = s.projects.filter((p) => p.dir !== s.project).map((p) => p.name);
     const lines = [`- pi works in: ${tilde(s.project, home)}${others.length ? `. Other projects ${userName} listed: ${others.join(', ')}` : ''}.`];
-    for (const r of s.routines.slice(0, 12)) lines.push(`- Routine "${r.name}": ${r.steps.map((x, i) => `${i + 1}) ${x}`).join('  ')}`);
+    for (const r of s.routines.slice(0, s.limits.routinesShown)) lines.push(`- Routine "${r.name}": ${r.steps.map((x, i) => `${i + 1}) ${x}`).join('  ')}`);
     if (job) lines.push(`- pi is WORKING now (${job.mode === 'edit' ? 'editing allowed' : 'read only'}) on: "${clip(job.prompt, 300)}". Until it replies you can only talk, keep the to-do list and notes, or stop_pi.`);
     else if (last && last.project === s.project) {
-      const said = last.reply ? ` pi's reply (the app puts it on screen for ${userName} in full): <<<${clip(last.reply, LIVE_MAX)}>>>` : '';
+      const said = last.reply ? ` pi's reply (the app puts it on screen for ${userName} in full): <<<${clip(last.reply, s.limits.piReplyChars)}>>>` : '';
       lines.push(`- Last pi task (${last.status}${last.problem ? `: ${clip(last.problem, 200)}` : ''}; ${last.mode === 'edit' ? 'editing allowed' : 'read only'}): "${clip(last.prompt, 300)}".${said}${last.snapshot ? ` A snapshot from before pi's edits is kept as ${last.snapshot}; to undo, ${userName} runs in Terminal: git -C "${last.project}" restore --source=${last.snapshot} --worktree -- .` : ''}${/\?\s*$/.test(last.reply) ? ` It ended with a question: ${userName}'s answer goes to pi with ask_pi and follow_up true.` : ''}`);
     }
     return lines.join('\n');
@@ -563,8 +668,8 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const out = [];
     try {
       const s = loadSettings(home), prefix = stamp(day).slice(0, 10);
-      for (const f of fs.readdirSync(path.join(s.dir, 'log')).filter((n) => n.startsWith(prefix) && n.endsWith('.jsonl')).sort()) {
-        const rows = fs.readFileSync(path.join(s.dir, 'log', f), 'utf8').split('\n').filter(Boolean);
+      for (const f of fs.readdirSync(path.join(s.dir, PATHS.log)).filter((n) => n.startsWith(prefix) && n.endsWith('.jsonl')).sort()) {
+        const rows = fs.readFileSync(path.join(s.dir, PATHS.log, f), 'utf8').split('\n').filter(Boolean);
         let first, lastRow; try { first = JSON.parse(rows[0]); lastRow = JSON.parse(rows.at(-1)); } catch { continue; }
         if (first?.type !== 'roamies_handoff') continue;
         out.push({ time: `${f.slice(11, 13)}:${f.slice(13, 15)}`, mode: first.mode, prompt: clip(String(first.prompt ?? ''), 160), status: lastRow?.type === 'roamies_result' ? lastRow.status : 'unfinished' });
@@ -582,7 +687,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const given = readState(s.dir).briefings ?? {};
     const list = (tasks) => (tasks.length ? tasks.map((t) => `- ${t.time} (${t.mode === 'edit' ? 'could edit' : 'read only'}, ${t.status}): ${t.prompt}`).join('\n') : '- nothing');
     const due = (kind, until) => s.briefings[kind] !== null && mins >= s.briefings[kind] && mins < until && given[kind] !== today;
-    if (due('morning', s.briefings.morning + 240)) {
+    if (due('morning', s.briefings.morning + s.limits.morningBriefingWindowHours * 60)) {
       const y = new Date(d); y.setDate(y.getDate() - 1);
       return { kind: 'morning', note: `(System, not ${userName}: it's time for the morning briefing they set up. In a few short spoken sentences, in character: greet them, say what's on their to-do list and what's due today (call list_commitments first; no other tool), and what pi worked on yesterday, from this list. Don't read the list out line by line.)\nWhat pi was asked yesterday:\n${list(tasksOn(y))}` };
     }
@@ -610,6 +715,36 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     state: () => ({ working: job ? { prompt: job.prompt, mode: job.mode, project: job.project, since: job.at } : null, last }),
   };
 }
+
+/** What stays in code, for the owner to see (the "reference" part of settings.default.json): the sandbox's lists and
+ *  the guards and fixed facts no setting changes. Built from the constants themselves; paths are written with ~. */
+export function codeReference() {
+  const h = '~', dir = `~/${PATHS.folder.split(path.sep).join('/')}`;
+  const blocked = BLOCKED(h, dir);
+  return {
+    limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}) }])),
+    sandbox: {
+      builtInToolFolders: [...TOOL_FOLDERS],
+      blockedFolders: blocked.filter(([kind]) => kind === 'subpath').map(([, p]) => p),
+      blockedFiles: blocked.filter(([kind]) => kind === 'literal').map(([, p]) => p),
+      startupFilesReadable: STARTUP.map((f) => `${h}/${f}`),
+      piMayWriteInItsOwnFolder: PI_WRITES.map(([kind, f]) => `${h}/${PI_HOME}/agent/${f}${kind === 'subpath' ? '/' : ''}`),
+      programsPiCannotRun: [...NO_EXEC],
+      externalDrives: VOLUMES,
+      dockerReadableWhenAllowed: DOCKER_READS.map((d) => `${h}/${d}`),
+      dockerSocketsClosedOtherwise: [...DOCKER_SOCKETS.home.map((d) => `${h}/${d}`), ...DOCKER_SOCKETS.system],
+      alwaysReadable: [`${h}/${PI_HOME}`, 'the folder of the "pi" command, when "pi" is a full path'],
+      alwaysWritable: [...WRITE_ALWAYS, ...TEMP, 'your temporary folder ($TMPDIR) and the cache folder beside it'],
+      sandboxProgram: SANDBOX_EXEC,
+    },
+    tools: { removed: [...REMOVED], piReadOnly: READ_TOOLS.split(','), allowedWhilePiWorks: [...DURING] },
+    sendWords: [...SEND_WORDS],
+    home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },
+    paths: { folder: dir, settings: PATHS.settings, reference: PATHS.reference, state: PATHS.state, records: `${PATHS.log}/`, defaultProject: `${PATHS.workspace}/`, longPrompt: PATHS.pending },
+  };
+}
+/** Where settings.default.json is. */
+export const referenceFile = (home) => path.join(home, PATHS.folder, PATHS.reference);
 
 // What the open tool may be given: an app's name. Not a link, a web address, or a file or folder path.
 export const isAppName = (target) => {

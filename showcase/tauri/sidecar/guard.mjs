@@ -6,9 +6,9 @@
 //     (by the front app's name alone, never by a word in a title, an address or the line itself).
 // It fails closed: if the open windows can't be listed, nothing is captured.
 import os from 'node:os';
-import { loadSettings } from './pi.mjs';
+import { loadSettings, NEVER_LOOK } from './pi.mjs';
 
-export const DEFAULT_NEVER_LOOK = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Passwords', 'Messages'];
+export const DEFAULT_NEVER_LOOK = NEVER_LOOK; // the one built-in list (pi.mjs, with the other defaults)
 
 const HIDDEN = 'In front: an app on the never-look list (its name and window are hidden).';
 

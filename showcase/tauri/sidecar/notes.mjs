@@ -9,11 +9,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { loadSettings } from './pi.mjs';
+import { limitsFor, loadSettings } from './pi.mjs';
 
-const MAX_NOTE = 20_000; // characters written or read in one go
-const MAX_FILES = 5000; // notes looked through in a search
-const MAX_BYTES = 300_000; // a bigger file is searched by its title only
+// The sizes and counts are settings ("limits" in settings.json): noteMaxChars, the characters written or read in one
+// go; notesSearched, the notes looked through in a search; noteTitleOnlyBytes, over which a note is searched by its
+// title only.
 export const NOTE_TOOLS = ['write_note', 'search_notes', 'read_note'];
 
 /** A title as a file name: no folders, no leading dots, none of the characters Obsidian or the file system refuse. */
@@ -39,18 +39,18 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
 
   /** Every note in the vault: { title, file, rel, mtime }. Folders starting with a dot (.obsidian, .trash) are skipped. */
   function all(dir) {
-    const out = [];
+    const out = [], most = limitsFor(home).notesSearched, titleOnly = limitsFor(home).noteTitleOnlyBytes;
     const walk = (d, depth) => {
-      if (depth > 8 || out.length >= MAX_FILES) return;
+      if (depth > 8 || out.length >= most) return;
       let entries;
       try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
         if (e.name.startsWith('.')) continue;
         const f = path.join(d, e.name);
         if (e.isDirectory()) walk(f, depth + 1);
-        else if (e.isFile() && /\.md$/i.test(e.name) && out.length < MAX_FILES) {
+        else if (e.isFile() && /\.md$/i.test(e.name) && out.length < most) {
           let st; try { st = fs.statSync(f); } catch { continue; }
-          out.push({ title: e.name.replace(/\.md$/i, ''), file: f, rel: path.relative(dir, f), mtime: st.mtimeMs, size: st.size });
+          out.push({ title: e.name.replace(/\.md$/i, ''), file: f, rel: path.relative(dir, f), mtime: st.mtimeMs, size: st.size, titleOnly: st.size > titleOnly });
         }
       }
     };
@@ -70,7 +70,7 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
     return { error: `There's no note called "${title}". search_notes finds what there is.` };
   }
 
-  const text = (n) => { try { return n.size > MAX_BYTES ? '' : fs.readFileSync(n.file, 'utf8'); } catch { return ''; } };
+  const text = (n) => { try { return n.titleOnly ? '' : fs.readFileSync(n.file, 'utf8'); } catch { return ''; } };
 
   const tools = [
     {
@@ -83,7 +83,8 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
         if (!name) throw new Error('The note needs a title: a few plain words.');
         const body = String(content ?? '').trim();
         if (!body) throw new Error('The note is empty.');
-        if (body.length > MAX_NOTE) throw new Error(`That's over ${MAX_NOTE} characters. Split it into a few notes that link to each other.`);
+        const most = limitsFor(home).noteMaxChars;
+        if (body.length > most) throw new Error(`That's over ${most} characters. Split it into a few notes that link to each other.`);
         const dir = vault(), when = stamp(new Date(now()));
         const there = all(dir).find((n) => n.title.toLowerCase() === name.toLowerCase());
         if (there) {
@@ -137,8 +138,8 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
       execute: async ({ title }) => {
         const { note, error } = find(all(vault()), title);
         if (error) throw new Error(error);
-        const body = fs.readFileSync(note.file, 'utf8');
-        return `# ${note.title}\n\n${body.length > MAX_NOTE ? `${body.slice(0, MAX_NOTE)}\n[Cut off: the note is longer than this.]` : body}`;
+        const body = fs.readFileSync(note.file, 'utf8'), most = limitsFor(home).noteMaxChars;
+        return `# ${note.title}\n\n${body.length > most ? `${body.slice(0, most)}\n[Cut off: the note is longer than this.]` : body}`;
       },
     },
   ];
