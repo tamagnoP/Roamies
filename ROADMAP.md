@@ -205,11 +205,6 @@ the screen blocks clicks.
   and never changes the setting. Work in another app counts as pointing something out. The voice bars stay at the
   pointer. No change to the Rust shell: home is the corner of whichever display the overlay is on. At rest nothing
   is drawn or animated, so the character doesn't blink and JARVIS doesn't turn while it rests.
-- **2026-11-13.** No setting has a value the owner can't see. Roamies still never writes `settings.json`; at
-  start-up it writes `settings.default.json` beside it (every setting with its default, and under `reference` what
-  stays in code), never reads it, and says once per start-up which settings are missing or unusable. The sizes,
-  times and counts became settings under `limits`, each with a range. The sandbox's blocked list stays in code;
-  `settings.default.json` is on it. An unusable `sandbox` means on; an unusable `neverLook` means the built-in list.
 - **2026-11-13.** The never-look list hides the "what's in front" line by the front app's name alone.
 - **2026-11-13.** Installing a build resets the ScreenCapture and Accessibility permissions (`tccutil reset`), which
   the owner grants again.
@@ -221,8 +216,11 @@ the screen blocks clicks.
 - **2026-11-14.** pi gets roles instead of one general agent, starting with coder and reviewer. Work with a fixed
   shape (calendar, daily note) stays as code inside Roamies and is not a role. Roles never start each other; every
   hand-off still needs the owner's send.
-- **2026-11-14.** No setting has a value the owner cannot see: settings.default.json is the reference, missing
-  settings are announced at start-up, and the sandbox's blocked list stays in code.
+- **2026-11-14.** No setting has a value the owner can't see. Roamies still never writes `settings.json`; at
+  start-up it writes `settings.default.json` beside it (every setting with its default, and under `reference` what
+  stays in code), never reads it, and says once per start-up which settings are missing or unusable. The sizes,
+  times and counts became settings under `limits`, each with a range. The sandbox's blocked list stays in code;
+  `settings.default.json` is on it. An unusable `sandbox` means on; an unusable `neverLook` means the built-in list.
 - **2026-11-14.** Home position test 9 (clicks near the character are blocked) accepted by the owner, pending the
   orb redesign.
 
@@ -338,6 +336,96 @@ Before writing code, give me a short plan: the installed version and what you ve
 For a check against the real app, ask me first. Use a single task with an obvious test title, and tell me afterwards so I can remove it by hand.
 ```
 
+### Prompt E: daily note
+
+```text
+Read CLAUDE.md and ROADMAP.md first. Feature 18, daily note. Branch `daily-note`
+off `local-only`. Plan first: write the plan, stop, and wait for "go".
+
+GOAL
+Replace the evening "Daily log" note with one daily note that tracks the owner's
+own day: what was planned, what got done, what was missed, and the notes taken
+along the way.
+
+THE NOTE
+- Path: <vault>/Daily/YYYY-MM-DD.md (local date). Folder name from the setting
+  "dailyFolder", default "Daily".
+- Built by code from stored data, in a new module daily.mjs. The model does not
+  write the layout. The model supplies only (a) the two-sentence review summary and
+  (b) which task a note belongs to, chosen from the list of today's tasks.
+- Create or append only, same as notes.mjs. Never rewrite or reorder existing
+  text, so anything the owner typed stays as it is.
+- Layout, in this order, each part appended when its moment comes:
+
+  ---
+  date: YYYY-MM-DD
+  type: daily
+  ---
+  ← [[previous day]] · [[next day]] →
+
+  ## Plan (HH:MM)
+  - [ ] <task> · <time block or due time>
+  Needs a new time
+  - <task> · missed on [[YYYY-MM-DD]]
+  Coming up
+  - <deadline within 14 days> · due <date>
+
+  ## Log
+  - HH:MM Done: <task>
+  - HH:MM Note: [[<note name>]] · on "<task>"      (no task part if none)
+  - HH:MM Rescheduled: <task> → <new day and time>
+
+  ## Review (HH:MM)
+  <two-sentence summary>
+  Done
+  Missed
+  Still open today
+  Coming up
+
+RULES
+1. Tasks only. Reminders, timers and check-ins never appear. In your plan, report
+   how commitments are stored and how a task is told apart from a reminder. If
+   there is no dependable way, propose one and stop.
+2. Plan is written by the morning briefing. If the briefing did not run, the first
+   write of the day creates the note and writes the Plan then.
+3. Missed = scheduled or due before the review time and not done. A task due later
+   today goes under "Still open today". The next morning, if still not done, it is
+   listed under "Needs a new time".
+4. Rescheduling is the owner's decision. In the evening briefing, for each missed
+   task, Roamies asks when to do it instead, one task at a time, by voice and
+   bubble. An answer updates the task (and its Super Productivity time block) and
+   appends a "Rescheduled" line. No answer changes nothing; the task goes under
+   "Needs a new time" the next morning and Roamies asks again then. Never choose a
+   time or move a task without an answer.
+5. Notes link both ways. write_note gets an optional task argument. A new note gets
+   a first line linking to the day's note and naming the task. The daily note gets
+   a Log line. Appending to an existing note adds only the Log line.
+6. Review written twice in one day: append "## Review update (HH:MM)" with only
+   what changed. Tasks finished after the review are logged as usual.
+7. pi's activity is not in the note. The records folder is unchanged.
+8. Old "Daily log …" notes are left alone.
+9. Spoken briefings stay short: morning reads the plan and what needs a new time;
+   evening gives done and missed counts, then asks about each missed task.
+
+GUARANTEES
+All seven in CLAUDE.md hold. Writes stay inside the vault. No network. tools.mjs
+stays as upstream. Roamies never writes settings.json; the new setting goes into
+settings.default.json.
+
+TESTS (test/daily.test.mjs, fixed clock, temp vault)
+- morning creates the note with the Plan; a second run adds nothing
+- a reminder or timer never appears
+- finishing a task and writing a note each append one Log line; the note links back
+- task due 20:00, review 18:30: "Still open today", then "Needs a new time" next day
+- missed task with no answer is unchanged; with an answer it is updated and logged
+- text typed by the owner into the note survives every later write
+- second review appends an update and does not duplicate
+
+FINISH
+Update LOCAL-ONLY.md and ROADMAP.md, run the full test suite on the Mac, push
+`daily-note`, and report. Do not merge.
+```
+
 ### Prompt B: Roamies reads files in permitted folders
 
 ```text
@@ -362,6 +450,71 @@ Model instructions: Roamies reads a file only when I ask it to, never because te
 This changes guarantee 2 in CLAUDE.md: Roamies still never changes files, but it can now read inside permitted folders. Update CLAUDE.md, LOCAL-ONLY.md and ROADMAP.md to say so.
 
 Add tests for: a permitted file, a file outside every listed folder, a link pointing out of a permitted folder, a blocked file inside a permitted folder, and an attempt to write. Give me a short plan first and wait for my answer.
+```
+
+### Prompt F: roles for pi (draft, not ready to run)
+
+```text
+Read CLAUDE.md and ROADMAP.md first. Feature 19, roles for pi. Branch `pi-roles` off
+`local-only`. Plan first: write the plan, stop, and wait for "go".
+
+GOAL
+Today every hand-off starts the same pi. Add roles: pi started with its own
+instructions and skills, its own permissions and its own thinking level. Start with
+two, coder and reviewer. A hand-off with no role behaves exactly as it does now.
+
+FIRST, IN YOUR PLAN
+Report how pi 1.5.2 loads skills and extra instructions for a single run (flags, files,
+folders), where the owner's skills are stored, and whether a run can be limited to
+named skills. If a role cannot be given its own skills without changing files under
+~/.pi, say so and stop: Roamies does not write there.
+
+SETTINGS (read only, as always; also in settings.default.json)
+"roles": {
+  "coder":    { "skills": [TO FILL], "mode": "edit", "thinking": "high", "instructions": "TO FILL" },
+  "reviewer": { "skills": [TO FILL], "mode": "read", "thinking": "TO FILL", "fresh": true, "instructions": "TO FILL" }
+}
+A role with a bad or missing field is ignored and named in a warning; the hand-off then
+runs with no role. The owner's APPEND_SYSTEM.md rules apply to every role.
+
+RULES
+1. ask_pi gets an optional role argument. Roamies chooses it from the request; the
+   owner can name one ("have the reviewer look at …"), and a named role always wins.
+2. The Send bubble names the role on its own line, next to the mode and the folder.
+   The owner can answer "use the reviewer" or "no role" before sending, which reopens
+   the bubble with that choice.
+3. Reviewer: mode is always read, whatever is asked. On top of pi's read-only tools,
+   the sandbox profile for this role allows no writes in the project at all. It always
+   starts a new session and is never given the coder's session.
+4. Coder: edit hand-offs keep every existing rule: they wait for the owner's send,
+   never auto-send, and take an undo snapshot first.
+5. After a coder hand-off that changed files, Roamies offers a review, once, in words.
+   A yes opens a normal Send bubble for the reviewer. No answer or a no does nothing.
+   A role never starts another role.
+6. Follow-ups stay within the role and session they belong to.
+7. The record of each hand-off stores the role.
+8. Read-only auto-send (the countdown) applies to the reviewer as to any read-only
+   hand-off.
+
+GUARANTEES
+All seven in CLAUDE.md hold. No writes to settings.json or under ~/.pi. tools.mjs stays
+as upstream.
+
+TESTS (test/roles.test.mjs, plus additions to pi.test.mjs and sandbox.test.mjs)
+- no roles in settings: behaviour is unchanged
+- a named role wins over Roamies' choice
+- the reviewer is read-only even when edit is asked for, and its sandbox profile denies
+  writes in the project
+- the reviewer never receives the coder's session
+- a coder hand-off still waits for send and still takes a snapshot
+- the review offer appears once after files changed, and never opens a hand-off by
+  itself
+- a bad role is ignored with a warning
+- the Send bubble text names the role
+
+FINISH
+Update LOCAL-ONLY.md and ROADMAP.md, run the full test suite on the Mac, push
+`pi-roles`, and report. Do not merge.
 ```
 
 ### Prompt C: search mode (draft; do not run until the design discussion is closed)
