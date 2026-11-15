@@ -26,7 +26,7 @@ Last updated: 2026-11-14.
 | 10 | `settings.json` written only by the owner | Done | `2ac8919`, `add0dd3` |
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
-| 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | In progress (Prompt D, widened) | `sp-calendar` |
+| 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Built, not merged; to be reviewed and tried against the app | `sp-calendar` |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
 | 16 | Natural local voice (Kokoro or Piper) | Later | |
@@ -87,11 +87,13 @@ commits, in this order:
    unschedule, read a day back, plan a day (times worked out by code; shown whole; created after a yes). An overlap
    is shown and asked about. Refused when the app isn't answering or the list isn't mirrored yet. The morning
    briefing says what is on the calendar.
-3. **Matrix.** Not built yet: urgent and important by voice, `sort_tasks`, `show_matrix`, the one-time offer of a
-   block.
+3. **Matrix. Built.** Urgent and important as two flags on each to-do, synced with the app's tags `EM_URGENT` and
+   `EM_IMPORTANT`, other tags preserved: `set_priority`, `sort_tasks` (a proposal, applied after a yes),
+   `show_matrix`, and one offer of a block for a to-do that is urgent and important and has none.
 
 Checked against the installed Super Productivity 20.0.0, by reading the API code inside the app and with test tasks
-the owner removes by hand. Not merged: the owner reviews it first.
+the owner removes by hand. The code itself has only been run against a stand-in server (`test/calendar.test.mjs`),
+never against the real app. Not merged: the owner reviews it first.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -243,6 +245,9 @@ the screen blocks clicks.
 
 - [ ] The start-up settings bubble on screen (a `settings.json` without `limits`), and that it waits for the setup
   guide to close.
+- [ ] Feature 13 against the real Super Productivity: the first-time bubble and the mirror; a change on each side
+  arriving on the other; a block placed, moved and taken off; an overlap question; a day plan; the matrix tags
+  showing on the app's Eisenhower board; the app closed while a to-do is added.
 - [ ] Home position on screen: resting at each corner, bubbles, the trip out to a drawing and back, a second display.
 - [ ] Spoken progress on a long pi task.
 - [ ] Evening briefing and its "Daily log" note; morning briefing.
@@ -264,6 +269,11 @@ the screen blocks clicks.
   don't apply; the install step resets both (`tccutil reset`) and the owner grants them again.
 - With a home, the character covers a patch of the desktop that can't be clicked through (165 points across; 83 in
   the small size), and "Ask About an Area" captures it if the area includes it.
+- Super Productivity: a task that gets a start time after it was made also gets the app's own reminder at that
+  time, and the API can't set or remove it. A new task lands in the app's Today list. If Roamies stops between
+  creating a task and saving the link, a stray task is left in the app (said once at the next start). Deleting
+  `state.json` makes Roamies forget which tasks are its own. What another task is called reaches the conversation
+  only in the question about an overlap.
 - Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Not yet known whether
   upstream has the same growth. Quitting and reopening Roamies clears it. Needs a diagnosis.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange
@@ -296,6 +306,9 @@ Add tests for the positioning logic that can be tested without a display. Tell m
 ```
 
 ### Prompt D: calendar blocks in Super Productivity
+
+Run on 2026-11-14 and widened by the owner before any code was written (mirror, two-way sync, the matrix): what was
+built is in section 2 and in the decisions log. The prompt below is as first given.
 
 ```text
 Read CLAUDE.md and LOCAL-ONLY.md first. Work on a new branch off local-only named sp-calendar.

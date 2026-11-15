@@ -494,6 +494,77 @@ assert.match(side, /b\.kind === 'morning' \? `\$\{b\.note\}\$\{cal\.dayNote\(\)\
 // they work while pi is busy, like the to-do list
 for (const n of ['schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'sync_todos']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);
 
+// ================= the Eisenhower matrix =================
+const tagsOf = (c) => app.tasks.get(linkOf(c).task).tagIds;
+cal.takeHeld();
+// ---- said by voice: only what was said changes, and the task's other tags stay
+const m1 = add('Matrix: grant report'), m2 = add('Matrix: tidy desk'), m3 = add('Matrix: reply to editor'), m4 = add('Matrix: order tips'), m5 = add('Matrix: call bank');
+await cal.sync('timer');
+app.tasks.get(linkOf(m1).task).tagIds = ['PERSONAL'];
+await cal.setLocal(m1.id, { start: at(27, 9), minutes: 60 }); await cal.sync('timer'); // on the calendar already
+mark = app.log.length;
+out = await T('set_priority').execute({ todo: m1.id, urgent: true, important: true });
+assert.equal(out, '"Matrix: grant report": urgent and important.');
+assert.deepEqual(writes(mark).map((w) => w.body), [{ tagIds: ['PERSONAL', 'EM_URGENT', 'EM_IMPORTANT'] }]);
+out = await T('set_priority').execute({ todo: m1.id, urgent: false });
+assert.equal(out, '"Matrix: grant report": important, not urgent.'); assert.deepEqual(tagsOf(m1), ['PERSONAL', 'EM_IMPORTANT'], 'important stays as it was');
+await assert.rejects(T('set_priority').execute({ todo: m1.id }), /Say which/);
+await assert.rejects(T('set_priority').execute({ todo: ping.id, urgent: true }), /is a reminder/);
+await assert.rejects(unstarted.tools.find((t) => t.name === 'set_priority').execute({ todo: m1.id, urgent: true }), /isn't in Super Productivity yet, and urgent and important are kept with each to-do's task there/);
+// ---- set in the app: the flags follow, both ways round
+tagsOf(m2).push('EM_URGENT'); await cal.sync('timer');
+assert.deepEqual([linkOf(m2).local.urgent, linkOf(m2).local.important], [true, false]);
+app.tasks.get(linkOf(m2).task).tagIds = []; await cal.sync('timer');
+assert.deepEqual([linkOf(m2).local.urgent, linkOf(m2).local.important], [false, false]);
+
+// ---- the matrix read back: four quadrants, and what isn't sorted yet
+await T('set_priority').execute({ todo: m5.id, urgent: true });
+out = await T('show_matrix').execute({});
+const rows = out.split('\n');
+assert.equal(rows.length, 5);
+assert.equal(rows[0], `Urgent and important: Answer Ana today [${mail.id}] (on the calendar)`, '(made so in the app, earlier)');
+assert.equal(rows[1], `Important, not urgent: Matrix: grant report [${m1.id}] (on the calendar)`);
+assert.equal(rows[2], `Urgent, not important: Matrix: call bank [${m5.id}]`);
+assert.match(rows[3], new RegExp(`^Neither urgent nor important: .*Matrix: tidy desk \\[${m2.id}\\]`), 'cleared in the app: it has had its place, so it is "neither", not unsorted');
+assert.match(rows[4], /^Not sorted yet: /); assert.ok(rows[4].includes(`Matrix: reply to editor [${m3.id}]`) && rows[4].includes(`Matrix: order tips [${m4.id}]`) && !rows[4].includes('Matrix: tidy desk') && !rows[4].includes('Matrix: call bank'));
+assert.ok(!out.includes('Stretch') && !out.includes('Seminar'), 'reminders and tasks that aren\'t Roamies\' have no place in it');
+
+// ---- sort_tasks: a proposal for the unsorted ones, shown whole, applied only after a yes
+const proposals = [{ todo: m3.id, urgent: true, important: true }, { todo: m4.id, urgent: false, important: false }];
+answer = null; asked.length = 0; mark = app.log.length;
+await assert.rejects(T('sort_tasks').execute({ proposals }), /didn't say yes to the proposal, so nothing was sorted/);
+assert.deepEqual(asked, ['Sort these to-dos like this?\nUrgent and important: Matrix: reply to editor\nNeither urgent nor important: Matrix: order tips']);
+assert.deepEqual(writes(mark), []); assert.deepEqual([linkOf(m3).local.urgent, linkOf(m3).sorted ?? false, linkOf(m4).sorted ?? false], [false, false, false]);
+await assert.rejects(T('sort_tasks').execute({ proposals: [...proposals, { todo: m1.id, urgent: true, important: true }] }), /"Matrix: grant report" already has its place \(important, not urgent\)/);
+await assert.rejects(T('sort_tasks').execute({ proposals: [proposals[0], proposals[0]] }), /Each to-do once/);
+await assert.rejects(T('sort_tasks').execute({ proposals: [{ todo: ping.id, urgent: true, important: true }] }), /is a reminder/);
+assert.deepEqual(writes(mark), []);
+answer = 'yes'; mark = app.log.length;
+out = await T('sort_tasks').execute({ proposals });
+assert.deepEqual(writes(mark).map((w) => w.body), [{ tagIds: ['EM_URGENT', 'EM_IMPORTANT'] }], 'all of it, and "neither" needs no tag');
+assert.deepEqual([linkOf(m3).local.urgent, linkOf(m3).local.important, linkOf(m4).sorted], [true, true, true]);
+// ---- urgent and important, with no block: one is offered, once
+assert.equal(out, 'Sorted 2 to-dos.\n"Matrix: reply to editor" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?');
+out = await T('show_matrix').execute({});
+assert.ok(!/Shall I put a block/.test(out), 'not offered a second time'); assert.match(out.split('\n')[0], /^Urgent and important: .*Matrix: reply to editor \[c\d+\]$/); assert.ok(!out.split('\n')[4].includes('Matrix:'), 'none of them is unsorted now');
+await cal.sync('timer'); await T('set_priority').execute({ todo: m3.id, urgent: false }); out = await T('set_priority').execute({ todo: m3.id, urgent: true });
+assert.equal(out, '"Matrix: reply to editor": urgent and important.', 'nor when it becomes urgent and important again');
+out = await T('set_priority').execute({ todo: m1.id, urgent: true });
+assert.equal(out, '"Matrix: grant report": urgent and important.', 'one that has a block is offered none');
+// made urgent and important in the app, with nobody asking: the offer waits for a quiet moment, in a bubble
+app.tasks.get(linkOf(m5).task).tagIds = ['EM_URGENT', 'EM_IMPORTANT']; await cal.sync('timer'); await cal.sync('timer');
+assert.deepEqual(cal.takeHeld().lines, ['"Matrix: call bank" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?']);
+// ---- with the app away, what is said is kept here and goes over at the next sync
+app.hang = (m, p) => p === '/health'; mark = app.log.length;
+out = await T('set_priority').execute({ todo: m4.id, important: true });
+assert.equal(out, '"Matrix: order tips": important, not urgent.\nSuper Productivity stopped answering before this reached it: it is saved here and goes over at the next sync.');
+assert.deepEqual(writes(mark), []);
+app.hang = null; await cal.sync('timer');
+assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
+// ---- over everything so far: the only tags Roamies ever adds are the two matrix tags
+for (const w of writes().filter((q) => q.body && 'tagIds' in q.body)) assert.ok(w.body.tagIds.every((id) => ['EM_URGENT', 'EM_IMPORTANT', 'PERSONAL', 'KANBAN_IN_PROGRESS'].includes(id)), JSON.stringify(w.body));
+for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);
+
 // ---- 15. the one function added to upstream's store: a to-do's wording, changed
 const store = await import('../store.mjs');
 const kept = await store.addCommitment('Send the figures', at(17, 10));

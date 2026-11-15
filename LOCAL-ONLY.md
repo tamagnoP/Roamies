@@ -457,6 +457,21 @@ block has a to-do behind it, and a to-do has one block at most.
 - The morning briefing also says what is on the calendar today.
 - These tools work while pi is busy, like the to-do list.
 
+**Urgent and important** (the Eisenhower matrix). Each to-do has two flags, urgent and important. In the app they
+are its two matrix tags, `EM_URGENT` and `EM_IMPORTANT`, which is what its Eisenhower board goes by unless you have
+changed that board. They are synced like the other fields, so a task dragged to another quadrant in the app changes
+the to-do's flags.
+
+- "That one is urgent and important", "the email isn't urgent": only what you said changes.
+- "Sort my to-dos": Roamies proposes a quadrant for each to-do that has no place yet. The whole proposal is shown in
+  a bubble, quadrant by quadrant, and applied only after your yes. A to-do that already has its place is not
+  re-sorted this way.
+- "Show me the matrix": the four quadrants and what isn't sorted yet, said briefly.
+- A to-do that is urgent and important and has no block: Roamies offers one, once for each to-do, whether it became
+  so here or in the app.
+- A to-do counts as sorted once it has been given a place, here or in the app, "neither" included.
+- With the app not answering, what you say is kept and reaches the app at the next sync.
+
 **What a sync has to say** (a clash, a deleted task, the first-time question) when nobody asked for one waits until
 nothing else is going on: no reply being made or read out, nobody talking, no bubble waiting for an answer. Then it
 is shown in a bubble, not spoken. It is kept in `state.json` until shown, so quitting doesn't lose it. During a

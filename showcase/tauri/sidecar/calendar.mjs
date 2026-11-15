@@ -264,6 +264,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
             if ('due' in toHere) await todos.update(id, { dueMs: toHere.due });
           }
           for (const f of ['start', 'minutes', 'urgent', 'important']) if (f in toHere) link.local[f] = toHere[f];
+          if ('urgent' in toHere || 'important' in toHere) link.sorted = true; // given a place in the matrix, in the app
           for (const f of Object.keys(toHere)) { link.agreed[f] = toHere[f]; local[f] = toHere[f]; }
           if ('title' in toHere) link.title = toHere.title;
           if ('done' in toHere) link.was = toHere.done ? 'done' : 'open';
@@ -274,6 +275,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         // Then Roamies' changes go there. An archived task takes none.
         if (Object.keys(toApp).length && !gone) {
           if (await writeTask(link, toApp, local)) { for (const f of Object.keys(toApp)) link.agreed[f] = toApp[f]; save(); log('calendar_to_app', { fields: Object.keys(toApp) }); }
+        }
+        // Urgent and important, and not on the calendar: a block is offered, once for each to-do.
+        if (!local.done && link.local.urgent && link.local.important && link.local.start === null && !link.offered && cal.links[id]) {
+          link.offered = true; save();
+          lines.push(`${quote(link.title)} is urgent and important, and isn't on the calendar. Shall I put a block for it there?`);
         }
         // Done on both sides: the link is retired and no longer synced.
         if (local.done && (gone || link.agreed.done)) { cal.retired[id] = link.task; delete cal.links[id]; save(); }
@@ -516,6 +522,73 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
   ];
 
+  // ---- the Eisenhower matrix: urgent and important, which are the app's two matrix tags
+  const QUADRANTS = [['Urgent and important', true, true], ['Important, not urgent', false, true], ['Urgent, not important', true, false], ['Neither urgent nor important', false, false]];
+  const quadrant = (urgent, important) => QUADRANTS.find(([, u, i]) => u === !!urgent && i === !!important)[0];
+  /** The open to-dos that are mirrored, each with where it sits: [{ id, title, urgent, important, sorted, block }]. */
+  async function sortable() {
+    const cal = get();
+    return (await todos.all()).filter((t) => t.status === 'open' && cal.links[t.id]).map((t) => { const l = cal.links[t.id]; return { id: t.id, title: t.text, urgent: l.local.urgent, important: l.local.important, sorted: !!l.sorted || l.local.urgent || l.local.important, block: l.local.start }; });
+  }
+  const setFlags = (id, flags) => inTurn(() => edit((cal) => { const l = cal.links[id]; if (!l) return false; for (const f of ['urgent', 'important']) if (typeof flags[f] === 'boolean') l.local[f] = flags[f]; l.sorted = true; return true; }));
+  /** Before the matrix is read or changed: mirrored, and in step with the app when it answers (without it, what is
+   *  set here is kept and goes over at the next sync). */
+  async function mirrored() {
+    if (!get().started) throw new Error(NOT_YET.replace('so there is nowhere to put a block', 'and urgent and important are kept with each to-do\'s task there'));
+    return (await sync('tool')).text;
+  }
+  const matrixTools = [
+    {
+      name: 'set_priority',
+      description: 'Mark a to-do urgent or not, important or not (the Eisenhower matrix; in Super Productivity these are its two matrix tags). Use it when they say so ("that one is urgent and important", "the email isn\'t urgent"). Give only what they said; the other stays as it is.',
+      parameters: z.object({ todo: z.string(), urgent: z.boolean().optional(), important: z.boolean().optional() }),
+      execute: async ({ todo, urgent, important }) => {
+        if (urgent === undefined && important === undefined) throw new Error('Say which: urgent, important, or both.');
+        const pre = await mirrored();
+        const { t } = await todoFor(todo);
+        await setFlags(todo, { urgent, important });
+        const l = get().links[todo].local;
+        log('calendar_priority', { set: 1 });
+        return settle(pre, `${quote(t.text)}: ${quadrant(l.urgent, l.important).toLowerCase()}.`);
+      },
+    },
+    {
+      name: 'sort_tasks',
+      description: 'Propose where each unsorted to-do goes in the Eisenhower matrix. Call show_matrix first to see which are unsorted, then give a proposal for every one of them: urgent or not, important or not, judged from what the to-do says and when it is due. The app shows them the whole proposal and applies it only after their yes. For one to-do they have placed themselves, use set_priority instead.',
+      parameters: z.object({ proposals: z.array(z.object({ todo: z.string(), urgent: z.boolean(), important: z.boolean() })).min(1).max(60) }),
+      execute: async ({ proposals }, ctx) => {
+        const pre = await mirrored();
+        const all = await sortable();
+        if (new Set(proposals.map((p) => p.todo)).size !== proposals.length) throw new Error('Each to-do once.');
+        for (const p of proposals) {
+          const it = all.find((x) => x.id === p.todo);
+          if (!it) { await todoFor(p.todo); throw new Error(`${p.todo} can't be sorted.`); } // todoFor says why not
+          if (it.sorted) throw new Error(`${quote(it.title)} already has its place (${quadrant(it.urgent, it.important).toLowerCase()}). sort_tasks is for the unsorted ones; set_priority changes one they name.`);
+        }
+        const shown = ['Sort these to-dos like this?', ...QUADRANTS.map(([name, u, i]) => { const here = proposals.filter((p) => p.urgent === u && p.important === i).map((p) => all.find((x) => x.id === p.todo).title); return here.length ? `${name}: ${here.join('; ')}` : null; }).filter(Boolean)].join('\n');
+        const yes = await ask({ placeholder: shown, choices: ['Sort them', 'Don\'t'] }, ctx?.signal);
+        if (!isSend(yes)) throw new Error('They didn\'t say yes to the proposal, so nothing was sorted.');
+        for (const p of proposals) await setFlags(p.todo, { urgent: p.urgent, important: p.important });
+        log('calendar_priority', { set: proposals.length });
+        return settle(pre, `Sorted ${proposals.length} to-do${proposals.length === 1 ? '' : 's'}.`);
+      },
+    },
+    {
+      name: 'show_matrix',
+      description: 'The Eisenhower matrix of their open to-dos: the four quadrants, and the to-dos not sorted yet. Say it briefly: a quadrant at a time, a few words each, not every line.',
+      parameters: z.object({}),
+      execute: async () => {
+        const pre = await mirrored();
+        const all = await sortable();
+        if (!all.length) return ['There are no open to-dos to sort.', pre].filter(Boolean).join('\n');
+        const line = (x) => `${x.title} [${x.id}]${x.block === null ? '' : ' (on the calendar)'}`;
+        const parts = QUADRANTS.map(([name, u, i]) => { const here = all.filter((x) => x.sorted && x.urgent === u && x.important === i); return `${name}: ${here.length ? here.map(line).join('; ') : 'nothing'}`; });
+        const loose = all.filter((x) => !x.sorted);
+        return [...parts, loose.length ? `Not sorted yet: ${loose.map(line).join('; ')}` : 'Every to-do is sorted.', pre].filter(Boolean).join('\n');
+      },
+    },
+  ];
+
   /** For the morning briefing: what is on the calendar today, as a note for the model. '' when that isn't known. */
   function dayNote(d = new Date(now())) {
     let cal;
@@ -534,6 +607,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
 
   const tools = [
     ...blockTools,
+    ...matrixTools,
     {
       name: 'sync_todos',
       description: 'Sync the to-do list with Super Productivity now (it also happens by itself, about once a minute). Use it when they ask to sync, or to put their to-do list in Super Productivity for the first time; that first time the app shows them the list and waits for their yes.',
