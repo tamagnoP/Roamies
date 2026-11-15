@@ -32,7 +32,7 @@ out({ type: 'agent_settled', aborted: false });
 process.env.PATH = `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}`;
 
 // ---- small pieces
-assert.ok(isSend('send') && isSend('Send it.') && isSend('yes') && !isSend("don't send") && !isSend('wait, change it') && !isSend(null));
+assert.ok(isSend('send') && isSend('Send it.') && isSend('yes') && !isSend("don't send") && !isSend('wait, change it') && !isSend(null) && !isSend('ok, wait, change it') && !isSend('go back'));
 assert.equal(describeStep('read', { path: '/a/b/notes.md' }), 'reading notes.md');
 assert.equal(describeStep('bash', { command: 'ls   -la\n' }), 'running ls -la');
 assert.equal(messageText({ content: [{ type: 'thinking', thinking: 'hm' }, { type: 'text', text: ' hi ' }] }), 'hi');
@@ -186,13 +186,35 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   r = await run('edit: unclear then send', async () => { await unclear('which files'); await say('send'); }, 'edit');
   assert.match(r.value, /^Sent to pi \(editing allowed/); await settled(); assert.equal(calls().length, ++n);
   // which words are which
-  for (const w of ['no', 'No.', 'no wait, read the other file', 'Don\'t.', 'don’t send it', 'do not send', 'cancel', 'Stop', 'never mind', 'nope']) assert.ok(isDontSend(w), w);
-  for (const w of ['maybe later', 'not sure', 'nothing', 'know', 'stopwatch', 'what does it say', '', 'send', 'yes', 'ok go']) assert.ok(!isDontSend(w), w);
-  assert.deepEqual(codeReference().dontSendWords.filter((w) => !isDontSend(w)), []);
+  // ---- which words are which: nothing but send words sends, nothing but don't-send words declines
+  const ref = codeReference();
+  for (const w of ref.sendWords) for (const form of [w, `${w[0].toUpperCase()}${w.slice(1)}.`, `  ${w.toUpperCase()}!  `, `${w} please`, `Please, ${w}.`, `${w}, ${w}`]) { assert.ok(isSend(form), form); assert.ok(!isDontSend(form), form); }
+  for (const w of ['send it please', 'Yes, send it.', 'OK, go ahead.', 'ok go', 'Yes yes yes', 'yeah do it please', 'Okay. Send.', 'yes']) assert.ok(isSend(w), w);
+  for (const w of ref.dontSendWords) for (const form of [w, `${w[0].toUpperCase()}${w.slice(1)}.`, `${w} please`, `${w}, ${w}`]) { assert.ok(isDontSend(form), form); assert.ok(!isSend(form), form); }
+  for (const w of ['No.', 'No, no.', 'No, stop.', 'Don’t.', 'don’t send it', 'No, don\'t send it please', 'cancel, never mind', 'nope']) assert.ok(isDontSend(w), w);
+  const OPEN = ['ok wait', 'OK, wait, change the prompt', 'go back', 'Go back.', 'yes but change the prompt', 'send it to the other project', 'send it later', 'sender', 'gone', 'okay so what does it do', 'confirm the folder first', 'yes and no',
+    'yes no', 'send, no wait', 'no, send it', 'ok cancel', 'stop, go ahead', 'no wait, read the other file', 'no not that one', 'stopwatch', 'maybe later', 'not sure', 'please', '', null];
+  for (const w of OPEN) assert.ok(!isSend(w) && !isDontSend(w), `"${w}" is neither`);
+
+  // ---- each send word alone sends, and so does "send it please"
+  for (const w of [...ref.sendWords, 'send it please']) {
+    r = await run(`send word: ${w}`, async () => { await say(w); });
+    assert.match(r.value, /^Sent to pi/, w); await settled(); assert.equal(calls().length, ++n, w); assert.equal(sentBy(), 'voice');
+  }
+  // ---- words that only start like a send, and mixed ones, send nothing and leave the bubble open: read only and edit
+  for (const mode of ['read', 'edit']) {
+    r = await run(`${mode}: not quite send`, async () => { for (const w of ['ok wait', 'go back', 'yes but change the prompt', 'send it to the other project', 'OK, wait, change the prompt', 'yes no', 'send, no wait', 'no, send it']) await unclear(w); await step(() => lastResolve(null)); }, mode);
+    assert.match(r.error, /didn't say send/); assert.equal(calls().length, n, `${mode}: pi was never started`);
+    // ...and afterwards it still takes a plain send, or a plain no
+    r = await run(`${mode}: then send`, async () => { await unclear('go back'); await unclear('ok wait'); await say('OK, send it.'); }, mode);
+    assert.match(r.value, mode === 'edit' ? /^Sent to pi \(editing allowed/ : /^Sent to pi \(read only/); await settled(); assert.equal(calls().length, ++n); assert.equal(sentBy(), 'voice');
+    r = await run(`${mode}: then no`, async () => { await unclear('yes but change the prompt'); await say('No, don\'t send it.'); }, mode);
+    assert.match(r.error, /didn't say send/); assert.equal(calls().length, n);
+  }
   answer = 'yes';
 }
-{ // said something else while the Send bubble was open: not sent
-  answer = () => pi.heard('no wait, read the other file');
+{ // "no" with more after it is not a plain no: the bubble stays open; a click on Don't send closes it
+  answer = () => { assert.ok(pi.heard('no wait, read the other file')); setTimeout(() => { assert.equal(pi.bubble(), 'idle'); lastResolve(null); }, 20); };
   await assert.rejects(tool('ask_pi').execute({ prompt: 'x', mode: 'read' }, {}), /didn't say send/);
 }
 { // a long prompt: the bubble holds the start, the whole of it is in pending.txt until answered

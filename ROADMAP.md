@@ -238,6 +238,9 @@ the screen blocks clicks.
   ask about the to-do; a to-do removed in Roamies leaves its task in the app without a time. From tasks Roamies did
   not make, only title, start, length and done are read, to see clashes. Urgent and important are the app's tags
   `EM_URGENT` and `EM_IMPORTANT`. One marked function in upstream's `store.mjs` is allowed for this.
+- **2026-11-15.** The Send bubble is as strict as the calendar's bubbles: it sends only on nothing but send words,
+  declines only on nothing but don't-send words, and stays open on anything else, a send word followed by other
+  words included. Before, anything starting with a send word sent ("OK, wait, change the prompt").
 - **2026-11-15.** Found on the installed `6d91f9c`: after an unclear phrase, a spoken "no" was not taken. The log
   shows every phrase was transcribed and reached the bubble; none was one of the listed phrases alone (the last was
   7 characters, "No." is 3; the log keeps sizes, not words). The listening pill stayed up after each ignored
@@ -292,6 +295,8 @@ the screen blocks clicks.
   creating a task and saving the link, a stray task is left in the app (said once at the next start). Deleting
   `state.json` makes Roamies forget which tasks are its own. What another task is called reaches the conversation
   only in the question about an overlap.
+- Two displays: starting to talk while the pointer is on the other display moves the overlay there, which closes an
+  open bubble (Send, or a yes/no question) as a no.
 - Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Not yet known whether
   upstream has the same growth. Quitting and reopening Roamies clears it. Needs a diagnosis.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange

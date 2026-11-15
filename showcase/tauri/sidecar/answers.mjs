@@ -14,9 +14,9 @@ export const YES_WORDS = ['yes', 'yes please', 'go ahead', 'do it'];
 export const NO_WORDS = ['no', "don't", 'cancel'];
 export const SPOKEN_HINT = 'Say yes or no, or click.';
 
-const plain = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/[^a-z]+/g, ' ').trim();
+export const plain = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/[^a-z]+/g, ' ').trim();
 // Longest first, so "yes please" is one phrase and not "yes" followed by something else.
-const only = (words) => new RegExp(`^(?:(?:${words.map(plain).sort((a, b) => b.length - a.length).join('|')})(?: |$))+$`);
+export const only = (words) => new RegExp(`^(?:(?:${words.map(plain).sort((a, b) => b.length - a.length).join('|')})(?: |$))+$`);
 const YES = only(YES_WORDS), NO = only(NO_WORDS);
 /** What was said, as an answer to a yes/no bubble: 'yes', 'no', or null when it isn't clearly either. */
 export function spokenAnswer(text) {

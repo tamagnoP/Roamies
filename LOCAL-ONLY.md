@@ -28,9 +28,12 @@ or named an app) is a rule in its instructions, which the model follows but the 
 3. A task that can edit is sent only when you click Send, press Y, or say "send". A read-only task goes by itself
    after a few seconds (`autoSendReadOnly`), so you only act to stop it: click Don't send, or say "no". Starting to
    talk stops the countdown for good: from then on it is sent only by "send" or a click.
-   What you say while the bubble is open is for the bubble. Words that start with a send word send it; words that
-   start with "no", "don't", "cancel", "stop" or "never mind" don't; anything else, or nothing heard, leaves the
-   bubble open as it was, any number of times, and is not taken as a new request. Both lists are under `reference`
+   What you say while the bubble is open is for the bubble. It is sent only when what you said is nothing but send
+   words: one alone, repeated or combined ("yes, send it", "ok go ahead"), with "please" if you like. It is declined
+   only when what you said is nothing but don't-send words ("no", "don't send it", "cancel", "stop", "never mind"),
+   by the same rule. Anything else leaves the bubble open as it was, any number of times, and is not taken as a new
+   request: a send word followed by other words ("OK, wait, change the prompt", "go back", "send it to the other
+   project"), mixed ones ("yes no", "send, no wait"), and nothing heard. A click is as it was. Both lists are under `reference`
    in `settings.default.json` (`sendWords`, `dontSendWords`).
 4. pi starts in the background, in the project folder, as `pi --mode json`. What it's doing ("Pi's reading
    segment.py…") shows in a bubble, at most one every few seconds.

@@ -15,7 +15,7 @@
 // Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
 // between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
-import { NO_WORDS, YES_WORDS, heardShape } from './answers.mjs';
+import { NO_WORDS, YES_WORDS, heardShape, only, plain } from './answers.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,13 +42,15 @@ export const SP = {
 };
 
 const SEND_WORDS = ['send', 'send it', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'go', 'go ahead', 'do it', 'approve', 'approved', 'confirm'];
-const SEND = new RegExp(`^\\s*(${SEND_WORDS.join('|')})\\b`, 'i');
-export const isSend = (text) => SEND.test(String(text ?? ''));
-// Said to the Send bubble: these, at the start of what was said, mean "don't send". Anything that starts with
-// neither a send word nor one of these leaves the bubble open.
-const DONT_WORDS = ['no', 'nope', "don't", 'dont', 'do not', 'cancel', 'stop', 'never mind'];
-const DONT = new RegExp(`^\\s*(${DONT_WORDS.join('|')})\\b`, 'i');
-export const isDontSend = (text) => !isSend(text) && DONT.test(String(text ?? '').replace(/’/g, "'"));
+// Said to the Send bubble, or typed to a yes/no question. It sends only when what was said is nothing but send
+// words: one alone, repeated or combined ("yes, send it", "ok go ahead"), with "please" if they like. It declines
+// only when it is nothing but don't-send words, by the same rule. Anything else leaves the bubble open: a send word
+// followed by other words ("ok, wait, change the prompt", "go back") and mixed ones ("yes no") included.
+const DONT_WORDS = ['no', 'nope', "don't", 'do not', "don't send", "don't send it", 'do not send', 'do not send it', 'cancel', 'stop', 'never mind'];
+const SEND = only(SEND_WORDS), DONT = only(DONT_WORDS);
+const said = (text) => plain(text).split(' ').filter((w) => w && w !== 'please').join(' ');
+export const isSend = (text) => SEND.test(said(text));
+export const isDontSend = (text) => DONT.test(said(text));
 
 const tilde = (p, home) => (p === home ? '~' : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const expand = (p, home) => path.resolve(String(p).replace(/^~(?=$|\/)/, home));
@@ -497,8 +499,8 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const closing = new AbortController();
     const signals = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
     let by = 'click';
-    // What is said while the bubble is open: "send" sends, "no" doesn't, and anything else (or nothing heard) leaves
-    // the bubble as it was, ready for the next thing said or a click, any number of times.
+    // What is said while the bubble is open: only send words send, only don't-send words decline, and anything else
+    // (or nothing heard) leaves the bubble as it was, ready for the next thing said or a click, any number of times.
     const voiced = new Promise((resolve) => {
       approval = {
         listening: false, closed: false, talked: false, // talked: they have said something, so the countdown is off for good
