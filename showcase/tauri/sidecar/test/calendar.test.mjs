@@ -33,8 +33,12 @@ const server = http.createServer((req, res) => {
     app.log.push({ method: req.method, path: url.pathname, query: url.search, body, auth: req.headers.authorization ?? null, host: req.headers.host });
     const send = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(status < 400 ? { ok: true, data } : { ok: false, error: data })); };
     if (app.hang && app.hang(req.method, url.pathname)) return; // never answers
+    if (app.mode === 'other') { res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end('<html>another program</html>'); }
+    if (app.mode === 'starting') return send(503, { code: 'RENDERER_NOT_READY', message: 'Renderer not ready' });
     if (req.method === 'GET' && url.pathname === '/health') return send(200, { server: 'up', rendererReady: true });
-    if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(401, { code: 'UNAUTHORIZED', message: 'Invalid authorization token.' });
+    if (req.headers.authorization !== `Bearer ${TOKEN}` || app.mode === 'locked') return send(401, { code: 'UNAUTHORIZED', message: 'Invalid authorization token.' });
+    const no = app.refuse?.(req.method, url.pathname, body);
+    if (no) return send(no.status, { code: no.code, message: no.message });
     const id = url.pathname.startsWith('/tasks/') ? decodeURIComponent(url.pathname.slice(7)) : null;
     if (req.method === 'GET' && url.pathname === '/tasks') {
       const from = url.searchParams.get('source') === 'archived' ? app.archived : app.tasks;
@@ -286,8 +290,8 @@ let t0 = Date.now();
 assert.match(await tool('remember_commitment').execute({ text: 'Made while the app was hung' }), /^Saved as c\d+\.$/);
 let took = Date.now() - t0;
 assert.ok(took >= 900 && took < 2500, `the check gives up within a second (${took} ms), whatever the request timeout is (${loadSettings(home).limits.calendarTimeoutSeconds} s)`);
-r = await cal.sync('timer'); assert.equal(r.ok, false); assert.match(r.why, /isn't answering/);
-await assert.rejects(cal.tools.find((t) => t.name === 'sync_todos').execute({}), /isn't answering.*still works here/s);
+r = await cal.sync('timer'); assert.equal(r.ok, false); assert.match(r.why, /^Super Productivity didn't answer within 1 second when asked to say that it is running\./);
+await assert.rejects(cal.tools.find((t) => t.name === 'sync_todos').execute({}), /didn't answer within 1 second.*still works here/s);
 app.hang = null;
 const offline = list.find((c) => c.text === 'Made while the app was hung'); mail.text = 'Answer Ana today';
 assert.equal(state().links[offline.id], undefined);
@@ -313,7 +317,7 @@ fs.writeFileSync(settingsFile, settingsBytes);
 // ---- 12. an intent left behind is reported once at the next start; the intent is written before the create
 const next = make();
 await next.startup();
-assert.deepEqual(next.takeHeld().lines, ['I was adding "Made while the app was slow" to Super Productivity when I last stopped. A stray task with that title may be in the app: delete it there if so.']);
+assert.deepEqual(next.takeHeld().lines, ['I couldn\'t bring my to-do list and Super Productivity in step. Super Productivity didn\'t answer within 2 seconds when asked to make a task for "Made while the app was slow". Open Super Productivity, and check that Settings > Misc > Enable local REST API is on.', 'I was adding "Made while the app was slow" to Super Productivity when I last stopped. A stray task with that title may be in the app: delete it there if so.'], 'what failed, said as what it was, and the create that was cut short');
 await next.startup(); assert.deepEqual(next.takeHeld().lines, [], 'once');
 app.hang = null;
 let seen = null; app.onPost = (body) => { seen = state().intents.map((i) => i.title).includes(body.title); };
@@ -369,7 +373,7 @@ assert.deepEqual(writes(mark), []);
 app.hang = (m, p) => p === '/health';
 const stateBefore = JSON.stringify(state());
 for (const [name, args, doing] of [['schedule_block', { todo: paper.id, date: '2026-11-23', start: '10:00', minutes: 60 }, 'place a block'], ['schedule_block', { title: 'Something new', date: '2026-11-23', start: '10:00', minutes: 60 }, 'place a block'], ['move_block', { todo: paper.id, start: '11:00' }, 'move a block'], ['plan_day', { date: '2026-11-23', items: [{ todo: paper.id, minutes: 30 }] }, 'plan the day'], ['show_day', { date: '2026-11-23' }, 'read the calendar']]) {
-  await assert.rejects(T(name).execute(args), new RegExp(`Error: Super Productivity isn't answering, so I can't ${doing}: I couldn't see what is already on the calendar\\.`), name);
+  await assert.rejects(T(name).execute(args), new RegExp(`Error: Super Productivity didn't answer within 1 second when asked to say that it is running\\. .* So I can't ${doing}: I couldn't see what is already on the calendar\\.$`), name);
 }
 assert.equal(JSON.stringify(state()), stateBefore); assert.ok(!list.some((c) => c.text === 'Something new'), 'not even the to-do of a new block is made');
 app.hang = null;
@@ -564,6 +568,68 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
 // ---- over everything so far: the only tags Roamies ever adds are the two matrix tags
 for (const w of writes().filter((q) => q.body && 'tagIds' in q.body)) assert.ok(w.body.tagIds.every((id) => ['EM_URGENT', 'EM_IMPORTANT', 'PERSONAL', 'KANBAN_IN_PROGRESS'].includes(id)), JSON.stringify(w.body));
 for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);
+
+// ---- 14b. a sync that fails says what failed, in plain words, with the app's own reason
+{
+  const S = () => cal.tools.find((t) => t.name === 'sync_todos').execute({});
+  const why = async () => { try { await S(); } catch (e) { return e.message; } return 'no failure'; };
+  cal.takeHeld();
+  // refused by the app: the answer is shaped as the real app's refusals are ({ ok: false, error: { code, message } })
+  const f1 = add('Fails: create'); mark = app.log.length;
+  app.refuse = (m) => (m === 'POST' ? { status: 400, code: 'INVALID_INPUT', message: `title is not allowed, said with ${TOKEN}` } : null);
+  let w = await why();
+  assert.equal(w, 'Super Productivity refused to make a task for "Fails: create": title is not allowed, said with […] (INVALID_INPUT, HTTP 400).');
+  assert.equal(linkOf(f1), undefined);
+  // on the timer the owner is told once, not every minute; and again only when the reason changes
+  await cal.sync('timer'); await cal.sync('timer'); await cal.sync('change');
+  assert.deepEqual(cal.takeHeld().lines, [`I couldn't bring my to-do list and Super Productivity in step. ${w}`]);
+  app.refuse = null; await cal.sync('timer'); assert.ok(linkOf(f1)); assert.deepEqual(cal.takeHeld().lines, []);
+  // each kind of change is named
+  app.refuse = (m, p, b) => (m === 'PATCH' ? { status: 500, code: 'INTERNAL_ERROR', message: 'Something broke' } : null);
+  f1.text = 'Fails: renamed'; assert.equal(await why(), 'Super Productivity refused to change the title of "Fails: renamed": Something broke (INTERNAL_ERROR, HTTP 500).');
+  app.refuse = (m, p, b) => (m === 'PATCH' && !('title' in b) ? { status: 400, code: 'INVALID_INPUT', message: '' } : null);
+  f1.due = at(29, 12); await cal.setLocal(f1.id, { start: at(28, 9), minutes: 30 });
+  assert.equal(await why(), 'Super Productivity refused to change the start time and the length and the due time of "Fails: renamed": it gave no reason (INVALID_INPUT, HTTP 400).');
+  app.refuse = (m, p, b) => (m === 'PATCH' && 'tagIds' in b ? { status: 400, code: 'INVALID_INPUT', message: 'tagIds' } : null);
+  await cal.setLocal(f1.id, { urgent: true });
+  assert.equal(await why(), 'Super Productivity refused to change the urgent and important tags of "Fails: renamed": tagIds (INVALID_INPUT, HTTP 400).');
+  app.refuse = (m, p) => (m === 'GET' && p === '/tasks' ? { status: 500, code: 'INTERNAL_ERROR', message: 'Renderer timeout' } : null);
+  assert.equal(await why(), 'Super Productivity refused to give me its task list: Renderer timeout (INTERNAL_ERROR, HTTP 500).');
+  app.refuse = null; await S(); await cal.setLocal(f1.id, { urgent: false, start: null }); await S(); cal.takeHeld();
+  // the token: not accepted, not there, not a token (said by its length, never shown)
+  app.mode = 'locked';
+  assert.match(await why(), /^Super Productivity didn't accept its access token \(401\)\. Switching its local REST API off and on again/);
+  app.mode = 'up';
+  const odd = createCalendar({ home, todos, port, tokenFile: path.join(home, 'odd'), now: () => clock });
+  r = await odd.sync('tool'); assert.equal(r.why, 'Super Productivity\'s access token isn\'t in the form I know (it is 18 characters; I expect 32 letters and digits), so I didn\'t send it.');
+  r = await createCalendar({ home, todos, port, tokenFile: path.join(home, 'nope'), now: () => clock }).sync('tool');
+  assert.match(r.why, /^Super Productivity's access token file isn't there, or can't be read\./);
+  // not ready, something else on the port, too slow, nothing there
+  app.mode = 'starting'; assert.match(await why(), /^Super Productivity answered that it isn't ready yet \(503\): it is probably still starting\./);
+  app.mode = 'other'; assert.match(await why(), new RegExp(`^Something answered on port ${port} when asked to say that it is running, but not the way Super Productivity's REST API does \\(HTTP 200\\)\\.`));
+  app.mode = 'up'; app.hang = (m, p) => m === 'GET' && p === '/tasks';
+  fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, limits: { ...file0.limits, calendarTimeoutSeconds: 2 } }));
+  assert.match(await why(), /^Super Productivity didn't answer within 2 seconds when asked to give me its task list\./);
+  fs.writeFileSync(settingsFile, settingsBytes); app.hang = null;
+  const shut = createClient({ home, port: 1, tokenFile });
+  await assert.rejects(shut.request('GET', '/tasks', undefined, 1000), /Error: Nothing is listening on port 1: Super Productivity is closed, or its local REST API is off\./);
+  r = await createCalendar({ home, todos, port: 1, tokenFile, now: () => clock }).sync('timer');
+  assert.match(r.why, /^Nothing is listening on port 1: Super Productivity is closed, or its local REST API is off\./);
+  // a fault in Roamies' own code is said as that
+  const real = todos.all; todos.all = async () => { throw new TypeError('list is broken'); };
+  r = await cal.sync('tool'); assert.equal(r.why, 'The sync stopped on an error in Roamies itself, not in Super Productivity: list is broken');
+  todos.all = real;
+  // after the first yes, a failure is said even when the app has gone
+  const home3 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-home3-')));
+  const fresh3 = createCalendar({ home: home3, todos, port, tokenFile, now: () => clock, ask: async () => { app.hang = (m, p) => p === '/health'; return 'yes'; } });
+  assert.equal(await fresh3.offerStart(), true);
+  app.hang = null;
+  const said3 = fresh3.takeHeld().lines;
+  assert.equal(said3.length, 1); assert.match(said3[0], /^I couldn't bring my to-do list and Super Productivity in step\. Super Productivity didn't answer within 1 second/);
+  assert.ok(![w, ...said3, JSON.stringify(logged)].join(' ').includes(TOKEN));
+  assert.ok(!JSON.stringify(logged).includes('Fails:'), 'the reason names a to-do, so the log has only that a run failed');
+  cal.takeHeld(); await S();
+}
 
 // ---- 15. the one function added to upstream's store: a to-do's wording, changed
 const store = await import('../store.mjs');

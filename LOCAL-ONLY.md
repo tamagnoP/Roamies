@@ -477,6 +477,14 @@ nothing else is going on: no reply being made or read out, nobody talking, no bu
 is shown in a bubble, not spoken. It is kept in `state.json` until shown, so quitting doesn't lose it. During a
 request of yours, it is part of Roamies' reply instead.
 
+**When a sync fails**, you are told what failed, not that it failed: which step it was (making a task for a to-do,
+changing its title, its time, its tags, reading the task list), and why: the app's own reason with its code and
+HTTP status when it refused; that it didn't answer within the time allowed; that nothing is listening on its port;
+that it is still starting; that it didn't accept the token; or that the token file is missing or not in the form
+Roamies knows (said by its length, never shown). A fault in Roamies' own code is said as that. On the timer the same
+failure is said once, not every minute, and the app simply being closed is not said at all until you ask for
+something that needs it. The log records only that a run failed, because the reason names a to-do.
+
 **Fixed in code, and listed under `reference` in `settings.default.json`:**
 
 - Only these requests are ever sent: `GET /health`, `GET /tasks`, `GET /tasks/:id`, `POST /tasks`,

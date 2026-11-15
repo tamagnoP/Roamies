@@ -245,9 +245,12 @@ the screen blocks clicks.
 
 - [ ] The start-up settings bubble on screen (a `settings.json` without `limits`), and that it waits for the setup
   guide to close.
-- [ ] Feature 13 against the real Super Productivity: the first-time bubble and the mirror; a change on each side
-  arriving on the other; a block placed, moved and taken off; an overlap question; a day plan; the matrix tags
-  showing on the app's Eisenhower board; the app closed while a to-do is added.
+- [x] Feature 13, the requests, against the real Super Productivity 20.0.0 with the real code and one test task
+  (2026-11-15): first mirror, read list, read one, title, time and length set and cleared, both tags set and cleared,
+  deadline set and cleared, done, archive lookup. All passed.
+- [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
+  block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
+  Eisenhower board; the app closed while a to-do is added.
 - [ ] Home position on screen: resting at each corner, bubbles, the trip out to a drawing and back, a second display.
 - [ ] Spoken progress on a long pi task.
 - [ ] Evening briefing and its "Daily log" note; morning briefing.

@@ -38,6 +38,8 @@ const title = (t) => String(t ?? '').trim().slice(0, 200).trim();
 const stamp = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 const minutes = (ms) => (typeof ms === 'number' && ms > 0 ? Math.round(ms / 60_000) : 0);
 const quote = (t) => `"${t}"`;
+/** Text from the app or from an error, made safe to show: short, and with nothing in it that could be the token. */
+const scrub = (t) => String(t ?? '').replace(/[A-Za-z0-9]{32,}/g, '[…]').replace(/\s+/g, ' ').trim().slice(0, 200);
 const pad = (n) => String(n).padStart(2, '0');
 const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const span = (b) => `${hm(b.start)} to ${hm(b.start + b.minutes * 60_000)}`;
@@ -78,32 +80,37 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
   const agent = new http.Agent({ keepAlive: false }); // an agent of its own: no proxy, whatever the environment says
   function token() {
     let t = '';
-    try { t = fs.readFileSync(tokenFile, 'utf8').trim(); } catch { /* handled below */ }
-    if (!TOKEN.test(t)) throw new Down(`I can't read Super Productivity's access token. ${HOW}`);
+    try { t = fs.readFileSync(tokenFile, 'utf8').trim(); } catch { throw new Down(`Super Productivity's access token file isn't there, or can't be read. The app writes it when its local REST API is switched on. ${HOW}`); }
+    // Said without the token: only how long it is.
+    if (!TOKEN.test(t)) throw new Down(`Super Productivity's access token isn't in the form I know (it is ${t.length} characters; I expect 32 letters and digits), so I didn't send it.`);
     return t;
   }
   /** → { status, body }. Throws Down when the app isn't there, is too slow, or refuses the token. */
-  function request(method, target, body, ms) {
+  function request(method, target, body, ms, doing) {
     if (!ROUTES.some(([m, p]) => m === method && p.test(target))) throw new Error(`Roamies doesn't send ${method} ${target.split('?')[0]} to Super Productivity.`);
     const auth = target === '/health' ? null : token();
     const payload = body === undefined ? null : JSON.stringify(body);
     return new Promise((resolve, reject) => {
-      const fail = () => reject(new Down(`Super Productivity isn't answering. ${HOW}`));
+      // What went wrong, in plain words: each way of not getting an answer is said as what it is.
+      const fail = (why) => reject(new Down(`${why} ${HOW}`));
+      const what = doing ? `when asked to ${doing}` : `(${method} ${target.split('?')[0].replace(/^\/tasks\/.+/, '/tasks/…')})`;
       const req = http.request({ host: SP.host, port, method, path: target, agent, headers: { ...(auth ? { Authorization: `Bearer ${auth}` } : {}), ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}) } }, (res) => {
         const parts = [];
         res.on('data', (d) => parts.push(d));
-        res.on('error', () => { clearTimeout(timer); fail(); });
+        res.on('error', () => { clearTimeout(timer); fail(`Super Productivity broke off its answer ${what}.`); });
         res.on('end', () => {
           clearTimeout(timer);
           let parsed = null;
           try { parsed = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { /* not JSON: not the app */ }
-          if (res.statusCode === 401) return reject(new Down(`Super Productivity didn't accept its access token. ${HOW}`));
-          if (res.statusCode === 503 || !parsed || typeof parsed !== 'object') return fail();
+          if (res.statusCode === 401) return reject(new Down('Super Productivity didn\'t accept its access token (401). Switching its local REST API off and on again in Settings > Misc makes a new one.'));
+          if (res.statusCode === 503) return fail('Super Productivity answered that it isn\'t ready yet (503): it is probably still starting.');
+          if (!parsed || typeof parsed !== 'object') return fail(`Something answered on port ${port} ${what}, but not the way Super Productivity's REST API does (HTTP ${res.statusCode}).`);
           resolve({ status: res.statusCode, body: parsed });
         });
       });
-      const timer = setTimeout(() => req.destroy(new Error('slow')), ms);
-      req.on('error', () => { clearTimeout(timer); fail(); });
+      let slow = false;
+      const timer = setTimeout(() => { slow = true; req.destroy(new Error('slow')); }, ms);
+      req.on('error', (e) => { clearTimeout(timer); fail(slow ? `Super Productivity didn't answer within ${ms / 1000} second${ms === 1000 ? '' : 's'} ${what}.` : e?.code === 'ECONNREFUSED' ? `Nothing is listening on port ${port}: Super Productivity is closed, or its local REST API is off.` : `The connection to Super Productivity failed ${what} (${scrub(e?.code ?? e?.message)}).`); });
       req.end(payload ?? undefined);
     });
   }
@@ -153,14 +160,16 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const other = (t) => ({ title: title(t.title), start: stamp(t.dueWithTime), minutes: minutes(t.timeEstimate), done: !!t.isDone });
   const seven = (o) => Object.fromEntries(FIELDS.map((f) => [f, o[f]]));
 
-  async function call(method, target, body) {
-    const r = await client.request(method, target, body, wait());
-    if (r.body.ok !== true && r.status !== 404) throw new Down(`Super Productivity refused a change (${String(r.body?.error?.code ?? r.status)}).`);
+  /** One request. `doing` is what it is for, in plain words: a refusal is said as that, with the app's own reason. */
+  async function call(method, target, body, doing) {
+    const r = await client.request(method, target, body, wait(), doing);
+    if (r.body.ok !== true && r.status !== 404) throw new Down(`Super Productivity refused to ${doing}: ${scrub(r.body?.error?.message) || 'it gave no reason'} (${scrub(r.body?.error?.code) || 'no code'}, HTTP ${r.status}).`);
     return r;
   }
   /** The task list, cut down: the linked ones by id, the rest as clash facts. */
   async function readTasks(mine, dayEnd, source = '') {
-    const r = await call('GET', `/tasks?includeDone=true${source ? `&source=${source}` : ''}`);
+    const r = await call('GET', `/tasks?includeDone=true${source ? `&source=${source}` : ''}`, undefined, source ? 'give me its archived tasks' : 'give me its task list');
+    if (!Array.isArray(r.body.data)) throw new Down(`Super Productivity's answer to "${source ? 'archived tasks' : 'task list'}" wasn't a list (HTTP ${r.status}).`);
     const list = Array.isArray(r.body.data) ? r.body.data : [];
     const linked = new Map(), rest = [];
     for (const t of list) { if (t && mine.has(String(t.id))) linked.set(String(t.id), own(t, dayEnd)); else if (t) rest.push(other(t)); }
@@ -171,30 +180,37 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const hold = (items) => { if (items.length) edit((cal) => { cal.held.push(...items); }); };
 
   /** Is the app there? One second at most, and no token. */
-  async function there() {
-    try { const r = await client.request('GET', '/health', undefined, SP.healthSeconds * 1000); return r.status === 200 && r.body?.data?.rendererReady !== false; } catch { return false; }
+  async function reach() {
+    try {
+      const r = await client.request('GET', '/health', undefined, SP.healthSeconds * 1000, 'say that it is running');
+      if (r.status !== 200) return { ok: false, why: `Super Productivity answered "are you there" with HTTP ${r.status}. ${HOW}` };
+      if (r.body?.data?.rendererReady === false) return { ok: false, why: 'Super Productivity is open but says it isn\'t ready yet: it is probably still starting.' };
+      return { ok: true, why: '' };
+    } catch (e) { if (e instanceof Down) return { ok: false, why: e.message }; throw e; }
   }
+  const there = async () => (await reach()).ok;
 
   // ---- writing a link's changes to the app
   async function writeTask(link, changes, local) {
     const id = encodeURIComponent(link.task);
     // The title goes alone, marked to be taken as written: any other way the app reads it for its short syntax.
-    if ('title' in changes) { const r = await call('PATCH', `/tasks/${id}`, { title: changes.title, isIgnoreShortSyntax: true }); if (r.status === 404) return false; }
+    const name = quote(link.title);
+    if ('title' in changes) { const r = await call('PATCH', `/tasks/${id}`, { title: changes.title, isIgnoreShortSyntax: true }, `change the title of ${name}`); if (r.status === 404) return false; }
     const body = {};
     if ('done' in changes) body.isDone = changes.done;
     if ('start' in changes) body.dueWithTime = changes.start;
     if ('minutes' in changes) body.timeEstimate = changes.minutes * 60_000;
     if ('due' in changes) Object.assign(body, changes.due === null ? { deadlineDay: null, deadlineWithTime: null } : { deadlineWithTime: changes.due });
-    if (Object.keys(body).length) { const r = await call('PATCH', `/tasks/${id}`, body); if (r.status === 404) return false; }
+    if (Object.keys(body).length) { const r = await call('PATCH', `/tasks/${id}`, body, `change ${['done', 'start', 'minutes', 'due'].filter((f) => f in changes).map((f) => WORDS[f]).join(' and ')} of ${name}`); if (r.status === 404) return false; }
     if ('urgent' in changes || 'important' in changes) {
       // The task's tags as they are this moment: the two matrix tags are set, every other tag goes back untouched.
-      const r = await call('GET', `/tasks/${id}`);
+      const r = await call('GET', `/tasks/${id}`, undefined, `give me the tags of ${name}`);
       if (r.status === 404) return false;
       const tags = (Array.isArray(r.body.data?.tagIds) ? r.body.data.tagIds : []).filter((x) => typeof x === 'string');
       const next = tags.filter((x) => x !== SP.urgentTag && x !== SP.importantTag);
       if (local.urgent) next.push(SP.urgentTag);
       if (local.important) next.push(SP.importantTag);
-      const w = await call('PATCH', `/tasks/${id}`, { tagIds: next });
+      const w = await call('PATCH', `/tasks/${id}`, { tagIds: next }, `change the urgent and important tags of ${name}`);
       if (w.status === 404) return false;
     }
     return true;
@@ -203,7 +219,8 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   // ---- one run
   async function run() {
     const lines = [], asks = [];
-    if (!(await there())) return { ok: false, lines, asks, why: `Super Productivity isn't answering. ${HOW}` };
+    const up = await reach();
+    if (!up.ok) return { ok: false, reached: false, lines, asks, why: up.why };
     let cal = get();
     if (!cal.started) return { ok: true, started: false, lines, asks };
     const s = settings(), dayEnd = s.calendar.dayEnd;
@@ -291,9 +308,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       for (const t of list) {
         if (t.status !== 'open' || t.kind !== 'commitment' || cal.links[t.id] || cal.retired[t.id] || cal.waiting[t.id]) continue;
         cal.intents = [...cal.intents.filter((i) => i.todo !== t.id), { todo: t.id, title: t.text, at: now() }]; save();
-        const r = await call('POST', '/tasks', { title: title(t.text), isIgnoreShortSyntax: true, ...(t.due ? { deadlineWithTime: t.due } : {}) });
-        const made = r.body.data && typeof r.body.data.id === 'string' ? own(r.body.data, dayEnd) : null;
-        if (!made) throw new Down('Super Productivity didn\'t say which task it made.');
+        const r = await call('POST', '/tasks', { title: title(t.text), isIgnoreShortSyntax: true, ...(t.due ? { deadlineWithTime: t.due } : {}) }, `make a task for ${quote(t.text)}`);
+        const made = r.status !== 404 && r.body.data && typeof r.body.data.id === 'string' ? own(r.body.data, dayEnd) : null;
+        if (!made) throw new Down(`Super Productivity answered the new task for ${quote(t.text)} without saying which task it made (HTTP ${r.status}), so I can't tell it apart from the others. A task with that title may now be in the app.`);
         cal.links[t.id] = { task: made.id, title: t.text, was: 'open', local: { start: made.start, minutes: made.minutes, urgent: made.urgent, important: made.important }, agreed: { ...seven(made), title: title(t.text), due: t.due ?? null } };
         cal.intents = cal.intents.filter((i) => i.todo !== t.id);
         save();
@@ -302,17 +319,26 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     } catch (e) {
       save();
       if (!(e instanceof Down)) throw e;
-      return { ok: false, lines, asks, why: e.message };
+      return { ok: false, reached: true, lines, asks, why: e.message };
     }
     return { ok: true, started: true, lines, asks };
   }
 
   /** Runs a sync. From a tool, what it has to say comes back as text for the model; otherwise it is held for a bubble. */
   let lastOk = false; // whether the last run reached the app: what is known of its calendar is only good then
+  let toldWhy = null; // the failure the owner was last told about, so the timer doesn't say the same thing every minute
   function sync(from = 'timer') {
     return inTurn(async () => {
       let r;
-      try { r = await run(); lastOk = r.ok && r.started !== false; } catch (e) { lastOk = false; log('calendar_error', { message: String(e?.message ?? e).slice(0, 200) }); return { ok: false, text: '', why: 'The sync with Super Productivity ran into a problem.' }; }
+      try { r = await run(); lastOk = r.ok && r.started !== false; } catch (e) {
+        lastOk = false;
+        log('calendar_error', { message: scrub(e?.message ?? e) });
+        r = { ok: false, reached: true, lines: [], asks: [], why: `The sync stopped on an error in Roamies itself, not in Super Productivity: ${scrub(e?.message ?? e)}` };
+      }
+      if (r.ok) toldWhy = null; else log('calendar_failed', { from, reached: !!r.reached }); // the reason names a to-do, so it isn't logged
+      // A failure nobody asked about is said once, as what it is. The app simply being closed is not one: that is
+      // said when something is asked of it. After the first yes it is said either way.
+      if (!r.ok && from !== 'tool' && (r.reached || from === 'start') && r.why !== toldWhy) { toldWhy = r.why; r.lines.push(`I couldn't bring my to-do list and Super Productivity in step. ${r.why}`); }
       // A task deleted in the app: the question is the app's own bubble, whoever started the run.
       hold(r.asks.map((a) => ({ ask: a })));
       if (from !== 'tool') { hold(r.lines.map((text) => ({ text }))); return { ...r, text: '' }; }
@@ -373,7 +399,8 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   /** Before a block is placed or a day read: the app answers, the list is mirrored, and a sync has just run, so
    *  what is on the calendar is what the app has this moment. Otherwise the tool refuses, in plain words. */
   async function fresh(doing) {
-    if (!(await there())) throw new Error(`Super Productivity isn't answering, so I can't ${doing}: I couldn't see what is already on the calendar. ${HOW}`);
+    const up = await reach();
+    if (!up.ok) throw new Error(`${up.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
     if (!get().started) throw new Error(NOT_YET);
     const r = await sync('tool');
     if (!r.ok) throw new Error(`${r.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
@@ -613,7 +640,8 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       description: 'Sync the to-do list with Super Productivity now (it also happens by itself, about once a minute). Use it when they ask to sync, or to put their to-do list in Super Productivity for the first time; that first time the app shows them the list and waits for their yes.',
       parameters: z.object({}),
       execute: async (_args, ctx) => {
-        if (!(await there())) throw new Error(`Super Productivity isn't answering. ${HOW} The to-do list still works here and is synced when the app is back.`);
+        const up = await reach();
+        if (!up.ok) throw new Error(`${up.why} The to-do list still works here and is synced when the app is back.`);
         if (!get().started && !(await offerStart(ctx?.signal))) return 'They didn\'t say yes, so nothing was added to Super Productivity.';
         const r = await sync('tool');
         if (!r.ok) throw new Error(r.why);
