@@ -40,6 +40,7 @@ import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
+import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
@@ -307,8 +308,10 @@ const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!co
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
+// Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
+const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data) });
 const cal = createCalendar({
-  ask, log: (kind, data) => logLine(kind, data),
+  ask: answers.ask, log: (kind, data) => logLine(kind, data),
   todos: {
     all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
@@ -329,7 +332,7 @@ async function calShow() {
       if (lines.length) { logLine('calendar_lines', { lines: lines.length }); say(lines.join('\n'), 'concerned'); }
       for (const a of asks) {
         calAsking = true;
-        const yes = await ask({ placeholder: `The task for "${a.title}" was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'] }).finally(() => { calAsking = false; });
+        const yes = await cal.askDeleted(a).finally(() => { calAsking = false; });
         if (yes) { await updateCommitment(a.todo, { status: 'dropped' }); menu(); scheduleReminders(); }
         await cal.answered(a.todo); cal.sync('change'); // kept: it gets a new task
       }
@@ -1449,7 +1452,7 @@ const PRIVACY = { microphone: 'Privacy_Microphone', speech: 'Privacy_SpeechRecog
 function onVoice(m) {
   if (m.type === 'voice_state') voiceState = String(m.state ?? 'idle'); // Local-only build: sync lines wait while the owner talks (calQuiet)
   if (m.type === 'voice_state' && m.state === 'listening') {
-    if (pi.listening()) speech.stop(); // local-only build: a Send bubble is open; talking answers it instead of cancelling the request
+    if (pi.listening() || answers.listening()) speech.stop(); // local-only build: a Send bubble or a yes/no bubble is open; talking answers it instead of cancelling the request
     else { interruptQuietly(); speech.stop(); warmUp(); } // talking over it stops it
   }
   else if (m.type === 'voice_state' && m.state === 'processing') frontSoon = { at: Date.now(), p: whereFront() }; // Local-only build: whereFront, not whereNow
@@ -1626,6 +1629,7 @@ let snapping = false;
 // Words said while ⌃⌥ was held, maybe with an area marked by drawing on the screen at the same time.
 async function onSpoken(text, area) {
   if (pi.heard(text)) return; // local-only build: a Send bubble is open, and this answers it
+  if (answers.heard(text)) return; // Local-only build: a yes/no bubble is open; a clear yes or no answers it, anything else does nothing
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);

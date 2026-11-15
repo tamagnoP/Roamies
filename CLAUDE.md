@@ -36,6 +36,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list mirrored in Super Productivity: the requests, the sync, its tools. |
+| `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). One marked function of ours: `renameCommitment`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |

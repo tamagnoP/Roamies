@@ -15,6 +15,7 @@
 // Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
 // between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
+import { NO_WORDS, YES_WORDS } from './answers.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -783,6 +784,7 @@ export function codeReference() {
     },
     tools: { removed: [...REMOVED], piReadOnly: READ_TOOLS.split(','), allowedWhilePiWorks: [...DURING] },
     sendWords: [...SEND_WORDS],
+    spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },
     paths: { folder: dir, settings: PATHS.settings, reference: PATHS.reference, state: PATHS.state, records: `${PATHS.log}/`, defaultProject: `${PATHS.workspace}/`, longPrompt: PATHS.pending },
   };

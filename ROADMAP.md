@@ -238,6 +238,12 @@ the screen blocks clicks.
   ask about the to-do; a to-do removed in Roamies leaves its task in the app without a time. From tasks Roamies did
   not make, only title, start, length and done are read, to see clashes. Urgent and important are the app's tags
   `EM_URGENT` and `EM_IMPORTANT`. One marked function in upstream's `store.mjs` is allowed for this.
+- **2026-11-15.** Found on the installed `02471e1`: the first mirror never happened. No request failed (every
+  request type passed against the real app with the real code). The yes was spoken, and starting to talk cancelled
+  the turn, which closed the bubble as a no; the spoken "yes" then became a new request, which opened the bubble
+  again. Fixed by letting the calendar's bubbles take a spoken yes or no (`answers.mjs`): only the listed phrases,
+  only while the bubble is open; talking neither closes the bubble nor cancels the turn. A failed sync now says
+  which step failed and why.
 - **2026-11-14.** Home position test 9 (clicks near the character are blocked) accepted by the owner, pending the
   orb redesign.
 
@@ -248,6 +254,8 @@ the screen blocks clicks.
 - [x] Feature 13, the requests, against the real Super Productivity 20.0.0 with the real code and one test task
   (2026-11-15): first mirror, read list, read one, title, time and length set and cleared, both tags set and cleared,
   deadline set and cleared, done, archive lookup. All passed.
+- [ ] A calendar bubble answered by voice on screen: it stays up while you talk, "yes" and "no" settle it, other
+  words leave it, a click still works. Also that pi's Send bubble now stays on screen while you talk.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.

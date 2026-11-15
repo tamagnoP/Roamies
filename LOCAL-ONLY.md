@@ -477,6 +477,19 @@ nothing else is going on: no reply being made or read out, nobody talking, no bu
 is shown in a bubble, not spoken. It is kept in `state.json` until shown, so quitting doesn't lose it. During a
 request of yours, it is part of Roamies' reply instead.
 
+**Answering its bubbles.** Every bubble this feature opens (the first time, an overlap, a day plan, a sorting
+proposal, a task deleted in the app) has two buttons and can also be answered by voice: hold the talk keys and say
+it. The bubble's last line says so.
+
+- Yes: "yes", "yes please", "go ahead", "do it". No: "no", "don't", "cancel". Only these, said alone; capitals and
+  punctuation don't matter. They are listed under `reference.spokenAnswers` in `settings.default.json`.
+- Anything else you say while the bubble is open does nothing: the bubble stays open, and the words are not taken as
+  a new request either.
+- Starting to talk doesn't close the bubble or cancel what Roamies was doing. The bubble stays on screen as it is
+  (the character doesn't step away while you talk), so clicking still works, and so do the Y and N keys.
+- With no such bubble open, "yes" is ordinary speech, as before.
+- The same change in the overlay page keeps pi's Send bubble on screen while you talk; which words send is unchanged.
+
 **When a sync fails**, you are told what failed, not that it failed: which step it was (making a task for a to-do,
 changing its title, its time, its tags, reading the task list), and why: the app's own reason with its code and
 HTTP status when it refused; that it didn't answer within the time allowed; that nothing is listening on its port;
@@ -537,6 +550,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
+- `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count.
 - `showcase/tauri/sidecar/store.mjs`: one function added, `renameCommitment`, so a title changed in the app reaches
   the list.
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
@@ -549,7 +563,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/roamies/home.js` (new): where the home spot is, and its margins for the reference file.
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question; the home position.
 - `showcase/roamies/core.js`: the frame loop stops while the character rests at home; no dozing off there.
-- `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests.
+- `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
+  with buttons stays on screen as it is while you talk.
 - `showcase/desktop.html`: loads `home.js`.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.

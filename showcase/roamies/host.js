@@ -354,8 +354,11 @@
     if (m.type === 'state' && m.state === 'listening') {
       hearing = true;
       dropAutoListen();
-      // Local-only build: a bubble with buttons (pi's Send bubble) stays open while you talk, so "send" can answer it.
-      if (ask && !ask.choices) finishAsk(null);
+      // Local-only build: a bubble with buttons (pi's Send bubble, a yes/no question) stays open while you talk, so
+      // a spoken answer can settle it. It stays on screen as it is: the character doesn't step away and no
+      // listening bubble takes its place, and clicking a button still works.
+      if (ask?.choices) { Roamie.sfx?.play('listen'); return; }
+      if (ask) finishAsk(null);
       endTalk();
       heard = null;
       panel()?.close();

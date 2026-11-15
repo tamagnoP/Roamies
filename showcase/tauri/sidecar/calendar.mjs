@@ -360,6 +360,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
    *  gets a new task at the next run. */
   const answered = (id) => inTurn(() => edit((cal) => { delete cal.waiting[id]; }));
 
+  /** The question about a to-do whose task was deleted in the app. → true when the to-do is to go too. */
+  const askDeleted = async (a, signal) => isSend(await ask({ placeholder: `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'] }, signal));
+
   /** At start-up: a create that was begun and never finished is said once. */
   function startup() {
     return inTurn(() => edit((cal) => {
@@ -655,8 +658,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     let cal;
     try { cal = get(); } catch { return '- Super Productivity: the settings file can\'t be read, so the to-do list isn\'t synced.'; }
     const n = Object.keys(cal.links).length;
-    return cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).';
+    const how = ' When a calendar tool needs a yes (the first time, an overlap, a day plan, a sorting proposal), the app opens a bubble itself and they answer it by saying yes or no, or by clicking: don\'t ask them yourself as well, and never tell them they have to click.';
+    return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
 }

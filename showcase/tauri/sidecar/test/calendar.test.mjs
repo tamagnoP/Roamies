@@ -631,6 +631,121 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   cal.takeHeld(); await S();
 }
 
+// ================= the calendar's bubbles take a spoken yes or no, as well as a click =================
+{
+  const { NO_WORDS, SPOKEN_HINT, YES_WORDS, createAnswers, spokenAnswer } = await import('../answers.mjs');
+  // ---- which words count: these, alone
+  for (const w of ['yes', 'Yes.', ' YES! ', 'Yes, please.', 'yes please', 'Go ahead.', 'do it', 'Do it!']) assert.equal(spokenAnswer(w), 'yes', w);
+  for (const w of ['no', 'No.', 'Don\'t.', 'don’t', 'dont', 'Cancel.', 'CANCEL']) assert.equal(spokenAnswer(w), 'no', w);
+  for (const w of ['', 'maybe', 'yes but move the first one', 'no wait', 'yes no', 'not now', 'ok', 'send', 'yesterday', 'know', 'I said yes', 'go', 'do it later', 'don\'t know', 'cancel the meeting', 'what is on it?']) assert.equal(spokenAnswer(w), null, w);
+  assert.deepEqual([YES_WORDS, NO_WORDS], [['yes', 'yes please', 'go ahead', 'do it'], ['no', 'don\'t', 'cancel']]);
+  assert.deepEqual(codeReference().spokenAnswers.yes, YES_WORDS); assert.deepEqual(codeReference().spokenAnswers.no, NO_WORDS);
+
+  // ---- the overlay's bubble, as sidekick.mjs has it: one resolver per bubble; an aborted signal takes it down
+  const overlay = { open: new Map(), closed: [], seq: 0 };
+  const overlayAsk = (opts, signal) => new Promise((resolve) => {
+    const id = ++overlay.seq; overlay.open.set(id, { opts, resolve });
+    signal?.addEventListener('abort', () => { if (overlay.open.delete(id)) overlay.closed.push(id); resolve(null); }, { once: true });
+  });
+  const click = (first) => { const [id, b] = [...overlay.open].at(-1); overlay.open.delete(id); b.resolve(first ? 'yes' : null); }; // as host.js answers: 'yes' for the first button
+  const shown = async () => { for (let i = 0; i < 300 && !overlay.open.size; i++) await new Promise((r) => setTimeout(r, 5)); assert.equal(overlay.open.size, 1, 'one bubble is open'); return [...overlay.open.values()][0].opts; };
+  const heardLog = [];
+  const voiced = createAnswers({ ask: overlayAsk, log: (k, d) => heardLog.push([k, d]) });
+  const pending = (p) => Promise.race([p.then(() => false, () => false), new Promise((r) => setTimeout(() => r(true), 60))]);
+
+  // ---- a yes spoken with no bubble open does nothing here: it is ordinary speech
+  assert.equal(voiced.listening(), false, 'so talking interrupts as it always does');
+  assert.equal(voiced.heard('Yes.'), false, 'and the words go on as a request'); assert.equal(overlay.seq, 0);
+
+  // ---- a calendar of its own, with the real tools, asking through that bubble
+  const homeV = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-homeV-')));
+  const listV = []; let seqV = 0;
+  const addV = (text) => { const c = { id: `v${++seqV}`, text, due: null, status: 'open', kind: 'commitment' }; listV.push(c); return c; };
+  const todosV = { all: async () => listV.filter((c) => c.status !== 'dropped'), update: async (id, ch) => { const c = listV.find((x) => x.id === id); if (ch.status) c.status = ch.status; }, rename: async () => {}, add: async (text) => addV(text) };
+  const calV = createCalendar({ home: homeV, todos: todosV, port, tokenFile, now: () => clock, ask: voiced.ask });
+  const V = (n) => calV.tools.find((t) => t.name === n);
+  const v1 = addV('Voice: one'), v2 = addV('Voice: two');
+  const settled = (p) => p.then((value) => ({ value }), (e) => ({ error: e.message }));
+
+  // Each bubble, answered each way. `start` opens it; `yes` and `no` say what each answer must lead to.
+  async function each(name, start, question, yes, no, prepare = async () => {}) {
+    for (const [how, answerIt, want] of [
+      ['a spoken yes', () => assert.equal(voiced.heard('Yes.'), true), 'yes'], ['a spoken "go ahead"', () => voiced.heard('Go ahead'), 'yes'],
+      ['a spoken no', () => voiced.heard('No.'), 'no'], ['a spoken "cancel"', () => voiced.heard('cancel'), 'no'],
+      ['a click on the first button', () => click(true), 'yes'], ['a click on the other button', () => click(false), 'no'],
+    ]) {
+      await prepare();
+      const before = app.log.length, p = settled(start(want));
+      const opts = await shown();
+      assert.match(opts.placeholder, question, `${name}: the question`); assert.ok(opts.placeholder.endsWith(`\n${SPOKEN_HINT}`), 'and that it can be said'); assert.equal(opts.choices.length, 2);
+      assert.deepEqual(writes(before), [], `${name}: nothing is written before the answer`);
+      // they start talking: the bubble stays, and the turn is not cancelled
+      assert.equal(voiced.listening(), true, `${name}: talking is for the bubble`);
+      // something unclear: the words are taken (they are not a new request), and nothing happens
+      for (const unclear of ['hmm, what was the second one?', 'yes but later', 'not sure']) assert.equal(voiced.heard(unclear), true);
+      assert.equal(overlay.open.size, 1, `${name}: still open after unclear words`); assert.equal(await pending(p), true, `${name}: and still waiting`); assert.deepEqual(writes(before), []);
+      await answerIt();
+      const out = await p;
+      assert.equal(overlay.open.size, 0, `${name}, ${how}: the bubble is gone`);
+      await (want === 'yes' ? yes : no)(out, before, how);
+      assert.equal(voiced.listening(), false); assert.equal(voiced.heard('yes'), false, 'a yes after it has closed is for nobody');
+    }
+  }
+
+  // 1. the first time
+  await each('first mirror', () => V('sync_todos').execute({}), /^Put my to-do list in Super Productivity\? 2 to-dos, each as a task there:\n- Voice: one\n- Voice: two\n/,
+    async (out, before, how) => {
+      assert.equal(out.value, 'The to-do list and Super Productivity are in step.', how); assert.equal(writes(before).filter((w) => w.method === 'POST').length, 2);
+      // back to before the yes, for the next way of answering
+      fs.rmSync(path.join(homeV, 'Documents', 'roamies-pi', 'state.json'));
+    },
+    async (out, before) => { assert.equal(out.value, 'They didn\'t say yes, so nothing was added to Super Productivity.'); assert.deepEqual(writes(before), []); assert.equal(calV.state().started, false); });
+  voiced.heard('x'); const go = settled(V('sync_todos').execute({})); await shown(); voiced.heard('yes please'); assert.match((await go).value, /in step/);
+  const linkV = (c) => calV.state().links[c.id];
+
+  // 2. a block that overlaps something
+  const wall = hand('Voice: in the way', { dueWithTime: at(20, 10), timeEstimate: 60 * 60_000 });
+  await each('an overlap', () => V('schedule_block').execute({ todo: v1.id, date: '2026-11-20', start: '10:30', minutes: 30 }), /^"Voice: one", 10:30 to 11:00 on Friday 20 November, overlaps "Voice: in the way" \(10:00 to 11:00\)\. Put it there anyway\?\n/,
+    async (out, before) => { assert.match(out.value, /is on the calendar Friday 20 November, 10:30 to 11:00/); assert.equal(linkV(v1).local.start, at(20, 10, 30)); await calV.setLocal(v1.id, { start: null }); await calV.sync('timer'); },
+    async (out, before) => { assert.match(out.error, /didn't say to put it there anyway\. Nothing was changed\./); assert.deepEqual(writes(before), []); assert.equal(linkV(v1).local.start, null); });
+  wall.isDone = true;
+
+  // 3. a day plan
+  await each('a day plan', () => V('plan_day').execute({ date: '2026-11-21', items: [{ todo: v1.id, minutes: 60 }, { todo: v2.id, minutes: 30 }] }), /^Plan for Saturday 21 November:\n09:00 to 10:00  Voice: one\n10:00 to 10:30  Voice: two\n/,
+    async (out) => { assert.match(out.value, /^On the calendar Saturday 21 November: 09:00 to 10:00 "Voice: one"; 10:00 to 10:30 "Voice: two"\.$/); await calV.setLocal(v1.id, { start: null }); await calV.setLocal(v2.id, { start: null }); await calV.sync('timer'); },
+    async (out, before) => { assert.match(out.error, /didn't say yes to the plan/); assert.deepEqual(writes(before), []); assert.equal(linkV(v2).local.start, null); });
+
+  // 4. a sorting proposal
+  let pair = [];
+  await each('sort_tasks', () => V('sort_tasks').execute({ proposals: [{ todo: pair[0].id, urgent: true, important: false }, { todo: pair[1].id, urgent: false, important: true }] }), /^Sort these to-dos like this\?\nImportant, not urgent: Voice: sort b\nUrgent, not important: Voice: sort a\n/,
+    async (out) => { assert.match(out.value, /^Sorted 2 to-dos\./); assert.deepEqual([linkV(pair[0]).local.urgent, linkV(pair[1]).local.important], [true, true]); },
+    async (out) => { assert.match(out.error, /nothing was sorted/); assert.deepEqual([linkV(pair[0]).local.urgent, linkV(pair[1]).local.important], [false, false]); },
+    async () => { pair = [addV('Voice: sort a'), addV('Voice: sort b')]; await calV.sync('timer'); });
+
+  // 5. a task deleted in the app
+  const gone = { todo: v2.id, title: v2.text };
+  await each('a deleted task', () => calV.askDeleted(gone), /^The task for "Voice: two" was deleted in Super Productivity\. Take it off my to-do list as well\?\n/,
+    async (out) => assert.equal(out.value, true),
+    async (out) => assert.equal(out.value, false));
+
+  // ---- the turn being cancelled some other way (Stop, Escape on the turn) still closes the bubble, as a no
+  const stop = new AbortController();
+  const cut = settled(V('plan_day').execute({ date: '2026-11-22', items: [{ todo: v1.id, minutes: 60 }] }, { signal: stop.signal }));
+  await shown(); stop.abort();
+  assert.match((await cut).error, /didn't say yes to the plan/); assert.equal(overlay.open.size, 0); assert.equal(voiced.listening(), false);
+  // ---- which way each answer came is on record, without what was asked
+  assert.ok(heardLog.some(([k, d]) => k === 'bubble_answer' && d.by === 'voice' && d.yes) && heardLog.some(([, d]) => d.by === 'click' && !d.yes)); assert.ok(!JSON.stringify(heardLog).includes('Voice:'));
+
+  // ---- the wiring in sidekick.mjs and in the overlay page (neither runs here; see ROADMAP "still to test")
+  assert.match(side, /const answers = createAnswers\(\{ ask, /); assert.match(side, /const cal = createCalendar\(\{\n  ask: answers\.ask,/);
+  assert.match(side, /await cal\.askDeleted\(a\)/, 'the deleted-task bubble too');
+  assert.match(side, /if \(pi\.listening\(\) \|\| answers\.listening\(\)\) speech\.stop\(\);[^\n]*\n\s*else \{ interruptQuietly\(\);/, 'starting to talk cancels the turn only when no such bubble is open');
+  assert.match(side, /if \(pi\.heard\(text\)\) return;[^\n]*\n  if \(answers\.heard\(text\)\) return;[^\n]*\n  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request');
+  const hostPage = fs.readFileSync(new URL('../../../roamies/host.js', import.meta.url), 'utf8');
+  assert.match(hostPage, /if \(ask\?\.choices\) \{ Roamie\.sfx\?\.play\('listen'\); return; \}\n\s*if \(ask\) finishAsk\(null\);\n\s*endTalk\(\);/, 'the page leaves a bubble with buttons as it is when listening starts: before anything is closed or hidden');
+  assert.match(calV.live(), /they answer it by saying yes or no, or by clicking: don't ask them yourself as well, and never tell them they have to click\./);
+}
+
 // ---- 15. the one function added to upstream's store: a to-do's wording, changed
 const store = await import('../store.mjs');
 const kept = await store.addCommitment('Send the figures', at(17, 10));
@@ -649,8 +764,9 @@ const bodies = writes().map((w) => w.body);
 assert.ok(bodies.every((b) => !('deadlineRemindAt' in b) && !('notes' in b) && !('projectId' in b) && !('subTaskIds' in b) && !('dueDay' in b)));
 assert.ok(writes().filter((w) => w.method === 'POST').every((w) => w.body.isIgnoreShortSyntax === true), 'every create asks for its title to be taken as written');
 assert.ok(writes().filter((w) => 'title' in w.body && w.method === 'PATCH').every((w) => Object.keys(w.body).sort().join() === 'isIgnoreShortSyntax,title'));
+// (the stand-in numbers what was made through POST sp…, and what the owner made by hand hand…)
 const madeByRoamies = new Set([...Object.values(state().links).map((l) => l.task), ...Object.values(state().retired), droppedTask, archTask, goneTask, twinBTask]);
-for (const w of writes().filter((q) => q.method === 'PATCH')) assert.ok(madeByRoamies.has(w.path.slice(7)), `only tasks Roamies made are written to: ${w.path}`);
+for (const w of writes().filter((q) => q.method === 'PATCH')) assert.ok(madeByRoamies.has(w.path.slice(7)) || /^\/tasks\/sp\d+$/.test(w.path), `only tasks Roamies made are written to: ${w.path}`);
 assert.ok(app.log.every((q) => q.host === `127.0.0.1:${port}`));
 // ---- the token, the app's full answer and anything from a task Roamies didn't make: in no file, log line or result
 assert.ok(written.length > 20);
