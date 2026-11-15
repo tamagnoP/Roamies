@@ -15,7 +15,7 @@
 // Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
 // between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
-import { NO_WORDS, YES_WORDS } from './answers.mjs';
+import { NO_WORDS, YES_WORDS, heardShape } from './answers.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -44,6 +44,11 @@ export const SP = {
 const SEND_WORDS = ['send', 'send it', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'go', 'go ahead', 'do it', 'approve', 'approved', 'confirm'];
 const SEND = new RegExp(`^\\s*(${SEND_WORDS.join('|')})\\b`, 'i');
 export const isSend = (text) => SEND.test(String(text ?? ''));
+// Said to the Send bubble: these, at the start of what was said, mean "don't send". Anything that starts with
+// neither a send word nor one of these leaves the bubble open.
+const DONT_WORDS = ['no', 'nope', "don't", 'dont', 'do not', 'cancel', 'stop', 'never mind'];
+const DONT = new RegExp(`^\\s*(${DONT_WORDS.join('|')})\\b`, 'i');
+export const isDontSend = (text) => !isSend(text) && DONT.test(String(text ?? '').replace(/’/g, "'"));
 
 const tilde = (p, home) => (p === home ? '~' : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const expand = (p, home) => path.resolve(String(p).replace(/^~(?=$|\/)/, home));
@@ -492,12 +497,25 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const closing = new AbortController();
     const signals = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
     let by = 'click';
-    const voiced = new Promise((resolve) => { approval = { listening: false, answer: (text) => { by = 'voice'; resolve(isSend(text)); } }; });
+    // What is said while the bubble is open: "send" sends, "no" doesn't, and anything else (or nothing heard) leaves
+    // the bubble as it was, ready for the next thing said or a click, any number of times.
+    const voiced = new Promise((resolve) => {
+      approval = {
+        listening: false, closed: false, talked: false, // talked: they have said something, so the countdown is off for good
+        answer: (text) => {
+          approval.listening = false;
+          const send = isSend(text);
+          // The bubble itself is gone (it closed while they talked): there is nothing left to answer later.
+          if (!send && !isDontSend(text) && !approval.closed) { log?.('send_heard', { taken: false, ...heardShape(text) }); return; }
+          by = 'voice'; resolve(send);
+        },
+      };
+    });
     // Once the user has started talking, the answer is what they say: a bubble that closes meanwhile isn't a "no".
-    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: [auto ? 'Send now' : 'Send', "Don't send"] }, signals).then((a) => (a == null && approval?.listening ? new Promise(() => {}) : isSend(a)));
+    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: [auto ? 'Send now' : 'Send', "Don't send"] }, signals).then((a) => { if (a == null && approval?.listening) { approval.closed = true; return new Promise(() => {}); } return isSend(a); });
     // The countdown. Once the user starts talking it no longer counts: what they say decides.
     let timer = null;
-    const timed = auto ? new Promise((resolve) => { timer = setTimeout(() => { if (approval?.listening) return; by = 'auto'; resolve(true); }, auto * 1000); }) : new Promise(() => {});
+    const timed = auto ? new Promise((resolve) => { timer = setTimeout(() => { if (approval?.talked) return; by = 'auto'; resolve(true); }, auto * 1000); }) : new Promise(() => {});
     try {
       const ok = await Promise.race([clicked, voiced, timed]);
       return { ok, by };
@@ -743,12 +761,15 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   return {
     tools, live, stop, tasksOn, briefing,
     busy: () => !!job,
-    /** Something said while a Send bubble is open answers it ("send" sends, anything else doesn't). True if it did. */
+    /** Something said while a Send bubble is open is for the bubble: "send" sends, "no" doesn't, anything else leaves
+     *  it open. True when a bubble was open. */
     heard(text) { if (!approval) return false; approval.answer(text); return true; },
     /** The user started talking. True while a Send bubble is open: what they say will answer it. */
-    listening() { if (!approval) return false; approval.listening = true; return true; },
-    /** They stopped and nothing was heard. True if that ended a Send bubble (nothing is sent). */
+    listening() { if (!approval) return false; approval.listening = approval.talked = true; return true; },
+    /** They stopped and nothing was heard: nothing is sent, and the bubble stays open. True when one was listening. */
     unheard() { if (!approval?.listening) return false; approval.answer(''); return true; },
+    /** The Send bubble: null (none), 'listening' (open, and they are talking) or 'idle' (open, waiting). */
+    bubble: () => (approval ? (approval.listening ? 'listening' : 'idle') : null),
     state: () => ({ working: job ? { prompt: job.prompt, mode: job.mode, project: job.project, since: job.at } : null, last }),
   };
 }
@@ -784,6 +805,7 @@ export function codeReference() {
     },
     tools: { removed: [...REMOVED], piReadOnly: READ_TOOLS.split(','), allowedWhilePiWorks: [...DURING] },
     sendWords: [...SEND_WORDS],
+    dontSendWords: [...DONT_WORDS],
     spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },
     paths: { folder: dir, settings: PATHS.settings, reference: PATHS.reference, state: PATHS.state, records: `${PATHS.log}/`, defaultProject: `${PATHS.workspace}/`, longPrompt: PATHS.pending },

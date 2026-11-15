@@ -637,6 +637,10 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   // ---- which words count: these, alone
   for (const w of ['yes', 'Yes.', ' YES! ', 'Yes, please.', 'yes please', 'Go ahead.', 'do it', 'Do it!']) assert.equal(spokenAnswer(w), 'yes', w);
   for (const w of ['no', 'No.', 'Don\'t.', 'don’t', 'dont', 'Cancel.', 'CANCEL']) assert.equal(spokenAnswer(w), 'no', w);
+  // the same word again, or several of the same kind, is still only an answer: "no, no" is a no
+  for (const w of ['No, no.', 'No. No. No.', 'no cancel', 'No, don\'t.', 'Cancel, cancel']) assert.equal(spokenAnswer(w), 'no', w);
+  for (const w of ['Yes, yes.', 'Yes, go ahead.', 'yes please do it', 'Go ahead, do it.']) assert.equal(spokenAnswer(w), 'yes', w);
+  for (const w of ['yes no', 'no yes', 'no, go ahead', 'yes cancel', 'no no later', 'yes yes but', 'please', 'yes pleased']) assert.equal(spokenAnswer(w), null, w);
   for (const w of ['', 'maybe', 'yes but move the first one', 'no wait', 'yes no', 'not now', 'ok', 'send', 'yesterday', 'know', 'I said yes', 'go', 'do it later', 'don\'t know', 'cancel the meeting', 'what is on it?']) assert.equal(spokenAnswer(w), null, w);
   assert.deepEqual([YES_WORDS, NO_WORDS], [['yes', 'yes please', 'go ahead', 'do it'], ['no', 'don\'t', 'cancel']]);
   assert.deepEqual(codeReference().spokenAnswers.yes, YES_WORDS); assert.deepEqual(codeReference().spokenAnswers.no, NO_WORDS);
@@ -675,20 +679,28 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
       ['a click on the first button', () => click(true), 'yes'], ['a click on the other button', () => click(false), 'no'],
     ]) {
       await prepare();
-      const before = app.log.length, p = settled(start(want));
+      const before = app.log.length, closedBefore = overlay.closed.length, p = settled(start(want));
       const opts = await shown();
       assert.match(opts.placeholder, question, `${name}: the question`); assert.ok(opts.placeholder.endsWith(`\n${SPOKEN_HINT}`), 'and that it can be said'); assert.equal(opts.choices.length, 2);
       assert.deepEqual(writes(before), [], `${name}: nothing is written before the answer`);
       // they start talking: the bubble stays, and the turn is not cancelled
       assert.equal(voiced.listening(), true, `${name}: talking is for the bubble`);
-      // something unclear: the words are taken (they are not a new request), and nothing happens
-      for (const unclear of ['hmm, what was the second one?', 'yes but later', 'not sure']) assert.equal(voiced.heard(unclear), true);
+      assert.equal(voiced.state(), 'listening');
+      // something unclear, three times over, with a take where nothing was heard in between: the words are taken
+      // (they are not a new request), nothing happens, and after each the bubble is idle, as when it opened
+      assert.equal(voiced.unheard(), true); assert.equal(voiced.state(), 'idle');
+      for (const unclear of ['maybe later', 'hmm, what was the second one?', 'yes but later']) {
+        assert.equal(voiced.listening(), true); assert.equal(voiced.state(), 'listening');
+        assert.equal(voiced.heard(unclear), true);
+        assert.equal(voiced.state(), 'idle', `${name}: idle after "${unclear}"`); assert.equal(overlay.open.size, 1); assert.equal(overlay.closed.length, closedBefore, 'the bubble was not taken down and put back');
+      }
+      assert.equal(voiced.listening(), true, `${name}: and talking again is for the bubble again`);
       assert.equal(overlay.open.size, 1, `${name}: still open after unclear words`); assert.equal(await pending(p), true, `${name}: and still waiting`); assert.deepEqual(writes(before), []);
       await answerIt();
       const out = await p;
       assert.equal(overlay.open.size, 0, `${name}, ${how}: the bubble is gone`);
       await (want === 'yes' ? yes : no)(out, before, how);
-      assert.equal(voiced.listening(), false); assert.equal(voiced.heard('yes'), false, 'a yes after it has closed is for nobody');
+      assert.equal(voiced.listening(), false); assert.equal(voiced.state(), null); assert.equal(voiced.unheard(), false); assert.equal(voiced.heard('yes'), false, 'a yes after it has closed is for nobody');
     }
   }
 
@@ -733,6 +745,16 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   const cut = settled(V('plan_day').execute({ date: '2026-11-22', items: [{ todo: v1.id, minutes: 60 }] }, { signal: stop.signal }));
   await shown(); stop.abort();
   assert.match((await cut).error, /didn't say yes to the plan/); assert.equal(overlay.open.size, 0); assert.equal(voiced.listening(), false);
+  // ---- one unclear phrase then yes; one then no; "no" said twice over (as a recogniser may write it)
+  for (const [first, then, want] of [['maybe later', 'Yes.', true], ['maybe later', 'No.', false], ['maybe later', 'No, no.', false], ['later', 'yes, yes', true]]) {
+    const p = settled(calV.askDeleted(gone)); await shown();
+    voiced.listening(); voiced.heard(first); assert.equal(voiced.state(), 'idle'); assert.equal(await pending(p), true);
+    voiced.listening(); voiced.heard(then);
+    assert.equal((await p).value, want, `${first}, then ${then}`); assert.equal(voiced.state(), null);
+  }
+  // ---- what was said and not taken is on record by its size only: enough to see next time why it wasn't an answer
+  assert.deepEqual(heardLog.find(([k, d]) => k === 'bubble_heard' && d.chars === 13), ['bubble_heard', { taken: false, chars: 13, words: 3, yesWord: true, noWord: false }], '"yes but later"');
+  assert.ok(!JSON.stringify(heardLog).includes('later'));
   // ---- which way each answer came is on record, without what was asked
   assert.ok(heardLog.some(([k, d]) => k === 'bubble_answer' && d.by === 'voice' && d.yes) && heardLog.some(([, d]) => d.by === 'click' && !d.yes)); assert.ok(!JSON.stringify(heardLog).includes('Voice:'));
 
@@ -740,7 +762,10 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   assert.match(side, /const answers = createAnswers\(\{ ask, /); assert.match(side, /const cal = createCalendar\(\{\n  ask: answers\.ask,/);
   assert.match(side, /await cal\.askDeleted\(a\)/, 'the deleted-task bubble too');
   assert.match(side, /if \(pi\.listening\(\) \|\| answers\.listening\(\)\) speech\.stop\(\);[^\n]*\n\s*else \{ interruptQuietly\(\);/, 'starting to talk cancels the turn only when no such bubble is open');
-  assert.match(side, /if \(pi\.heard\(text\)\) return;[^\n]*\n  if \(answers\.heard\(text\)\) return;[^\n]*\n  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request');
+  assert.match(side, /if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request, and the shell is told the words were dealt with');
+  assert.match(side, /m\.state === 'idle' && \(pi\.unheard\(\) \|\| answers\.unheard\(\)\)/);
+  const shell = fs.readFileSync(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
+  assert.match(shell.slice(shell.indexOf('fn shows_answer')), /^[^}]*Some\("summon" \| "say" \| "ask" \| "list" \| "heard"\) => true/, 'on "heard" the shell lets the listening pill go (to_overlays: handoff)');
   const hostPage = fs.readFileSync(new URL('../../../roamies/host.js', import.meta.url), 'utf8');
   assert.match(hostPage, /if \(ask\?\.choices\) \{ Roamie\.sfx\?\.play\('listen'\); return; \}\n\s*if \(ask\) finishAsk\(null\);\n\s*endTalk\(\);/, 'the page leaves a bubble with buttons as it is when listening starts: before anything is closed or hidden');
   assert.match(calV.live(), /they answer it by saying yes or no, or by clicking: don't ask them yourself as well, and never tell them they have to click\./);

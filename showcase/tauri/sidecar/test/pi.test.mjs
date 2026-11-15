@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createPi, describeStep, forVoice, gateTools, isAppName, isSend, loadSettings, messageText, projectProblem, REMOVED, snapshot, voiceFor } from '../pi.mjs';
+import { codeReference, createPi, describeStep, forVoice, gateTools, isAppName, isDontSend, isSend, loadSettings, messageText, projectProblem, REMOVED, snapshot, voiceFor } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-home-')));
 const dir = path.join(home, 'Documents', 'roamies-pi');
@@ -140,11 +140,56 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await tool('ask_pi').execute({ prompt: 'spoken approval', mode: 'read' }, {});
   await settled();
   assert.equal(records().at(-1)[0].approved_by, 'voice');
-  // ...and if nothing was heard, nothing is sent
-  answer = () => { pi.listening(); setTimeout(() => assert.ok(pi.unheard()), 20); };
+  // ...and if nothing was heard once the bubble has gone, nothing is sent
+  answer = () => { pi.listening(); lastResolve(null); setTimeout(() => assert.ok(pi.unheard()), 20); };
   await assert.rejects(tool('ask_pi').execute({ prompt: 'mumble', mode: 'read' }, {}), /didn't say send/);
   assert.equal(pi.unheard(), false);
+  // ...nor after words that aren't "send"
+  answer = () => { pi.listening(); lastResolve(null); setTimeout(() => assert.ok(pi.heard('maybe later')), 20); };
+  await assert.rejects(tool('ask_pi').execute({ prompt: 'gone and unclear', mode: 'read' }, {}), /didn't say send/);
   answer = realAsk;
+}
+{ // Words that are neither "send" nor "no" leave the Send bubble exactly as it opened, any number of times
+  assert.equal(pi.bubble(), null);
+  const step = (fn) => new Promise((r) => setTimeout(() => { fn(); r(); }, 15));
+  // Someone talks, says something unclear, and the bubble must be idle and still open afterwards.
+  const unclear = async (words) => {
+    const before = calls().length;
+    await step(() => { assert.equal(pi.listening(), true); assert.equal(pi.bubble(), 'listening'); });
+    await step(() => assert.equal(pi.heard(words), true, 'the words were for the bubble, not a new request'));
+    await step(() => { assert.equal(pi.bubble(), 'idle', `after "${words}" the bubble is as it opened`); assert.equal(calls().length, before, 'nothing was sent'); assert.ok(!pi.busy()); });
+  };
+  const nothingHeard = async () => {
+    await step(() => pi.listening());
+    await step(() => assert.equal(pi.unheard(), true));
+    await step(() => { assert.equal(pi.bubble(), 'idle', 'nothing heard: still open, nothing sent'); assert.equal(pi.unheard(), false, 'and that take is over'); });
+  };
+  const say = (words) => step(() => { assert.equal(pi.listening(), true); }).then(() => step(() => assert.equal(pi.heard(words), true)));
+  const run = async (name, script, mode = 'read') => { let done = null; answer = () => { done = script(); }; const r = await tool('ask_pi').execute({ prompt: name, mode }, {}).then((value) => ({ value }), (e) => ({ error: e.message })); await done; assert.equal(pi.bubble(), null); return r; };
+  const sentBy = () => records().at(-1)[0].approved_by;
+  let n = calls().length, r;
+  // an unclear phrase, then "send"
+  r = await run('unclear then send', async () => { await unclear('maybe later'); await say('Send.'); });
+  assert.match(r.value, /^Sent to pi/); await settled(); assert.equal(calls().length, ++n); assert.equal(sentBy(), 'voice');
+  // three unclear phrases (and nothing heard, in between), then "send it"
+  r = await run('three unclear then send', async () => { await unclear('hmm, what does it say?'); await unclear('I am not sure about this'); await nothingHeard(); await unclear('let me think'); await say('send it'); });
+  assert.match(r.value, /^Sent to pi/); await settled(); assert.equal(calls().length, ++n); assert.equal(sentBy(), 'voice');
+  // an unclear phrase, then "no"
+  r = await run('unclear then no', async () => { await unclear('maybe later'); await say('No.'); });
+  assert.match(r.error, /didn't say send/); assert.equal(calls().length, n);
+  // an unclear phrase, then a click on each button: a click still works after talking
+  r = await run('unclear then click send', async () => { await unclear('what is that'); await step(() => lastResolve('yes')); });
+  assert.match(r.value, /^Sent to pi/); await settled(); assert.equal(calls().length, ++n); assert.equal(sentBy(), 'click');
+  r = await run('unclear then click no', async () => { await unclear('what is that'); await unclear('and that'); await step(() => lastResolve(null)); });
+  assert.match(r.error, /didn't say send/); assert.equal(calls().length, n);
+  // the same for a hand-off that can edit
+  r = await run('edit: unclear then send', async () => { await unclear('which files'); await say('send'); }, 'edit');
+  assert.match(r.value, /^Sent to pi \(editing allowed/); await settled(); assert.equal(calls().length, ++n);
+  // which words are which
+  for (const w of ['no', 'No.', 'no wait, read the other file', 'Don\'t.', 'don’t send it', 'do not send', 'cancel', 'Stop', 'never mind', 'nope']) assert.ok(isDontSend(w), w);
+  for (const w of ['maybe later', 'not sure', 'nothing', 'know', 'stopwatch', 'what does it say', '', 'send', 'yes', 'ok go']) assert.ok(!isDontSend(w), w);
+  assert.deepEqual(codeReference().dontSendWords.filter((w) => !isDontSend(w)), []);
+  answer = 'yes';
 }
 { // said something else while the Send bubble was open: not sent
   answer = () => pi.heard('no wait, read the other file');
@@ -297,6 +342,12 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await assert.rejects(tool('ask_pi').execute({ prompt: 'auto two', mode: 'read' }, {}), /didn't say send/);
   answer = () => { pi.listening(); setTimeout(() => pi.heard('no, stop'), 120); }; // talking pauses the countdown; the words decide
   await assert.rejects(tool('ask_pi').execute({ prompt: 'auto three', mode: 'read' }, {}), /didn't say send/);
+  // talking stops the countdown for good: after words that are neither "send" nor "no" it waits, and doesn't go by itself
+  let went = false; answer = () => { pi.listening(); setTimeout(() => pi.heard('hmm, which folder is that'), 8); };
+  const held = tool('ask_pi').execute({ prompt: 'auto four', mode: 'read' }, {}).then(() => { went = true; }, () => {});
+  await new Promise((r) => setTimeout(r, 1600));
+  assert.equal(went, false, 'well past the countdown: nothing was sent'); assert.equal(pi.bubble(), 'idle'); assert.ok(!pi.busy());
+  pi.listening(); pi.heard('no'); await held; assert.equal(went, false);
   // one that can edit waits, however long
   let done = false; answer = never;
   const waiting = tool('ask_pi').execute({ prompt: 'edit something', mode: 'edit' }, {}).then(() => { done = true; });

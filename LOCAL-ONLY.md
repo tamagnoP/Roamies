@@ -26,8 +26,12 @@ or named an app) is a rule in its instructions, which the model follows but the 
 2. A bubble shows exactly what will be sent, the folder, and the mode, with **Send** and **Don't send**. With spoken
    replies on, it is read out too.
 3. A task that can edit is sent only when you click Send, press Y, or say "send". A read-only task goes by itself
-   after a few seconds (`autoSendReadOnly`), so you only act to stop it: click Don't send, or say anything other than
-   "send". Starting to talk pauses the countdown.
+   after a few seconds (`autoSendReadOnly`), so you only act to stop it: click Don't send, or say "no". Starting to
+   talk stops the countdown for good: from then on it is sent only by "send" or a click.
+   What you say while the bubble is open is for the bubble. Words that start with a send word send it; words that
+   start with "no", "don't", "cancel", "stop" or "never mind" don't; anything else, or nothing heard, leaves the
+   bubble open as it was, any number of times, and is not taken as a new request. Both lists are under `reference`
+   in `settings.default.json` (`sendWords`, `dontSendWords`).
 4. pi starts in the background, in the project folder, as `pi --mode json`. What it's doing ("Pi's reading
    segment.py…") shows in a bubble, at most one every few seconds.
 5. When pi finishes, Roamies tells you the gist in its own voice (with spoken replies on), and then pi's full reply,
@@ -481,10 +485,13 @@ request of yours, it is part of Roamies' reply instead.
 proposal, a task deleted in the app) has two buttons and can also be answered by voice: hold the talk keys and say
 it. The bubble's last line says so.
 
-- Yes: "yes", "yes please", "go ahead", "do it". No: "no", "don't", "cancel". Only these, said alone; capitals and
-  punctuation don't matter. They are listed under `reference.spokenAnswers` in `settings.default.json`.
+- Yes: "yes", "yes please", "go ahead", "do it". No: "no", "don't", "cancel". Only these, said alone, or several of
+  the same kind together ("no, no", "yes, go ahead"); capitals and punctuation don't matter. They are listed under `reference.spokenAnswers` in `settings.default.json`.
 - Anything else you say while the bubble is open does nothing: the bubble stays open, and the words are not taken as
-  a new request either.
+  a new request either. Afterwards the bubble is as ready for an answer as when it opened, any number of times, and
+  the listening pill by the cursor goes away (no reply is coming for those words).
+- What was said and not taken is logged by its size only (characters, words, whether a yes or no word was in it),
+  never the words.
 - Starting to talk doesn't close the bubble or cancel what Roamies was doing. The bubble stays on screen as it is
   (the character doesn't step away while you talk), so clicking still works, and so do the Y and N keys.
 - With no such bubble open, "yes" is ordinary speech, as before.

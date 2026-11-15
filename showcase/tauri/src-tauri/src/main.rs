@@ -955,7 +955,9 @@ fn starts_interaction(msg: &Value) -> bool {
 /// (The turn's start isn't one: the pill's dots are what shows while it thinks.)
 fn shows_answer(msg: &Value) -> bool {
     match msg.get("kind").and_then(Value::as_str) {
-        Some("summon" | "say" | "ask" | "list") => true,
+        // Local-only build: "heard" is the sidecar saying that what was spoken went to a bubble that is open (a
+        // Send bubble, a yes/no question) and that no reply follows it: the pill has nothing to wait for.
+        Some("summon" | "say" | "ask" | "list" | "heard") => true,
         Some("agent") => match msg.pointer("/e/type").and_then(Value::as_str) {
             Some("tool") => msg.pointer("/e/anim").is_some_and(|a| !a.is_null()),
             Some("text" | "emote" | "draw" | "act_start" | "trail" | "done" | "error") => true,
@@ -1615,6 +1617,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Local-only build: words that went to an open bubble get no reply, so "heard" lets the listening pill go;
+    // it is not the start of anything, so the overlay doesn't move for it.
+    #[test]
+    fn words_taken_by_a_bubble_let_the_pill_go() {
+        assert!(shows_answer(&json!({ "kind": "heard" })));
+        assert!(!starts_interaction(&json!({ "kind": "heard" })));
+        assert!(shows_answer(&json!({ "kind": "ask", "id": "a1" })));
+        assert!(!shows_answer(&json!({ "kind": "agent", "e": { "type": "start" } })));
+    }
 
     #[test]
     fn a_second_launch_says_what_it_wants_with_one_flag() {

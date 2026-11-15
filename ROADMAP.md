@@ -238,6 +238,12 @@ the screen blocks clicks.
   ask about the to-do; a to-do removed in Roamies leaves its task in the app without a time. From tasks Roamies did
   not make, only title, start, length and done are read, to see clashes. Urgent and important are the app's tags
   `EM_URGENT` and `EM_IMPORTANT`. One marked function in upstream's `store.mjs` is allowed for this.
+- **2026-11-15.** Found on the installed `6d91f9c`: after an unclear phrase, a spoken "no" was not taken. The log
+  shows every phrase was transcribed and reached the bubble; none was one of the listed phrases alone (the last was
+  7 characters, "No." is 3; the log keeps sizes, not words). The listening pill stayed up after each ignored
+  phrase, waiting for a reply that wasn't coming. Changed: the same answer said more than once counts ("no, no");
+  the pill is let go when words went to a bubble; pi's Send bubble also stays open after unclear words instead of
+  taking them as "don't send"; once you have talked, a read-only hand-off no longer goes by itself.
 - **2026-11-15.** Found on the installed `02471e1`: the first mirror never happened. No request failed (every
   request type passed against the real app with the real code). The yes was spoken, and starting to talk cancelled
   the turn, which closed the bubble as a no; the spoken "yes" then became a new request, which opened the bubble
@@ -255,7 +261,8 @@ the screen blocks clicks.
   (2026-11-15): first mirror, read list, read one, title, time and length set and cleared, both tags set and cleared,
   deadline set and cleared, done, archive lookup. All passed.
 - [ ] A calendar bubble answered by voice on screen: it stays up while you talk, "yes" and "no" settle it, other
-  words leave it, a click still works. Also that pi's Send bubble now stays on screen while you talk.
+  words leave it, a click still works; after an unclear phrase the listening pill goes and a spoken "no" is taken.
+  The same on pi's Send bubble: an unclear phrase, then "send".
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.

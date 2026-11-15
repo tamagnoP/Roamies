@@ -1461,7 +1461,7 @@ function onVoice(m) {
     if (typeof m.ms === 'number') logLine('voice_final', { ms: m.ms, via: String(m.via ?? ''), chars: m.text.trim().length });
     onSpoken(m.text.trim(), m.area);
   }
-  else if (m.type === 'voice_state' && m.state === 'idle' && pi.unheard()) { /* local-only build: nothing was heard for the Send bubble, so nothing is sent */ }
+  else if (m.type === 'voice_state' && m.state === 'idle' && (pi.unheard() || answers.unheard())) { /* local-only build: nothing was heard for the bubble that is open: nothing is sent or answered, and it stays open */ }
   else if (m.type === 'voice_state' && m.state === 'idle' && snap?.waitingVoice) snap.waitingVoice = false;
   else if (m.type === 'voice_error') {
     if (m.code === 'nothing_heard' && snap) { snap.waitingVoice = false; return; }
@@ -1628,8 +1628,10 @@ async function areaSnap() {
 let snapping = false;
 // Words said while ⌃⌥ was held, maybe with an area marked by drawing on the screen at the same time.
 async function onSpoken(text, area) {
-  if (pi.heard(text)) return; // local-only build: a Send bubble is open, and this answers it
-  if (answers.heard(text)) return; // Local-only build: a yes/no bubble is open; a clear yes or no answers it, anything else does nothing
+  // Local-only build: a Send bubble or a yes/no bubble is open, and what was said is for it: a clear answer settles
+  // it, anything else leaves it open. Either way no reply follows these words, so the shell is told they were dealt
+  // with ("heard"): the listening pill by the cursor goes, instead of waiting for an answer that isn't coming.
+  if (pi.heard(text) || answers.heard(text)) { ui({ kind: 'heard' }); return; }
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);
