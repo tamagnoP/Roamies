@@ -205,8 +205,10 @@ setup guide is open, the bubble waits until it closes.
     "notesSearched": 5000,
     "noteTitleOnlyBytes": 300000,
     "frontLookupMs": 900,
-    "frontReuseSeconds": 8
-  }
+    "frontReuseSeconds": 8,
+    "calendarTimeoutSeconds": 20
+  },
+  "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60 }
 }
 ```
 
@@ -270,6 +272,18 @@ setup guide is open, the bubble waits until it closes.
   | `noteTitleOnlyBytes` | 300000 | 1000 to 10000000, whole | A note bigger than this is searched by its title only. |
   | `frontLookupMs` | 900 | 100 to 5000, whole | Milliseconds the look-up of the app in front may take. |
   | `frontReuseSeconds` | 8 | 1 to 60 | Seconds the look-up made when you stop talking stays good. |
+  | `calendarTimeoutSeconds` | 20 | 2 to 60 | Seconds each request to Super Productivity may take. The check that the app is there at all always gives up after 1 second. |
+- `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
+  or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
+  missing setting.
+
+  | Part | Default | Allowed | What it is |
+  | --- | --- | --- | --- |
+  | `dayStart` | "09:00" | a time, before `dayEnd` | Where a day plan starts. |
+  | `dayEnd` | "18:00" | a time, after `dayStart` | Where a day plan ends. Also the time given to a deadline in the app that has a day but no time. |
+  | `lunch` | ["12:30", "13:30"] | two times in order, or `[]` or `null` | The break a day plan keeps free; `[]` or `null` means no break. |
+  | `gapMinutes` | 0 | 0 to 240, whole | Minutes left between blocks in a day plan. |
+  | `syncSeconds` | 60 | 15 to 3600 | How often the to-do list is synced with Super Productivity. |
 
 `settings.default.json`: the reference described above. Written by Roamies at every start, never read by it.
 
@@ -279,8 +293,11 @@ it emitted them (without the letter-by-letter streaming updates), then the resul
 are deleted.
 
 `state.json`: Roamies' own memory, which it writes itself: the project you last switched to (with what `project` was at
-that moment, so a later edit of yours is noticed), and the days the
-briefings were given. Deleting it is safe.
+that moment, so a later edit of yours is noticed), the days the
+briefings were given, and under `calendar` which to-do goes with which Super Productivity task, with the values both
+had after the last sync. Deleting it is safe for the first two; without `calendar`, Roamies no longer knows which
+tasks are its own: it asks again before putting the list in the app, and the tasks already there would be made a
+second time.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
@@ -382,6 +399,68 @@ These are the only files Roamies touches itself. In code, a title is only ever a
 existing note is never written over, and nothing is changed or deleted. What it reads from your notes to answer you
 becomes part of the conversation with your AI provider.
 
+## To-dos in Super Productivity
+
+Roamies' to-do list is mirrored in Super Productivity, through that app's local REST API (Settings > Misc > Enable
+local REST API). Requests go only to `127.0.0.1:3876`, on this Mac.
+
+**The mirror.** Every to-do that is something you said you'd do has a task in the app, with or without a time. Plain
+reminders ("remind me at five") have none. The first time, Roamies shows how many to-dos would be added, with their
+titles, and waits for your yes; before it, nothing is created. A new task appears in the app's Today list, as any
+task added there does.
+
+**The sync.** For a to-do and its task, seven things are kept the same on both sides: the title, whether it is done,
+the start time, the length, urgent, important, and the due time (the app's deadline). A change on either side
+reaches the other.
+
+- When: before any to-do tool runs, before each briefing, and every `calendar.syncSeconds` (60) while the app
+  answers.
+- The pair is known by the task's id, kept in `state.json`. A title never identifies anything: two to-dos with the
+  same words are two tasks, and a renamed task stays with its to-do.
+- If both sides changed different things, both changes are kept. If both changed the same thing, the app's value
+  wins, and Roamies tells you in one line.
+- What a sync reads is never written back: after each run both sides hold the same values, so the next run has
+  nothing to do. A run with nothing to do costs two requests: "are you there", and the task list.
+- A task deleted in the app: Roamies forgets the pair and asks, in a bubble, whether the to-do goes too. Until you
+  answer, the to-do gets no new task; if you keep it, it gets one.
+- A to-do taken off Roamies' list: its task loses its time and stays in the app, and Roamies tells you to delete it
+  there if you don't want it. Roamies never deletes a task.
+- Done on both sides: the pair is retired and no longer synced. A task the app has archived counts as done. A to-do
+  you open again in Roamies takes its old task up again if it is still in the app's list.
+- The app closed, or its API off: to-dos work as always, and the two are brought in step at the next sync. The
+  check that the app is there gives up after one second, so a closed or hung app never holds up a to-do.
+- The due time is the app's deadline: a time (`deadlineWithTime`) when Roamies sets it. A deadline you set in the
+  app as a day without a time is taken as that day at `calendar.dayEnd`. Roamies never sets the app's deadline
+  reminder.
+
+**What a sync has to say** (a clash, a deleted task, the first-time question) when nobody asked for one waits until
+nothing else is going on: no reply being made or read out, nobody talking, no bubble waiting for an answer. Then it
+is shown in a bubble, not spoken. It is kept in `state.json` until shown, so quitting doesn't lose it. During a
+request of yours, it is part of Roamies' reply instead.
+
+**Fixed in code, and listed under `reference` in `settings.default.json`:**
+
+- Only these requests are ever sent: `GET /health`, `GET /tasks`, `GET /tasks/:id`, `POST /tasks`,
+  `PATCH /tasks/:id`. There is no `DELETE`.
+- The access token is read from the app's own file (`~/Library/Application Support/superProductivity/local-rest-api-token`)
+  for each request and kept nowhere: not in a setting, `state.json`, a log, a record or a bubble, and the model never
+  sees it. pi can't read that folder.
+- Only tasks Roamies made are written to. The app's task list arrives whole (the API can't send less); from tasks
+  that aren't Roamies' own, four things are kept, in memory only, to see clashes: title, start, length, done. Their
+  notes, tags, attachments and sub-tasks are dropped as the answer is read, and nothing from them is written
+  anywhere.
+- A title is sent marked "as written", so the app doesn't read `@`, `#` or `+` in it as its short syntax.
+- Only the two matrix tags (`EM_URGENT`, `EM_IMPORTANT`) are ever added to or taken from a task. Its other tags are
+  read just before and sent back as they were.
+- Before each create, the intent is written to `state.json`, and cleared when the pair is saved. If Roamies stops in
+  between, it says so once at the next start: the title, and that a stray task may be in the app.
+
+**The app's own reminder** (seen in 20.0.0): a task given a start time after it was made gets the app's reminder at
+that time; the API can neither set nor remove it. Roamies' own reminder stays on the to-do's due time, which is a
+different thing from a block's start.
+
+The logs record what kind of change a sync made (which fields), never a title.
+
 ## What the patch changes besides pi
 
 | Area | Upstream | This build |
@@ -395,6 +474,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 
 ## What still uses the network
 
+- Requests to Super Productivity on this Mac (`127.0.0.1:3876`). They don't leave the Mac.
 - Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, and
   screenshots or window text when you ask about your screen.
 - pi's own conversation with its provider, using pi's sign-in. Which files pi and the commands it runs can
@@ -409,6 +489,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
+- `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
+- `showcase/tauri/sidecar/store.mjs`: one function added, `renameCommitment`, so a title changed in the app reaches
+  the list.
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches;
@@ -424,7 +507,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs` (new),
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs` (new),
   `package.json`: tests.
 
 ## Build (macOS)

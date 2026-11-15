@@ -323,6 +323,16 @@ export async function updateCommitment(id, { status, dueMs }) {
   return c;
 }
 
+// Local-only build: a to-do's wording, changed. Super Productivity holds a copy of each to-do (calendar.mjs), and a
+// title edited there has to reach the list here; nothing else calls this. Kept to the same 200 characters.
+export async function renameCommitment(id, text) {
+  const c = loadMemory().commitments.find((x) => x.id === id), t = String(text ?? '').trim().slice(0, 200);
+  if (!c || !t) return null;
+  c.text = t;
+  await saveMemory();
+  return c;
+}
+
 // ---------- facts (long-term memory about the user) ----------
 
 const FACT_CAP = 150;

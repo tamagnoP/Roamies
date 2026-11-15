@@ -21,7 +21,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, nextDue, pickFacts, planFold,
-  touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, saveSession, takeDueReminders, updateCommitment, writeJson,
+  touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
 } from './store.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
 import { EMOTES, EchoFilter, ReplyStream } from './reply.mjs';
@@ -37,9 +37,10 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, gateTools, homeFor, limitsFor, voiceFor } from './pi.mjs';
+import { createPi, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
+import { createCalendar, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
@@ -255,7 +256,7 @@ const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: where
   speak: (line) => { if (!turnVoice) return false; turnVoice.say(line); return true; },
   onHandoff: (task) => { activity.handoff(task); panel(); },
   commitmentsText: () => [commitmentsText(), doneTodayText() && `Done today:\n${doneTodayText()}`].filter(Boolean).join('\n'),
-  onCommitments: (c) => { menu(); scheduleReminders(); showList({ flash: c?.id, seconds: 6 }); },
+  onCommitments: (c) => { menu(); scheduleReminders(); showList({ flash: c?.id, seconds: 6 }); cal.changed(c); }, // Local-only build: cal.changed, so Super Productivity follows
   showList: () => showList({ seconds: 20 }),
   fmtWhen: (ms) => fmtWhen(ms),
   onPlan: (args) => trail.plan(args),
@@ -270,6 +271,7 @@ function voiceLine(text) {
   if (!text || !VOICE_ON()) return;
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
   if (turnVoice) { for (const p of parts) turnVoice.say(p); return; }
+  lineUntil = Date.now() + 1500 + String(text).length * 75; // roughly how long it takes to say: sync lines wait for it (calQuiet)
   speech.setVoice(lookVoice());
   const v = speech.start();
   for (const p of parts) v.say(p);
@@ -303,9 +305,45 @@ const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('se
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
+// Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
+// list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
+const cal = createCalendar({
+  ask, log: (kind, data) => logLine(kind, data),
+  todos: {
+    all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
+    update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
+    rename: async (id, text) => { await renameCommitment(id, text); menu(); },
+  },
+});
+// What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
+// nothing else is going on: no reply being made or spoken, nobody talking, no bubble waiting for an answer. It is
+// shown in a bubble then, never spoken, and never dropped (it is kept in state.json until shown).
+let voiceState = 'idle', lineUntil = 0, calOffered = false, calAsking = false;
+const calQuiet = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!config.onboarded || guideClosed) && !loggingIn, busy, queued, asking: pending.size > 0 || calAsking, voice: voiceState, speakingUntil: lineUntil });
+async function calShow() {
+  try {
+    if (!calQuiet()) return;
+    if (cal.hasHeld()) {
+      const { lines, asks } = cal.takeHeld();
+      if (lines.length) { logLine('calendar_lines', { lines: lines.length }); say(lines.join('\n'), 'concerned'); }
+      for (const a of asks) {
+        calAsking = true;
+        const yes = await ask({ placeholder: `The task for "${a.title}" was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'] }).finally(() => { calAsking = false; });
+        if (yes) { await updateCommitment(a.todo, { status: 'dropped' }); menu(); scheduleReminders(); }
+        await cal.answered(a.todo); cal.sync('change'); // kept: it gets a new task
+      }
+      return;
+    }
+    // The first time, once per start: the to-dos that would go into the app, and a yes before any is created.
+    if (!calOffered && !cal.state().started && await cal.there()) {
+      calOffered = true; calAsking = true;
+      await cal.offerStart().finally(() => { calAsking = false; });
+    }
+  } catch (e) { console.error('calendar', e); }
+}
 // Apps on the never-look list are checked before any screen tool runs.
 const guard = createGuard({ windows: async () => (await hands('windows')).windows ?? [] });
-tools.splice(0, tools.length, ...gateTools(guard.wrap(tools), pi, notes.tools));
+tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools])); // Local-only build: cal
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -438,6 +476,7 @@ const livePrompt = (context = '') => {
   const turn = `Live state (current as of this moment):
 ${frontNow ? `${frontNow}\n` : ''}${pi.live()}
 ${notes.live()}
+${cal.live()}
 - Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
 ${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}
 - Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
@@ -1221,8 +1260,9 @@ function showList({ seconds = 0, flash = null, toggle = false } = {}) {
 async function toggleItem(id) {
   const c = listItems().today.concat(listItems().later).find((i) => i.id === id);
   if (!c) return;
-  await updateCommitment(id, { status: c.done ? 'open' : 'done' });
+  const after = await updateCommitment(id, { status: c.done ? 'open' : 'done' });
   menu(); scheduleReminders(); showList({ flash: id, seconds: 4 });
+  cal.changed(after); // Local-only build: Super Productivity follows
 }
 // Finished items stay struck through for the rest of the day; at midnight they're deleted.
 async function midnightClean() {
@@ -1406,6 +1446,7 @@ const startVoiceDownload = () => {
 };
 const PRIVACY = { microphone: 'Privacy_Microphone', speech: 'Privacy_SpeechRecognition' };
 function onVoice(m) {
+  if (m.type === 'voice_state') voiceState = String(m.state ?? 'idle'); // Local-only build: sync lines wait while the owner talks (calQuiet)
   if (m.type === 'voice_state' && m.state === 'listening') {
     if (pi.listening()) speech.stop(); // local-only build: a Send bubble is open; talking answers it instead of cancelling the request
     else { interruptQuietly(); speech.stop(); warmUp(); } // talking over it stops it
@@ -1507,6 +1548,7 @@ async function onMenu(id) {
     const done = id.startsWith('done:');
     updateCommitment(id.slice(5), { status: done ? 'done' : 'dropped' }).then((c) => {
       menu(); showList({ flash: c?.id, seconds: 4 });
+      cal.changed(c); // Local-only build: Super Productivity follows
       if (c && done) ui({ kind: 'agent', e: { type: 'emote', action: 'hype' } }), say(`Done: ${c.text}. That's what I'm talking about!`, 'happy');
     });
   }
@@ -1897,6 +1939,15 @@ setInterval(() => {
     if (!b) return;
     pi.briefing.done(b.kind);
     logLine('briefing', { kind: b.kind });
-    enqueue(b.note);
+    cal.sync('briefing').catch(() => {}).finally(() => enqueue(b.note)); // Local-only build: the to-do list is in step with Super Productivity first
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
+// Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the
+// settings), and what a sync had to say is shown once nothing else is going on.
+cal.startup().catch((e) => console.error('calendar', e));
+(function calTick() {
+  let wait = 60;
+  try { wait = loadSettings(HOME).calendar.syncSeconds; } catch { /* the default */ }
+  setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(calTick); }, wait * 1000);
+})();
+setInterval(calShow, 3000);

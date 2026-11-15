@@ -26,7 +26,7 @@ Last updated: 2026-11-14.
 | 10 | `settings.json` written only by the owner | Done | `2ac8919`, `add0dd3` |
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
-| 13 | Calendar blocks in Super Productivity | Queued (Prompt D) | |
+| 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | In progress (Prompt D, widened) | `sp-calendar` |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
 | 16 | Natural local voice (Kokoro or Piper) | Later | |
@@ -72,7 +72,23 @@ stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answ
 
 ## 2. In progress
 
-Nothing is in progress.
+### 13. To-dos, calendar blocks and the Eisenhower matrix in Super Productivity (branch `sp-calendar`)
+
+Started from Prompt D on 2026-11-14 and widened by the owner the same day, before any code: no longer only calendar
+blocks, but the whole to-do list mirrored in the app and kept in step both ways, with the matrix on top. Three
+commits, in this order:
+
+1. **Mirror and sync. Built.** Every to-do of kind commitment has a task in the app (after a first yes); seven
+   fields synced both ways (title, done, start, length, urgent, important, due time as the app's deadline), per
+   field, the app winning a clash; identity by task id in `state.json`; never `DELETE`; the token read per request
+   and kept nowhere; from other tasks only title, start, length and done, in memory. Settings `calendar` and
+   `limits.calendarTimeoutSeconds`. One marked function added to upstream's `store.mjs`.
+2. **Blocks.** Not built yet: place, show, move and unschedule a block; plan a day after a yes.
+3. **Matrix.** Not built yet: urgent and important by voice, `sort_tasks`, `show_matrix`, the one-time offer of a
+   block.
+
+Checked against the installed Super Productivity 20.0.0, by reading the API code inside the app and with test tasks
+the owner removes by hand. Not merged: the owner reviews it first.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -80,19 +96,7 @@ parent folders of research work and data; list the OrbStack app's project under 
 
 ## 3. Queued, in this order
 
-Build order: 13, 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
-
-### 13. Calendar blocks in Super Productivity (Prompt D)
-
-Roamies keeps its own to-do list and uses Super Productivity only as the calendar.
-
-- Decided: working day 09:00 to 18:00, extendable by saying so; lunch 12:30 to 13:30 kept free; blocks may sit back
-  to back (`gapMinutes` 0); a dictated block goes straight in; a whole-day plan needs a yes; ticking a to-do marks
-  its block done.
-- Limits: never delete a task; change only blocks Roamies created; one block per to-do; loopback only; the access
-  token is read from the app's own file and never stored or shown.
-- Before it can work: enable Settings > Misc > Enable local REST API in Super Productivity.
-- Builder: Claude Code, branch `sp-calendar`.
+Build order: 13 (in progress, section 2), 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
 
 ### 18. Daily note (Prompt E)
 
@@ -221,6 +225,14 @@ the screen blocks clicks.
   stays in code), never reads it, and says once per start-up which settings are missing or unusable. The sizes,
   times and counts became settings under `limits`, each with a range. The sandbox's blocked list stays in code;
   `settings.default.json` is on it. An unusable `sandbox` means on; an unusable `neverLook` means the built-in list.
+- **2026-11-14.** Feature 13 widened before building. The to-do list is mirrored in Super Productivity and synced
+  both ways, not only placed as blocks: every to-do of kind commitment has a task, reminders have none; every block
+  has a to-do behind it. Synced per field, the app winning when both sides changed the same field. A block's start
+  is separate from the to-do's due time, which is synced with the app's deadline. The first mirror waits for a yes
+  to a bubble with the count and the titles. Roamies never sends `DELETE`: a task deleted in the app makes Roamies
+  ask about the to-do; a to-do removed in Roamies leaves its task in the app without a time. From tasks Roamies did
+  not make, only title, start, length and done are read, to see clashes. Urgent and important are the app's tags
+  `EM_URGENT` and `EM_IMPORTANT`. One marked function in upstream's `store.mjs` is allowed for this.
 - **2026-11-14.** Home position test 9 (clicks near the character are blocked) accepted by the owner, pending the
   orb redesign.
 

@@ -59,7 +59,7 @@ put(path.join(dir, 'state.json'), '{}\n'); put(path.join(dir, 'settings.default.
 put(path.join(cells, 'a.py')); put(path.join(cells, 'frozen', 'f.txt')); put(path.join(cells, 'nested', 'n.txt'));
 put(path.join(other, 'o.txt')); put(path.join(ref, 'r.txt')); put(H('Documents', 'private', 'p.txt')); put(H('Desktop', 'd.txt')); put(H('Library', 'CloudStorage', 'Drive', 'c.txt'));
 put(H('.ssh', 'id')); put(H('.gnupg', 'key')); put(H('.gg', 'g')); put(H('.claude', 'c')); put(H('Library', 'Keychains', 'login.keychain-db'));
-put(H('Library', 'Application Support', 'superProductivity', 'data')); put(H('.config', 'gh', 'hosts.yml')); put(H('.cache', 'huggingface', 'token')); put(H('.cache', 'huggingface', 'hub', 'model.bin'));
+put(H('Library', 'Application Support', 'superProductivity', 'data')); put(H('Library', 'Application Support', 'superProductivity', 'local-rest-api-token')); put(H('.config', 'gh', 'hosts.yml')); put(H('.cache', 'huggingface', 'token')); put(H('.cache', 'huggingface', 'hub', 'model.bin'));
 put(H('.config', 'git', 'ignore')); put(H('.config', 'zotero-mcp', 'key')); put(H('.bash_history')); put(H('.bash_profile'), '');
 put(H('.cargo', 'bin', 'tool')); put(H('.matplotlib', 'rc')); put(H('mytools', 'lib.txt')); put(H('.toolrc'));
 put(H('.pi', 'agent', 'auth.json'), '{}'); put(H('.pi', 'agent', 'models.json'), '{}'); put(H('.pi', 'agent', 'settings.json'), '{}'); put(H('.pi', 'agent', 'trust.json'), '{}'); put(H('.pi', 'agent', 'APPEND_SYSTEM.md')); put(H('.pi', 'agent', 'SYSTEM.md'));
@@ -208,6 +208,8 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
     ['read ~/.claude', 'read', H('.claude', 'c')],
     ['read a keychain', 'read', H('Library', 'Keychains', 'login.keychain-db')],
     ['read Super Productivity', 'read', H('Library', 'Application Support', 'superProductivity', 'data')],
+    ['read Super Productivity\'s access token', 'read', H('Library', 'Application Support', 'superProductivity', 'local-rest-api-token')],
+    ['write Super Productivity\'s access token', 'write', H('Library', 'Application Support', 'superProductivity', 'local-rest-api-token')],
     ['read the Hugging Face token', 'read', H('.cache', 'huggingface', 'token')],
     ['read OrbStack\'s keys', 'read', H('.orbstack', 'ssh', 'id')],
     ['read cargo\'s sign-in (credentials.toml), inside the tool folder ~/.cargo', 'read', H('.cargo', 'credentials.toml')],

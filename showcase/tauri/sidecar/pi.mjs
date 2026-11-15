@@ -29,7 +29,16 @@ const PATHS = { folder: path.join('Documents', 'roamies-pi'), settings: 'setting
 // Tools taken out of Roamies: files and commands are pi's job.
 export const REMOVED = new Set(['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'run_command', 'fetch_url']);
 // What still works while pi is busy.
-const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note']);
+const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note', 'sync_todos']);
+
+// Super Productivity (calendar.mjs): the to-do list is mirrored there through that app's local REST API. Where it
+// listens, where its access token is kept (read when a request is made, never stored), the two tags its Eisenhower
+// matrix goes by, how long the "is it there?" check may take, and the only requests Roamies sends (never DELETE).
+export const SP = {
+  host: '127.0.0.1', port: 3876, tokenFile: 'Library/Application Support/superProductivity/local-rest-api-token',
+  urgentTag: 'EM_URGENT', importantTag: 'EM_IMPORTANT', healthSeconds: 1,
+  requests: ['GET /health', 'GET /tasks', 'GET /tasks/:id', 'POST /tasks', 'PATCH /tasks/:id'],
+};
 
 const SEND_WORDS = ['send', 'send it', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'go', 'go ahead', 'do it', 'approve', 'approved', 'confirm'];
 const SEND = new RegExp(`^\\s*(${SEND_WORDS.join('|')})\\b`, 'i');
@@ -244,12 +253,13 @@ export const LIMITS = {
   noteTitleOnlyBytes: { default: 300_000, min: 1000, max: 10_000_000, whole: true }, // a bigger note is searched by its title only
   frontLookupMs: { default: 900, min: 100, max: 5000, whole: true }, // how long the look-up of the app in front may take
   frontReuseSeconds: { default: 8, min: 1, max: 60 }, // how long the look-up made when you stop talking stays good
+  calendarTimeoutSeconds: { default: 20, min: 2, max: 60 }, // each request to Super Productivity (not the 1-second "is it there?" check)
 };
 const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -298,14 +308,27 @@ const CLEAN = {
   readOnly: list, toolFolders: list, toolFoldersOff: list, docker: list,
   home: when((v) => (isStr(v) && HOME_CORNERS.includes(v.trim().toLowerCase())) || (isObj(v) && typeof v.x === 'number' && typeof v.y === 'number' && Number.isFinite(v.x) && Number.isFinite(v.y))),
   limits: when(isObj),
+  calendar: when(isObj),
 };
+/** The parts of "calendar": the working day a day plan fills, the lunch break kept free ([] or null: none), the
+ *  minutes left between blocks, and how often the to-do list is synced with Super Productivity. One that is missing
+ *  or can't be used takes its default and is named at start-up, like a limit. */
+const whole = (v, lo, hi) => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+export const CALENDAR = {
+  dayStart: { default: '09:00', ok: (v) => clock(v) !== null },
+  dayEnd: { default: '18:00', ok: (v) => clock(v) !== null },
+  lunch: { default: ['12:30', '13:30'], ok: (v) => v === null || (Array.isArray(v) && (v.length === 0 || (v.length === 2 && clock(v[0]) !== null && clock(v[1]) !== null && clock(v[0]) < clock(v[1])))) },
+  gapMinutes: { default: 0, min: 0, max: 240, ok: (v) => whole(v, 0, 240) },
+  syncSeconds: { default: 60, min: 15, max: 3600, ok: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 15 && v <= 3600 },
+};
+function calendarDefaults() { return Object.fromEntries(Object.entries(CALENDAR).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : v.default])); }
 
 /** What Roamies itself keeps in ~/Documents/roamies-pi/state.json: the project chosen with switch_project, and the
  *  days the briefings were given. {} when there's none or it can't be read. */
-function readState(dir) {
+export function readState(dir) {
   try { const s = JSON.parse(fs.readFileSync(path.join(dir, PATHS.state), 'utf8')); return s && typeof s === 'object' && !Array.isArray(s) ? s : {}; } catch { return {}; }
 }
-const writeState = (dir, state) => fs.writeFileSync(path.join(dir, PATHS.state), `${JSON.stringify(state, null, 2)}\n`);
+export const writeState = (dir, state) => fs.writeFileSync(path.join(dir, PATHS.state), `${JSON.stringify(state, null, 2)}\n`);
 
 /** Reads ~/Documents/roamies-pi/settings.json, making the folder and the file the first time. After that the file is
  *  the owner's alone: nothing here, or anywhere else in Roamies, writes it.
@@ -338,6 +361,19 @@ export function loadSettings(home) {
       else limits[name] = set.limits[name];
     }
   }
+  // calendar: part by part, the same way. A day that doesn't start before it ends is the default day.
+  const cal = calendarDefaults();
+  if (set.calendar !== defaults.calendar) {
+    for (const name of Object.keys(CALENDAR)) {
+      if (!Object.hasOwn(set.calendar, name)) missing.push(`calendar.${name}`);
+      else if (!CALENDAR[name].ok(set.calendar[name])) invalid.push({ name: `calendar.${name}`, using: CALENDAR[name].default });
+      else cal[name] = set.calendar[name];
+    }
+    if (clock(cal.dayStart) >= clock(cal.dayEnd)) {
+      for (const name of ['dayStart', 'dayEnd']) { cal[name] = CALENDAR[name].default; if (!invalid.some((i) => i.name === `calendar.${name}`)) invalid.push({ name: `calendar.${name}`, using: cal[name] }); }
+    }
+  }
+  const calendar = { dayStart: clock(cal.dayStart), dayEnd: clock(cal.dayEnd), lunch: cal.lunch?.length ? cal.lunch.map(clock) : null, gapMinutes: cal.gapMinutes, syncSeconds: cal.syncSeconds };
   // projects: a list of folders (named by their last part), or { name: folder }.
   const listed = Array.isArray(set.projects) ? set.projects.map((p) => [base(expand(p, home)), p]) : Object.entries(set.projects);
   // The settings folder itself used to be pi's default project. It no longer can be one (pi could rewrite these
@@ -367,7 +403,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes) };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes) };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -723,6 +759,14 @@ export function codeReference() {
   const blocked = BLOCKED(h, dir);
   return {
     limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}) }])),
+    calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max } },
+    superProductivity: {
+      address: `http://${SP.host}:${SP.port}`, tokenFile: `${h}/${SP.tokenFile}`, tokenKept: 'read from that file for each request; never stored, logged or shown',
+      requestsSent: [...SP.requests], neverSent: 'DELETE',
+      urgentTag: SP.urgentTag, importantTag: SP.importantTag, isItThereCheckSeconds: SP.healthSeconds,
+      synced: ['title', 'done', 'start time', 'length', 'urgent', 'important', 'due time (the app\'s deadline)'],
+      fromTasksRoamiesDidNotMake: ['title', 'start time', 'length', 'done'],
+    },
     sandbox: {
       builtInToolFolders: [...TOOL_FOLDERS],
       blockedFolders: blocked.filter(([kind]) => kind === 'subpath').map(([, p]) => p),
