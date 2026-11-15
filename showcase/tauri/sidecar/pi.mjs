@@ -29,7 +29,7 @@ const PATHS = { folder: path.join('Documents', 'roamies-pi'), settings: 'setting
 // Tools taken out of Roamies: files and commands are pi's job.
 export const REMOVED = new Set(['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'run_command', 'fetch_url']);
 // What still works while pi is busy.
-const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note', 'sync_todos']);
+const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note', 'sync_todos', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day']);
 
 // Super Productivity (calendar.mjs): the to-do list is mirrored there through that app's local REST API. Where it
 // listens, where its access token is kept (read when a request is made, never stored), the two tags its Eisenhower

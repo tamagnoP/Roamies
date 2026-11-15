@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import {
-  addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, nextDue, pickFacts, planFold,
+  addCommitment, addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, nextDue, pickFacts, planFold,
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
 } from './store.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
@@ -313,6 +313,7 @@ const cal = createCalendar({
     all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
     rename: async (id, text) => { await renameCommitment(id, text); menu(); },
+    add: async (text) => { const c = await addCommitment(text, null, 'commitment'); menu(); showList({ flash: c.id, seconds: 6 }); return c; },
   },
 });
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
@@ -1939,7 +1940,7 @@ setInterval(() => {
     if (!b) return;
     pi.briefing.done(b.kind);
     logLine('briefing', { kind: b.kind });
-    cal.sync('briefing').catch(() => {}).finally(() => enqueue(b.note)); // Local-only build: the to-do list is in step with Super Productivity first
+    cal.sync('briefing').catch(() => {}).finally(() => enqueue(b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note)); // Local-only build: the to-do list is in step with Super Productivity first
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the

@@ -11,6 +11,8 @@
 //   - Only tasks Roamies made are ever written to. From the others, four things are kept, in memory, to see clashes:
 //     title, start, length, done. The rest of the app's answer is dropped as it is parsed.
 //   - Only the two matrix tags are ever added to or taken from a task; its other tags are sent back as they were.
+//   - Every block has a to-do behind it, and a to-do has one block at most. A block is never placed without the task
+//     list having just been read, so a clash is always seen; a day plan is created only after a yes.
 //
 // A sync run: is the app there (1 second at most); read the task list once; for each link compare, field by field,
 // Roamies' value, the app's, and the value both had after the last run. What only one side changed goes to the other;
@@ -36,6 +38,36 @@ const title = (t) => String(t ?? '').trim().slice(0, 200).trim();
 const stamp = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 const minutes = (ms) => (typeof ms === 'number' && ms > 0 ? Math.round(ms / 60_000) : 0);
 const quote = (t) => `"${t}"`;
+const pad = (n) => String(n).padStart(2, '0');
+const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const span = (b) => `${hm(b.start)} to ${hm(b.start + b.minutes * 60_000)}`;
+const dayOf = (text) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text ?? '').trim()); const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; return d && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3] ? d : null; };
+const clockOf = (text) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim()); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
+const dayName = (d) => d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+/** Two stretches of time overlap. One with no length is a moment, and clashes when it falls inside the other. */
+const overlap = (a, b) => a.start < b.start + Math.max(b.minutes, 1) * 60_000 && b.start < a.start + Math.max(a.minutes, 1) * 60_000;
+
+/** Where a day plan puts each item: in the order given, each at the first free stretch of its length between `from`
+ *  and `until` (ms), clear of `busy` ([{ start, minutes }]) and of each other, `gap` minutes apart. → { placed:
+ *  [{ ...item, start }], left: [item] } (left: what doesn't fit). */
+export function placeDay(items, { from, until, busy = [], gap = 0 }) {
+  const taken = busy.map((b) => ({ start: b.start - (b.gap === false ? 0 : gap * 60_000), end: b.start + Math.max(b.minutes, 1) * 60_000 + (b.gap === false ? 0 : gap * 60_000) }));
+  const placed = [], left = [];
+  for (const item of items) {
+    let at = from, found = false;
+    for (;;) {
+      const end = at + item.minutes * 60_000;
+      if (end > until) break;
+      const hit = taken.filter((t) => at < t.end && t.start < end).sort((a, b) => b.end - a.end)[0];
+      if (!hit) { found = true; break; }
+      at = hit.end;
+    }
+    if (!found) { left.push(item); continue; }
+    placed.push({ ...item, start: at });
+    taken.push({ start: at - gap * 60_000, end: at + item.minutes * 60_000 + gap * 60_000 });
+  }
+  return { placed, left };
+}
 
 /** Whether a line from a sync nobody asked for can be shown now: the overlay is up and the setup guide out of the
  *  way, no reply is being made or spoken, nobody is talking, and no bubble (Send, a plan, any question) is waiting. */
@@ -81,7 +113,7 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
 /**
  * todos: Roamies' own list, as sidekick.mjs hands it over:
  *   all() → [{ id, text, due, status: 'open' | 'done', kind }]  (open ones, and those finished today)
- *   update(id, { status, dueMs }), rename(id, text)
+ *   update(id, { status, dueMs }), rename(id, text), add(text) → { id }  (a new to-do of kind commitment)
  * ask: the question bubble. now: the clock. port, tokenFile: only tests set these.
  */
 export function createCalendar({ home = os.homedir(), todos, ask = async () => null, log = () => {}, now = () => Date.now(), port, tokenFile } = {}) {
@@ -270,10 +302,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   }
 
   /** Runs a sync. From a tool, what it has to say comes back as text for the model; otherwise it is held for a bubble. */
+  let lastOk = false; // whether the last run reached the app: what is known of its calendar is only good then
   function sync(from = 'timer') {
     return inTurn(async () => {
       let r;
-      try { r = await run(); } catch (e) { log('calendar_error', { message: String(e?.message ?? e).slice(0, 200) }); return { ok: false, text: '', why: 'The sync with Super Productivity ran into a problem.' }; }
+      try { r = await run(); lastOk = r.ok && r.started !== false; } catch (e) { lastOk = false; log('calendar_error', { message: String(e?.message ?? e).slice(0, 200) }); return { ok: false, text: '', why: 'The sync with Super Productivity ran into a problem.' }; }
       // A task deleted in the app: the question is the app's own bubble, whoever started the run.
       hold(r.asks.map((a) => ({ ask: a })));
       if (from !== 'tool') { hold(r.lines.map((text) => ({ text }))); return { ...r, text: '' }; }
@@ -329,11 +362,178 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return true;
   }
 
+  // ---- blocks: a to-do's start time and length, on the calendar in the app
+  const NOT_YET = 'The to-do list isn\'t in Super Productivity yet, so there is nowhere to put a block. sync_todos shows them the list and asks; nothing is added before their yes.';
+  /** Before a block is placed or a day read: the app answers, the list is mirrored, and a sync has just run, so
+   *  what is on the calendar is what the app has this moment. Otherwise the tool refuses, in plain words. */
+  async function fresh(doing) {
+    if (!(await there())) throw new Error(`Super Productivity isn't answering, so I can't ${doing}: I couldn't see what is already on the calendar. ${HOW}`);
+    if (!get().started) throw new Error(NOT_YET);
+    const r = await sync('tool');
+    if (!r.ok) throw new Error(`${r.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
+    return r.text;
+  }
+  /** What is on the calendar on a day: Roamies' own blocks (with their to-do), and the time other tasks take. */
+  function dayBlocks(day, cal = get(), list = []) {
+    const from = day.getTime(), until = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+    const on = (b) => b.start !== null && b.start < until && b.start + Math.max(b.minutes, 1) * 60_000 > from;
+    const mine = Object.entries(cal.links).filter(([, l]) => on(l.local)).map(([id, l]) => ({ todo: id, title: list.find((t) => t.id === id)?.text ?? l.title, start: l.local.start, minutes: l.local.minutes, done: l.was === 'done' }));
+    return { mine: mine.sort((a, b) => a.start - b.start), theirs: others.filter((o) => !o.done && on(o)).sort((a, b) => a.start - b.start) };
+  }
+  /** The open to-do a block is for: of kind commitment, and mirrored. */
+  async function todoFor(id) {
+    const t = (await todos.all()).find((x) => x.id === id);
+    if (!t) throw new Error(`There's no to-do ${id}. list_commitments shows the ids.`);
+    if (t.kind !== 'commitment') throw new Error(`${quote(t.text)} is a reminder, and reminders aren't put on the calendar.`);
+    if (t.status !== 'open') throw new Error(`${quote(t.text)} is already done.`);
+    const link = get().links[id];
+    if (!link) throw new Error(`${quote(t.text)} has no task in Super Productivity right now (its task was deleted there, and they haven't said yet whether the to-do stays).`);
+    return { t, link };
+  }
+  const settle = async (pre, said) => { const r = await sync('tool'); return [said, r.ok ? '' : 'Super Productivity stopped answering before this reached it: it is saved here and goes over at the next sync.', pre, r.text].filter(Boolean).join('\n'); };
+  const when = (date, start) => {
+    const day = dayOf(date), at = clockOf(start);
+    if (!day) throw new Error('The date has to be YYYY-MM-DD.');
+    if (at === null) throw new Error('The start has to be a time, HH:MM.');
+    return { day, start: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, at).getTime() };
+  };
+  /** Puts one block on the calendar. If it would overlap something, the owner is shown what and asked. */
+  async function place(id, title_, start, mins, signal) {
+    const cal = get(), day = new Date(start); day.setHours(0, 0, 0, 0);
+    const { mine, theirs } = dayBlocks(day, cal);
+    const block = { start, minutes: mins };
+    const hits = [...mine.filter((b) => b.todo !== id && !b.done && overlap(block, b)), ...theirs.filter((b) => overlap(block, b))];
+    if (hits.length) {
+      const what = hits.map((b) => `${quote(b.title)} (${span(b)})`).join(' and ');
+      const a = await ask({ placeholder: `${quote(title_)}, ${span(block)} on ${dayName(day)}, overlaps ${what}. Put it there anyway?`, choices: ['Put it there', 'Don\'t'] }, signal);
+      if (!isSend(a)) throw new Error(`It would overlap ${what}, and they didn't say to put it there anyway. Nothing was changed. Ask what time suits instead.`);
+    }
+    await setLocal(id, { start, minutes: mins });
+  }
+  const minutesArg = z.number().int().min(5).max(720);
+  const blockTools = [
+    {
+      name: 'schedule_block',
+      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title for something new, which also becomes a to-do. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself.',
+      parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), minutes: minutesArg.optional() }),
+      execute: async ({ todo, title: name, date, start, minutes: mins }, ctx) => {
+        if (!todo === !name?.trim()) throw new Error('Give either todo (an id) or title (something new), not both.');
+        const at = when(date, start);
+        const pre = await fresh('place a block');
+        let id = todo;
+        if (!id) {
+          if (!mins) throw new Error('How long does it take? Ask, then give minutes.');
+          id = (await todos.add(title(name))).id; // every block has a to-do behind it
+          const made = await sync('tool');
+          if (!made.ok || !get().links[id]) throw new Error(`${quote(title(name))} is on the to-do list, but Super Productivity stopped answering before its block could be placed. Try the block again later.`);
+        }
+        const { t, link } = await todoFor(id);
+        const length = mins ?? link.local.minutes;
+        if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
+        const moved = link.local.start !== null;
+        await place(id, t.text, at.start, length, ctx?.signal);
+        log('calendar_block', { what: moved ? 'moved' : 'placed' });
+        return settle(pre, `${quote(t.text)} is on the calendar ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}${moved ? ' (moved from where it was)' : ''}${todo ? '' : `, and on the to-do list as ${id}`}.`);
+      },
+    },
+    {
+      name: 'move_block',
+      description: 'Move a to-do\'s block on the calendar to another day or time, or change its length. Give what changes; the rest stays.',
+      parameters: z.object({ todo: z.string(), date: z.string().optional(), start: z.string().optional(), minutes: minutesArg.optional() }),
+      execute: async ({ todo, date, start, minutes: mins }, ctx) => {
+        if (!date && !start && !mins) throw new Error('Say what changes: date, start or minutes.');
+        const pre = await fresh('move a block');
+        const { t, link } = await todoFor(todo);
+        if (link.local.start === null) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
+        const was = new Date(link.local.start);
+        const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(link.local.start));
+        const length = mins ?? link.local.minutes;
+        if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
+        await place(todo, t.text, at.start, length, ctx?.signal);
+        log('calendar_block', { what: 'moved' });
+        return settle(pre, `${quote(t.text)} is now ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}.`);
+      },
+    },
+    {
+      name: 'unschedule_block',
+      description: 'Take a to-do\'s block off the calendar. The to-do and its task stay; only the time goes.',
+      parameters: z.object({ todo: z.string() }),
+      execute: async ({ todo }) => {
+        if (!get().started) throw new Error(NOT_YET);
+        const pre = (await sync('tool')).text;
+        const { t, link } = await todoFor(todo);
+        if (link.local.start === null) return `${quote(t.text)} has no block on the calendar.`;
+        await setLocal(todo, { start: null });
+        log('calendar_block', { what: 'unscheduled' });
+        return settle(pre, `${quote(t.text)} is off the calendar. It is still on the to-do list.`);
+      },
+    },
+    {
+      name: 'show_day',
+      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by other tasks they scheduled in Super Productivity themselves (given as taken time only).',
+      parameters: z.object({ date: z.string() }),
+      execute: async ({ date }) => {
+        const day = dayOf(date);
+        if (!day) throw new Error('The date has to be YYYY-MM-DD.');
+        const pre = await fresh('read the calendar');
+        const { mine, theirs } = dayBlocks(day, get(), await todos.all());
+        const lines = [...mine.map((b) => ({ at: b.start, text: `${span(b)} (${b.minutes} min): ${b.title}${b.done ? ' (done)' : ''} [${b.todo}]` })), ...theirs.map((b) => ({ at: b.start, text: `${span(b)}: taken by a task of their own in Super Productivity` }))].sort((a, b) => a.at - b.at).map((l) => l.text);
+        return [lines.length ? `${dayName(day)}:\n${lines.join('\n')}` : `Nothing is on the calendar ${dayName(day)}.`, pre].filter(Boolean).join('\n');
+      },
+    },
+    {
+      name: 'plan_day',
+      description: 'Plan a day: give the to-dos to place, in the order to do them, each with how long it takes (ask when they haven\'t said and the to-do has no length). The app works out the times itself, inside the working day, keeping lunch and everything already scheduled free, then shows them the whole plan and creates it only after their yes. from and until (HH:MM) stretch or shorten the day for this one plan, only when they say so ("plan until 20:00 today").',
+      parameters: z.object({ date: z.string(), items: z.array(z.object({ todo: z.string(), minutes: minutesArg.optional() })).min(1).max(30), from: z.string().optional(), until: z.string().optional() }),
+      execute: async ({ date, items, from, until }, ctx) => {
+        const day = dayOf(date);
+        if (!day) throw new Error('The date has to be YYYY-MM-DD.');
+        const c = settings().calendar, a = from ? clockOf(from) : c.dayStart, b = until ? clockOf(until) : c.dayEnd;
+        if (a === null || b === null || a >= b) throw new Error('from and until have to be times, HH:MM, from before until.');
+        const pre = await fresh('plan the day');
+        if (new Set(items.map((i) => i.todo)).size !== items.length) throw new Error('A to-do can be in the plan once: it has one block.');
+        const want = [];
+        for (const i of items) {
+          const { t, link } = await todoFor(i.todo);
+          const length = i.minutes ?? link.local.minutes;
+          if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give its minutes.`);
+          want.push({ todo: i.todo, title: t.text, minutes: length });
+        }
+        const at = (m) => new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, m).getTime();
+        const { mine, theirs } = dayBlocks(day);
+        const busy = [...mine.filter((x) => !x.done && !want.some((w) => w.todo === x.todo)), ...theirs, ...(c.lunch ? [{ start: at(c.lunch[0]), minutes: c.lunch[1] - c.lunch[0], gap: false }] : [])];
+        // Today, a plan starts from now (to the next five minutes), not from a time already gone.
+        const soonest = Math.ceil(now() / 300_000) * 300_000;
+        const { placed, left } = placeDay(want, { from: Math.max(at(a), soonest), until: at(b), busy, gap: c.gapMinutes });
+        if (!placed.length) throw new Error(`Nothing fits ${dayName(day)} between ${hm(Math.max(at(a), soonest))} and ${hm(at(b))} with what is already there. Nothing was changed.`);
+        const shown = [`Plan for ${dayName(day)}:`, ...placed.map((p) => `${span(p)}  ${p.title}`), ...(left.length ? [`No room for: ${left.map((l) => l.title).join('; ')}`] : [])].join('\n');
+        const yes = await ask({ placeholder: shown, choices: ['Plan it', 'Don\'t'] }, ctx?.signal);
+        if (!isSend(yes)) throw new Error('They didn\'t say yes to the plan, so nothing was put on the calendar.');
+        for (const p of placed) await setLocal(p.todo, { start: p.start, minutes: p.minutes });
+        log('calendar_plan', { blocks: placed.length, left: left.length });
+        return settle(pre, `On the calendar ${dayName(day)}: ${placed.map((p) => `${span(p)} ${quote(p.title)}`).join('; ')}.${left.length ? ` No room for: ${left.map((l) => quote(l.title)).join(', ')}.` : ''}`);
+      },
+    },
+  ];
+
+  /** For the morning briefing: what is on the calendar today, as a note for the model. '' when that isn't known. */
+  function dayNote(d = new Date(now())) {
+    let cal;
+    try { cal = get(); } catch { return ''; }
+    if (!cal.started || !lastOk) return '';
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const { mine, theirs } = dayBlocks(day, cal);
+    const open = mine.filter((b) => !b.done);
+    if (!open.length && !theirs.length) return '\nNothing is on the calendar in Super Productivity today.';
+    return `\nOn the calendar in Super Productivity today: ${open.map((b) => `${span(b)} ${quote(b.title)}`).join('; ') || 'none of their to-dos'}${theirs.length ? `; and ${theirs.length} other stretch${theirs.length === 1 ? '' : 'es'} of time taken by tasks of their own there (${theirs.map(span).join(', ')})` : ''}. Say it in a sentence or two.`;
+  }
+
   /** Upstream's to-do tools, with a sync before each: what the app changed is in before the list is read or changed. */
   const TODO_TOOLS = new Set(['remember_commitment', 'update_commitment', 'list_commitments', 'show_list']);
   const wrap = (tools) => tools.map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { const pre = await sync('tool'); const out = await t.execute(...a); return pre.text ? `${out}\n\n${pre.text}` : out; } } : t));
 
   const tools = [
+    ...blockTools,
     {
       name: 'sync_todos',
       description: 'Sync the to-do list with Super Productivity now (it also happens by itself, about once a minute). Use it when they ask to sync, or to put their to-do list in Super Productivity for the first time; that first time the app shows them the list and waits for their yes.',
@@ -356,5 +556,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).';
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
 }

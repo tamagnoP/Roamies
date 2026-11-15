@@ -20,7 +20,7 @@ for (const name of ['writeFileSync', 'appendFileSync']) { const real = fs[name];
 for (const name of ['writeFile', 'appendFile']) { const real = fs.promises[name]; fs.promises[name] = (file, data, ...rest) => { written.push({ file: String(file), data: String(data) }); return real(file, data, ...rest); }; }
 
 const { CALENDAR, LIMITS, SP, codeReference, loadSettings } = await import('../pi.mjs');
-const { Down, FIELDS, createCalendar, createClient, quiet } = await import('../calendar.mjs');
+const { Down, FIELDS, createCalendar, createClient, placeDay, quiet } = await import('../calendar.mjs');
 const { settingsNotice, settingsReference } = await import('../reference.mjs');
 
 // ---- the stand-in for Super Productivity
@@ -78,10 +78,12 @@ const todos = {
   all: () => list.filter((c) => c.status === 'open' || c.status === 'done').map((c) => ({ ...c })),
   update: async (id, { status, dueMs }) => { const c = list.find((x) => x.id === id); if (status) c.status = status; if (dueMs !== undefined) c.due = dueMs; },
   rename: async (id, text) => { list.find((x) => x.id === id).text = text; },
+  add: async (text) => add(text),
 };
 const logged = [];
 let answer = null; const asked = [];
-const make = () => createCalendar({ home, todos, port, tokenFile, ask: async (o) => { asked.push(o.placeholder); return answer; }, log: (kind, data) => logged.push({ kind, data }) });
+let clock = new Date(2026, 10, 14, 8).getTime();
+const make = () => createCalendar({ home, todos, port, tokenFile, now: () => clock, ask: async (o) => { asked.push(o.placeholder); return answer; }, log: (kind, data) => logged.push({ kind, data }) });
 const cal = make();
 const state = () => (fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')).calendar : undefined);
 const taskOf = (c) => app.tasks.get(state().links[c.id].task);
@@ -339,6 +341,159 @@ assert.match(side, /if \(m\.type === 'voice_state'\) voiceState = /); assert.mat
 assert.match(side, /cal\.sync\('briefing'\)/, 'a sync before each briefing'); assert.match(side, /loadSettings\(HOME\)\.calendar\.syncSeconds/, 'the timer follows the setting');
 for (const hook of ["cal.changed(c); }, // Local-only build", 'cal.changed(after);', 'cal.changed(c); // Local-only build']) assert.ok(side.includes(hook), `a to-do changed in Roamies is told to the calendar: ${hook}`);
 
+
+// ================= blocks =================
+const T = (n) => cal.tools.find((t) => t.name === n);
+const linkOf = (c) => state().links[c.id];
+// ---- where a day plan puts things (the rule alone)
+const M = 60_000, day0 = at(24, 0);
+const P = (items, o) => placeDay(items, { from: at(24, 9), until: at(24, 18), ...o });
+assert.deepEqual(P([{ k: 'a', minutes: 90 }, { k: 'b', minutes: 30 }]).placed.map((p) => [p.k, p.start]), [['a', at(24, 9)], ['b', at(24, 10, 30)]], 'back to back, in the order given');
+assert.deepEqual(P([{ k: 'a', minutes: 90 }, { k: 'b', minutes: 30 }], { gap: 10 }).placed.map((p) => p.start), [at(24, 9), at(24, 10, 40)]);
+const lunchBusy = { start: at(24, 12, 30), minutes: 60, gap: false };
+assert.deepEqual(P([{ k: 'a', minutes: 180 }, { k: 'b', minutes: 60 }, { k: 'c', minutes: 30 }], { busy: [lunchBusy] }).placed.map((p) => p.start), [at(24, 9), at(24, 13, 30), at(24, 12)], 'lunch is kept free; a short one still fits before it');
+assert.deepEqual(P([{ k: 'a', minutes: 60 }], { busy: [lunchBusy, { start: at(24, 9), minutes: 60 }], gap: 15 }).placed.map((p) => p.start), [at(24, 10, 15)], 'the gap also applies around what is already there, but not around lunch');
+assert.deepEqual(P([{ k: 'a', minutes: 200 }, { k: 'b', minutes: 60 }], { busy: [{ start: at(24, 9, 30), minutes: 0 }] }).placed.map((p) => p.start), [at(24, 9, 31), at(24, 12, 51)], 'a task with a start and no length is a moment that is kept clear');
+const tight = P([{ k: 'a', minutes: 300 }, { k: 'b', minutes: 300 }, { k: 'c', minutes: 60 }]);
+assert.deepEqual([tight.placed.map((p) => p.k), tight.left.map((p) => p.k)], [['a', 'c'], ['b']], 'what doesn\'t fit is left out and named, the rest still placed');
+assert.equal(day0 + 9 * 60 * M, at(24, 9));
+
+// ---- before the first yes, and with the app away: block tools refuse, in plain words, and change nothing
+const home2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-home2-')));
+const unstarted = createCalendar({ home: home2, todos, port, tokenFile, ask: async () => null, now: () => clock });
+mark = app.log.length;
+for (const [name, args] of [['schedule_block', { todo: paper.id, date: '2026-11-23', start: '10:00', minutes: 60 }], ['move_block', { todo: paper.id, start: '11:00' }], ['unschedule_block', { todo: paper.id }], ['show_day', { date: '2026-11-23' }], ['plan_day', { date: '2026-11-23', items: [{ todo: paper.id, minutes: 30 }] }]]) {
+  await assert.rejects(unstarted.tools.find((t) => t.name === name).execute(args), /isn't in Super Productivity yet.*nothing is added before their yes/is, name);
+}
+assert.deepEqual(writes(mark), []);
+app.hang = (m, p) => p === '/health';
+const stateBefore = JSON.stringify(state());
+for (const [name, args, doing] of [['schedule_block', { todo: paper.id, date: '2026-11-23', start: '10:00', minutes: 60 }, 'place a block'], ['schedule_block', { title: 'Something new', date: '2026-11-23', start: '10:00', minutes: 60 }, 'place a block'], ['move_block', { todo: paper.id, start: '11:00' }, 'move a block'], ['plan_day', { date: '2026-11-23', items: [{ todo: paper.id, minutes: 30 }] }, 'plan the day'], ['show_day', { date: '2026-11-23' }, 'read the calendar']]) {
+  await assert.rejects(T(name).execute(args), new RegExp(`Error: Super Productivity isn't answering, so I can't ${doing}: I couldn't see what is already on the calendar\\.`), name);
+}
+assert.equal(JSON.stringify(state()), stateBefore); assert.ok(!list.some((c) => c.text === 'Something new'), 'not even the to-do of a new block is made');
+app.hang = null;
+
+// ---- one block: a to-do, a day, a start, a length. It goes straight in.
+const seminar = hand('Seminar', { dueWithTime: at(23, 10), timeEstimate: 60 * M });
+mark = app.log.length; asked.length = 0;
+let out = await T('schedule_block').execute({ todo: third.id, date: '2026-11-23', start: '14:00', minutes: 45 });
+assert.match(out, /^"Book room D" is on the calendar Monday 23 November, 14:00 to 14:45\.$/);
+assert.deepEqual(writes(mark).map((w) => [w.method, w.path, w.body]), [['PATCH', `/tasks/${linkOf(third).task}`, { dueWithTime: at(23, 14), timeEstimate: 45 * M }]]);
+assert.equal(asked.length, 0, 'no question: a dictated block goes straight in');
+// scheduling it again moves it: one block per to-do, the same task
+mark = app.log.length;
+out = await T('schedule_block').execute({ todo: third.id, date: '2026-11-23', start: '16:00' });
+assert.match(out, /16:00 to 16:45 \(moved from where it was\)/, 'the length it had is kept');
+assert.deepEqual(writes(mark).map((w) => [w.method, w.path, w.body]), [['PATCH', `/tasks/${linkOf(third).task}`, { dueWithTime: at(23, 16) }]]);
+// a title that is something new: a to-do first (kind commitment), its task, then its block
+mark = app.log.length; const before = list.length;
+out = await T('schedule_block').execute({ title: 'Review Ines\'s draft @home', date: '2026-11-23', start: '22:00', minutes: 30 });
+const review = list.at(-1);
+assert.equal(list.length, before + 1); assert.deepEqual([review.text, review.kind, review.status], ['Review Ines\'s draft @home', 'commitment', 'open'], 'every block has a to-do behind it');
+assert.match(out, new RegExp(`22:00 to 22:30, and on the to-do list as ${review.id}\\.$`), 'outside the working day is fine for a block they dictate');
+assert.deepEqual(writes(mark).map((w) => [w.method, w.body]), [['POST', { title: 'Review Ines\'s draft @home', isIgnoreShortSyntax: true }], ['PATCH', { dueWithTime: at(23, 22), timeEstimate: 30 * M }]]);
+assert.equal(app.tasks.get(linkOf(review).task).title, 'Review Ines\'s draft @home');
+// what it needs
+await assert.rejects(T('schedule_block').execute({ todo: paper.id, title: 'both', date: '2026-11-23', start: '10:00', minutes: 30 }), /either todo .* or title/);
+await assert.rejects(T('schedule_block').execute({ date: '2026-11-23', start: '10:00', minutes: 30 }), /either todo .* or title/);
+await assert.rejects(T('schedule_block').execute({ title: 'No length', date: '2026-11-23', start: '08:00' }), /How long does it take\?/);
+await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '08:00' }), /How long does "Made while the app was slow" take\?/);
+await assert.rejects(T('schedule_block').execute({ todo: paper.id, date: '23/11/2026', start: '10:00', minutes: 30 }), /YYYY-MM-DD/);
+await assert.rejects(T('schedule_block').execute({ todo: paper.id, date: '2026-02-30', start: '10:00', minutes: 30 }), /YYYY-MM-DD/);
+await assert.rejects(T('schedule_block').execute({ todo: paper.id, date: '2026-11-23', start: '25:00', minutes: 30 }), /HH:MM/);
+await assert.rejects(T('schedule_block').execute({ todo: 'c-none', date: '2026-11-23', start: '10:00', minutes: 30 }), /no to-do c-none/);
+await assert.rejects(T('schedule_block').execute({ todo: ping.id, date: '2026-11-23', start: '10:00', minutes: 30 }), /is a reminder, and reminders aren't put on the calendar/);
+await assert.rejects(T('schedule_block').execute({ todo: arch.id, date: '2026-11-23', start: '10:00', minutes: 30 }), /already done/);
+assert.ok(!list.some((c) => c.text === 'No length'));
+
+// ---- a clash: the owner is shown what it overlaps and asked; without a yes nothing changes
+answer = null; asked.length = 0; mark = app.log.length;
+await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '10:30', minutes: 60 }), /It would overlap "Seminar" \(10:00 to 11:00\), and they didn't say to put it there anyway\. Nothing was changed\./);
+assert.deepEqual(asked, ['"Made while the app was slow", 10:30 to 11:30 on Monday 23 November, overlaps "Seminar" (10:00 to 11:00). Put it there anyway?']);
+assert.deepEqual(writes(mark), []); assert.equal(linkOf(slow).local.start, null);
+await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '16:30', minutes: 60 }), /overlap "Book room D" \(16:00 to 16:45\)/, 'a clash with one of Roamies\' own blocks too');
+answer = 'yes';
+out = await T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '10:30', minutes: 60 });
+assert.match(out, /10:30 to 11:30/); assert.equal(app.tasks.get(linkOf(slow).task).dueWithTime, at(23, 10, 30));
+// back to back is not a clash, and a finished task of theirs takes no time
+asked.length = 0; seminar.isDone = true;
+await T('move_block').execute({ todo: slow.id, start: '11:00' }); await T('move_block').execute({ todo: slow.id, start: '10:15' });
+assert.equal(asked.length, 0);
+seminar.isDone = false;
+
+// ---- move and unschedule
+mark = app.log.length;
+out = await T('move_block').execute({ todo: third.id, date: '2026-11-25' });
+assert.match(out, /^"Book room D" is now Wednesday 25 November, 16:00 to 16:45\.$/, 'only the day changes');
+out = await T('move_block').execute({ todo: third.id, start: '09:15', minutes: 20 });
+assert.match(out, /Wednesday 25 November, 09:15 to 09:35/);
+assert.deepEqual(writes(mark).map((w) => w.body), [{ dueWithTime: at(25, 16) }, { dueWithTime: at(25, 9, 15), timeEstimate: 20 * M }]);
+await assert.rejects(T('move_block').execute({ todo: third.id }), /Say what changes/);
+mark = app.log.length;
+out = await T('unschedule_block').execute({ todo: third.id });
+assert.equal(out, '"Book room D" is off the calendar. It is still on the to-do list.');
+assert.deepEqual(writes(mark).map((w) => w.body), [{ dueWithTime: null }]); assert.equal(third.status, 'open'); assert.ok(app.tasks.has(linkOf(third).task));
+assert.equal(linkOf(third).local.minutes, 20, 'the length is kept');
+assert.equal(await T('unschedule_block').execute({ todo: third.id }), '"Book room D" has no block on the calendar.');
+await assert.rejects(T('move_block').execute({ todo: third.id, start: '09:00' }), /has no block to move/);
+
+// ---- ticking a to-do marks its block's task done
+const reviewTask = linkOf(review).task; review.status = 'done'; await cal.changed(review);
+assert.equal(app.tasks.get(reviewTask).isDone, true); assert.equal(app.tasks.get(reviewTask).dueWithTime, at(23, 22), 'its time stays where it was');
+
+// ---- a day read back: Roamies' blocks with their to-dos; other tasks only as taken time
+out = await T('show_day').execute({ date: '2026-11-23' });
+assert.equal(out, `Monday 23 November:\n10:00 to 11:00: taken by a task of their own in Super Productivity\n10:15 to 11:15 (60 min): Made while the app was slow [${slow.id}]`);
+assert.ok(!out.includes('Seminar'), 'what another task is called is used for clashes only');
+assert.equal(await T('show_day').execute({ date: '2026-11-29' }), 'Nothing is on the calendar Sunday 29 November.');
+
+// ---- a whole day: worked out by the code, shown whole, created only after a yes
+const p1 = add('Plan: figures'), p2 = add('Plan: methods'), p3 = add('Plan: email'), p4 = add('Plan: too long');
+hand('Group meeting', { dueWithTime: at(24, 10), timeEstimate: 60 * M });
+await cal.sync('timer');
+const items = [{ todo: p1.id, minutes: 120 }, { todo: p2.id, minutes: 150 }, { todo: p3.id, minutes: 30 }, { todo: p4.id, minutes: 400 }];
+answer = null; asked.length = 0; mark = app.log.length;
+await assert.rejects(T('plan_day').execute({ date: '2026-11-24', items }), /didn't say yes to the plan, so nothing was put on the calendar/);
+assert.deepEqual(asked, ['Plan for Tuesday 24 November:\n13:30 to 15:30  Plan: figures\n15:30 to 18:00  Plan: methods\n09:00 to 09:30  Plan: email\nNo room for: Plan: too long'], 'lunch free, the meeting kept clear, back to back, and what doesn\'t fit is named');
+assert.deepEqual(writes(mark), []); assert.equal(linkOf(p1).local.start, null);
+answer = 'yes'; mark = app.log.length;
+out = await T('plan_day').execute({ date: '2026-11-24', items });
+assert.match(out, /^On the calendar Tuesday 24 November: 13:30 to 15:30 "Plan: figures"; 15:30 to 18:00 "Plan: methods"; 09:00 to 09:30 "Plan: email"\. No room for: "Plan: too long"\.$/);
+assert.deepEqual(writes(mark).map((w) => w.body), [{ dueWithTime: at(24, 13, 30), timeEstimate: 120 * M }, { dueWithTime: at(24, 15, 30), timeEstimate: 150 * M }, { dueWithTime: at(24, 9), timeEstimate: 30 * M }]);
+assert.equal(linkOf(p4).local.start, null);
+// planned again, the same to-dos are moved, not doubled, and the day can be stretched for this one plan
+mark = app.log.length;
+out = await T('plan_day').execute({ date: '2026-11-24', items: [{ todo: p4.id, minutes: 180 }, { todo: p1.id }], from: '08:00', until: '21:00' });
+assert.match(out, /18:00 to 21:00 "Plan: too long"; 13:30 to 15:30 "Plan: figures"\.$/);
+assert.deepEqual([linkOf(p4).local.start, linkOf(p1).local.start], [at(24, 18), at(24, 13, 30)], 'around the meeting, lunch and the blocks that stay; until 21:00 this once; a length it already has is used');
+assert.equal(writes(mark).filter((w) => w.method === 'POST').length, 0);
+assert.equal(loadSettings(home).calendar.dayEnd, 1080, 'the setting itself is as it was');
+// no lunch break, and a gap, when the settings say so
+fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, calendar: { ...file0.calendar, lunch: [], gapMinutes: 10 } }));
+const q1 = add('Plan: a'), q2 = add('Plan: b'); await cal.sync('timer');
+await T('plan_day').execute({ date: '2026-11-26', items: [{ todo: q1.id, minutes: 200 }, { todo: q2.id, minutes: 60 }] });
+assert.deepEqual([linkOf(q1).local.start, linkOf(q2).local.start], [at(26, 9), at(26, 12, 30)], 'straight through what would be lunch, ten minutes apart');
+fs.writeFileSync(settingsFile, settingsBytes);
+// today, a plan starts from now
+clock = at(14, 15, 2);
+await T('plan_day').execute({ date: '2026-11-14', items: [{ todo: q2.id }] });
+assert.equal(linkOf(q2).local.start, at(14, 15, 5), 'the next five minutes, not a time already gone');
+clock = at(14, 8);
+await assert.rejects(T('plan_day').execute({ date: '2026-11-27', items: [{ todo: q1.id }, { todo: q1.id }] }), /once: it has one block/);
+await assert.rejects(T('plan_day').execute({ date: '2026-11-27', items: [{ todo: p3.id, minutes: 30 }], from: '19:00' }), /from before until/);
+await assert.rejects(T('plan_day').execute({ date: '2026-11-27', items: [{ todo: twinA.id }] }), /How long does "Call the lab about the antibody" take\?/);
+await assert.rejects(T('plan_day').execute({ date: '2026-11-27', items: [{ todo: p3.id, minutes: 30 }], from: '17:50' }), /Nothing fits Friday 27 November between 17:50 and 18:00/);
+
+// ---- the morning briefing's note: today's blocks, and how much time other tasks take
+hand('Lab meeting', { dueWithTime: at(14, 11), timeEstimate: 30 * M }); await cal.sync('timer');
+assert.equal(cal.dayNote(new Date(at(14, 8))), '\nOn the calendar in Super Productivity today: 15:05 to 16:05 "Plan: b"; and 1 other stretch of time taken by tasks of their own there (11:00 to 11:30). Say it in a sentence or two.');
+assert.equal(cal.dayNote(new Date(at(30, 8))), '\nNothing is on the calendar in Super Productivity today.');
+assert.equal(unstarted.dayNote(new Date(at(14, 8))), '', 'nothing is said about a calendar that isn\'t known');
+assert.match(side, /b\.kind === 'morning' \? `\$\{b\.note\}\$\{cal\.dayNote\(\)\}` : b\.note/);
+// they work while pi is busy, like the to-do list
+for (const n of ['schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'sync_todos']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);
+
 // ---- 15. the one function added to upstream's store: a to-do's wording, changed
 const store = await import('../store.mjs');
 const kept = await store.addCommitment('Send the figures', at(17, 10));
@@ -362,9 +517,9 @@ for (const w of writes().filter((q) => q.method === 'PATCH')) assert.ok(madeByRo
 assert.ok(app.log.every((q) => q.host === `127.0.0.1:${port}`));
 // ---- the token, the app's full answer and anything from a task Roamies didn't make: in no file, log line or result
 assert.ok(written.length > 20);
-for (const w of written) { assert.ok(!w.data.includes(TOKEN), `the token is not in ${w.file}`); assert.ok(!w.data.includes(SECRET) && !w.data.includes('Dentist') && !w.data.includes('INBOX_PROJECT') && !w.data.includes('"tagIds"'), `nothing of the app's answer beyond the synced fields is in ${w.file}`); }
+for (const w of written) { assert.ok(!w.data.includes(TOKEN), `the token is not in ${w.file}`); assert.ok(!w.data.includes(SECRET) && !w.data.includes('Dentist') && !w.data.includes('Seminar') && !w.data.includes('Group meeting') && !w.data.includes('INBOX_PROJECT') && !w.data.includes('"tagIds"'), `nothing of the app's answer beyond the synced fields is in ${w.file}`); }
 const said = JSON.stringify([logged, asked, told]);
-assert.ok(!said.includes(TOKEN) && !said.includes(SECRET) && !said.includes('Dentist'));
+assert.ok(!said.includes(TOKEN) && !said.includes(SECRET) && !JSON.stringify(logged).includes('Seminar') && !said.includes('Dentist'), 'a task that isn\'t Roamies\' is named only to the owner, in the question about a clash');
 assert.ok(logged.length > 10 && logged.every((l) => !/title|text/.test(Object.keys(l.data).join())), 'the records say what kind of change, not what a to-do says');
 assert.equal(fs.readFileSync(settingsFile, 'utf8'), settingsBytes, 'and settings.json is as the owner left it');
 assert.deepEqual(FIELDS, ['title', 'done', 'start', 'minutes', 'urgent', 'important', 'due']);

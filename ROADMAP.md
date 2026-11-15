@@ -83,7 +83,10 @@ commits, in this order:
    field, the app winning a clash; identity by task id in `state.json`; never `DELETE`; the token read per request
    and kept nowhere; from other tasks only title, start, length and done, in memory. Settings `calendar` and
    `limits.calendarTimeoutSeconds`. One marked function added to upstream's `store.mjs`.
-2. **Blocks.** Not built yet: place, show, move and unschedule a block; plan a day after a yes.
+2. **Blocks. Built.** A block is a to-do's start and length. Place (a new title becomes a to-do first), move,
+   unschedule, read a day back, plan a day (times worked out by code; shown whole; created after a yes). An overlap
+   is shown and asked about. Refused when the app isn't answering or the list isn't mirrored yet. The morning
+   briefing says what is on the calendar.
 3. **Matrix.** Not built yet: urgent and important by voice, `sort_tasks`, `show_matrix`, the one-time offer of a
    block.
 

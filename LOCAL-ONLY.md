@@ -433,6 +433,30 @@ reaches the other.
   app as a day without a time is taken as that day at `calendar.dayEnd`. Roamies never sets the app's deadline
   reminder.
 
+**Blocks.** A block is a to-do's start time and length, which is what puts a task on the app's calendar. Every
+block has a to-do behind it, and a to-do has one block at most.
+
+- "Put the paper on Monday at ten for ninety minutes": the block goes straight in. If you name something that isn't
+  a to-do yet, it becomes one first. If you don't say how long and the to-do has no length yet, Roamies asks.
+- Scheduling a to-do that already has a block moves the block. "Move it to Wednesday" and "take it off the calendar"
+  do what they say; off the calendar, the to-do and its task stay and keep their length.
+- A block you dictate is placed at the time you said, also outside the working day. If it would overlap something
+  already there, a bubble shows what it overlaps, with the times, and asks; without your yes nothing changes. Blocks
+  that touch end to start don't overlap.
+- "Plan my day": Roamies gives the to-dos and how long each takes (asking you where it doesn't know), and the times
+  are worked out by the app's code, not the model: in the order given, each at the first free stretch between
+  `dayStart` and `dayEnd`, keeping `lunch` and everything already scheduled free, `gapMinutes` apart. Today, a plan
+  starts from now. The whole plan is shown in a bubble, with what found no room, and is created only after your yes.
+  "Plan until 20:00 today" stretches the day for that plan only.
+- "What's on Monday?": your to-dos' blocks, with times and lengths. Tasks you scheduled in the app yourself are given
+  as taken time, without their names: what they are called is used only in the question about an overlap.
+- Ticking a to-do marks its task done in the app; its time stays where it was.
+- A block is never placed, moved or planned without the app's task list having just been read. So if the app isn't
+  answering, or the list isn't mirrored yet, these refuse and say why. Taking a block off the calendar still works,
+  and reaches the app at the next sync.
+- The morning briefing also says what is on the calendar today.
+- These tools work while pi is busy, like the to-do list.
+
 **What a sync has to say** (a clash, a deleted task, the first-time question) when nobody asked for one waits until
 nothing else is going on: no reply being made or read out, nobody talking, no bubble waiting for an answer. Then it
 is shown in a bubble, not spoken. It is kept in `state.json` until shown, so quitting doesn't lose it. During a
