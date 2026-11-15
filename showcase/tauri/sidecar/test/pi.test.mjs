@@ -427,5 +427,56 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await settled();
   assert.ok(!fs.existsSync(old) && fs.existsSync(recent));
 }
+{ // A click is judged by which button it was, never by what the button says
+  // Each button, answered as the overlay answers ('yes' for the first, nothing for the other) and, should a page
+  // ever hand back the label, by the label itself: the first button's label still means the first button.
+  fs.rmSync(path.join(dir, 'state.json'), { force: true });
+  const file = (auto) => fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi', projects: ['~/Documents/roamies-pi', '~/Documents/cells'], pi: fakePi, autoSendReadOnly: auto }));
+  const labels = new Set();
+  const pressing = (which, how) => () => { const c = asked.at(-1).choices; c.forEach((l) => labels.add(l)); lastResolve(how === 'label' ? c[which] : which === 0 ? 'yes' : null); };
+  for (const [auto, mode, first] of [[0, 'read', 'Send'], [0, 'edit', 'Send'], [30, 'read', 'Send now'], [30, 'edit', 'Send']]) {
+    file(auto);
+    for (const how of ['position', 'label']) {
+      const name = `${mode}, countdown ${auto}, by ${how}`;
+      let n = calls().length;
+      answer = pressing(0, how);
+      assert.match(await tool('ask_pi').execute({ prompt: `click first: ${name}`, mode }, {}), /^Sent to pi/, `the first button sends: ${name}`);
+      assert.deepEqual(asked.at(-1).choices, [first, "Don't send"]);
+      await settled(); assert.equal(calls().length, n + 1, name); assert.equal(records().at(-1)[0].approved_by, 'click');
+      answer = pressing(1, how);
+      await assert.rejects(tool('ask_pi').execute({ prompt: `click second: ${name}`, mode }, {}), /didn't say send/, `the second button doesn't: ${name}`);
+      assert.equal(calls().length, n + 1); assert.ok(!pi.busy());
+    }
+  }
+  // "send now", said, sends (the countdown bubble's own button)
+  file(30);
+  answer = () => { pi.listening(); setTimeout(() => assert.ok(pi.heard('Send now.')), 10); };
+  assert.match(await tool('ask_pi').execute({ prompt: 'said: send now', mode: 'read' }, {}), /^Sent to pi/); await settled(); assert.equal(records().at(-1)[0].approved_by, 'voice');
+  assert.ok(codeReference().sendWords.includes('send now'));
+  // the folder-change question
+  file(0);
+  for (const how of ['position', 'label']) {
+    answer = pressing(1, how);
+    await assert.rejects(tool('switch_project').execute({ name: 'cells' }, {}), /said no, so pi stays in/, how);
+    assert.deepEqual(asked.at(-1).choices, ['Switch', "Don't switch"]); assert.equal(loadSettings(home).project, work);
+    answer = pressing(0, how);
+    assert.match(await tool('switch_project').execute({ name: 'cells' }, {}), /pi now works in cells/, how); assert.equal(loadSettings(home).project, cells);
+    answer = pressing(0, how);
+    assert.match(await tool('switch_project').execute({ name: 'workspace' }, {}), /pi now works in workspace/, how);
+  }
+  // No label is itself a word that would settle it: these tests pass only because the position decides.
+  assert.deepEqual([...labels].sort(), ["Don't send", "Don't switch", 'Send', 'Send now', 'Switch']);
+  assert.ok(!isSend('Switch') && !isDontSend("Don't switch"), 'a label judged as speech would not resolve: it never is');
+  // Every bubble with buttons in the local-only files goes through the position rule, and none through a word check.
+  for (const f of ['pi.mjs', 'calendar.mjs', 'notes.mjs', 'guard.mjs', 'reference.mjs', 'answers.mjs']) {
+    const src = fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+    for (const line of src.split('\n').filter((l) => /choices:/.test(l) && !/^\s*(\/\/|\*)/.test(l) && /ask\(|yesTo\(/.test(l))) {
+      assert.ok(/firstButton\(|yesTo\(|\.then\(\(a\) => \{[^\n]*firstButton\(a, buttons\)|placeholder: `\$\{opts\.placeholder\}/.test(line), `${f}: a bubble's answer is not taken by button position: ${line.trim().slice(0, 90)}`);
+      assert.ok(!/isSend\(|isYes\(|spokenAnswer\(/.test(line), `${f}: a click judged by words: ${line.trim().slice(0, 90)}`);
+    }
+    assert.ok(!/isSend\((a|yes|answer)\)/.test(src), `${f}: an answer from a bubble is passed to the spoken-word check`);
+  }
+  answer = 'yes';
+}
 fs.rmSync(home, { recursive: true, force: true });
 console.log('pi hand-off tests: passed');

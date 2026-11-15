@@ -1036,7 +1036,10 @@ function ask(opts, signal) {
   // The setup guide has no buttons: its answer box takes a typed y.
   if (onboarding && opts.choices) opts = { ...opts, placeholder: `${opts.placeholder} Type y to allow.` };
   to({ kind: 'ask', id, ...opts });
-  return new Promise((resolve) => {
+  return new Promise((done) => {
+    // Local-only build: the setup guide has no buttons, so a typed y or yes there stands for the first button.
+    const typed = onboarding && opts.choices;
+    const resolve = (a) => done(typed && /^\s*y(es)?\s*$/i.test(String(a ?? '')) ? 'yes' : a);
     pending.set(id, resolve);
     // Another route finished first (e.g. the OAuth callback server): close the input bubble.
     signal?.addEventListener('abort', () => { pending.delete(id); to({ kind: 'cancel_ask', id }); resolve(null); }, { once: true });

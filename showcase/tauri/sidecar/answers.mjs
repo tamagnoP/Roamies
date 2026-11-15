@@ -10,6 +10,14 @@
 //     starting to talk doesn't cancel what Roamies is doing.
 //   - A click answers as it always did.
 
+// A click is never judged by words. The overlay answers a bubble with buttons by which button it was: FIRST for the
+// first one (also the Y key), nothing for any other. Should a page ever hand back the button's label instead, the
+// first label is still the first button, whatever it says.
+export const FIRST = 'yes';
+export const firstButton = (answer, choices = []) => answer === FIRST || (typeof answer === 'string' && choices.length > 0 && answer === choices[0]);
+/** A question bubble with buttons, answered by position: (opts, signal) → true when the first button was pressed. */
+export const byButton = (ask) => async (opts, signal) => firstButton(await ask(opts, signal), opts.choices);
+
 export const YES_WORDS = ['yes', 'yes please', 'go ahead', 'do it'];
 export const NO_WORDS = ['no', "don't", 'cancel'];
 export const SPOKEN_HINT = 'Say yes or no, or click.';
@@ -50,13 +58,13 @@ export function createAnswers({ ask, log = () => {} }) {
           const i = waiting.indexOf(entry);
           if (i < 0) return;
           waiting.splice(i, 1);
-          log('bubble_answer', { by, yes: answer === 'yes' });
+          log('bubble_answer', { by, yes: answer === FIRST });
           resolve(answer);
           closing.abort(); // answered by voice: the bubble is taken down
         },
       };
       waiting.push(entry);
-      Promise.resolve(ask({ ...opts, placeholder: `${opts.placeholder}\n${SPOKEN_HINT}` }, inner)).then((a) => entry.settle(a ?? null, 'click'), () => entry.settle(null, 'click'));
+      Promise.resolve(ask({ ...opts, placeholder: `${opts.placeholder}\n${SPOKEN_HINT}` }, inner)).then((a) => entry.settle(firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
     });
   }
   return {
@@ -68,7 +76,7 @@ export function createAnswers({ ask, log = () => {} }) {
       talking = false;
       if (!waiting.length) return false;
       const a = spokenAnswer(text);
-      if (a) waiting.at(-1).settle(a === 'yes' ? 'yes' : null, 'voice');
+      if (a) waiting.at(-1).settle(a === 'yes' ? FIRST : null, 'voice');
       else log('bubble_heard', { taken: false, ...heardShape(text) });
       return true;
     },

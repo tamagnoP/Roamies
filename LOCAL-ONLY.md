@@ -33,7 +33,9 @@ or named an app) is a rule in its instructions, which the model follows but the 
    only when what you said is nothing but don't-send words ("no", "don't send it", "cancel", "stop", "never mind"),
    by the same rule. Anything else leaves the bubble open as it was, any number of times, and is not taken as a new
    request: a send word followed by other words ("OK, wait, change the prompt", "go back", "send it to the other
-   project"), mixed ones ("yes no", "send, no wait"), and nothing heard. A click is as it was. Both lists are under `reference`
+   project"), mixed ones ("yes no", "send, no wait"), and nothing heard.
+   A click is never judged by words: the first button sends and the other doesn't, whatever the buttons are called
+   ("Send" or "Send now"). The same holds for the folder-change question and the Super Productivity bubbles. Both lists are under `reference`
    in `settings.default.json` (`sendWords`, `dontSendWords`).
 4. pi starts in the background, in the project folder, as `pi --mode json`. What it's doing ("Pi's reading
    segment.py…") shows in a bubble, at most one every few seconds.

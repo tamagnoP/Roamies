@@ -652,6 +652,8 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
     signal?.addEventListener('abort', () => { if (overlay.open.delete(id)) overlay.closed.push(id); resolve(null); }, { once: true });
   });
   const click = (first) => { const [id, b] = [...overlay.open].at(-1); overlay.open.delete(id); b.resolve(first ? 'yes' : null); }; // as host.js answers: 'yes' for the first button
+  const seenLabels = new Set();
+  const clickLabel = (i) => { const [id, b] = [...overlay.open].at(-1); overlay.open.delete(id); b.opts.choices.forEach((l) => seenLabels.add(l)); b.resolve(b.opts.choices[i]); };
   const shown = async () => { for (let i = 0; i < 300 && !overlay.open.size; i++) await new Promise((r) => setTimeout(r, 5)); assert.equal(overlay.open.size, 1, 'one bubble is open'); return [...overlay.open.values()][0].opts; };
   const heardLog = [];
   const voiced = createAnswers({ ask: overlayAsk, log: (k, d) => heardLog.push([k, d]) });
@@ -677,6 +679,8 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
       ['a spoken yes', () => assert.equal(voiced.heard('Yes.'), true), 'yes'], ['a spoken "go ahead"', () => voiced.heard('Go ahead'), 'yes'],
       ['a spoken no', () => voiced.heard('No.'), 'no'], ['a spoken "cancel"', () => voiced.heard('cancel'), 'no'],
       ['a click on the first button', () => click(true), 'yes'], ['a click on the other button', () => click(false), 'no'],
+      // should a page ever hand back the button's label: the first label is the first button, whatever it says
+      ['the first button, by its label', () => clickLabel(0), 'yes'], ['the other button, by its label', () => clickLabel(1), 'no'],
     ]) {
       await prepare();
       const before = app.log.length, closedBefore = overlay.closed.length, p = settled(start(want));
@@ -739,6 +743,13 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   await each('a deleted task', () => calV.askDeleted(gone), /^The task for "Voice: two" was deleted in Super Productivity\. Take it off my to-do list as well\?\n/,
     async (out) => assert.equal(out.value, true),
     async (out) => assert.equal(out.value, false));
+
+  // ---- every one of its buttons was pressed by its label above, and none of those labels is a yes or no word:
+  // they resolved because of where the button is, not what it says
+  assert.deepEqual([...seenLabels].sort(), ['Add them', 'Don\'t', 'Keep it', 'Not now', 'Plan it', 'Put it there', 'Sort them', 'Take it off']);
+  const { isSend: sendWord, isDontSend: dontWord } = await import('../pi.mjs');
+  for (const l of seenLabels) if (l !== 'Don\'t') assert.ok(spokenAnswer(l) === null && !sendWord(l) && !dontWord(l), l);
+  assert.ok(!/isSend|isYes/.test(fs.readFileSync(new URL('../calendar.mjs', import.meta.url), 'utf8')), 'calendar.mjs never judges an answer by send or yes words');
 
   // ---- the turn being cancelled some other way (Stop, Escape on the turn) still closes the bubble, as a no
   const stop = new AbortController();

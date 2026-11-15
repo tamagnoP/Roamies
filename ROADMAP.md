@@ -238,6 +238,8 @@ the screen blocks clicks.
   ask about the to-do; a to-do removed in Roamies leaves its task in the app without a time. From tasks Roamies did
   not make, only title, start, length and done are read, to see clashes. Urgent and important are the app's tags
   `EM_URGENT` and `EM_IMPORTANT`. One marked function in upstream's `store.mjs` is allowed for this.
+- **2026-11-15.** A click on a bubble's button is resolved by which button it was (the first means yes, send,
+  switch), never by passing its answer or its label through the spoken-word check. "send now" is a send word.
 - **2026-11-15.** The Send bubble is as strict as the calendar's bubbles: it sends only on nothing but send words,
   declines only on nothing but don't-send words, and stays open on anything else, a send word followed by other
   words included. Before, anything starting with a send word sent ("OK, wait, change the prompt").

@@ -15,7 +15,7 @@
 // Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
 // between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
-import { NO_WORDS, YES_WORDS, heardShape, only, plain } from './answers.mjs';
+import { NO_WORDS, YES_WORDS, firstButton, heardShape, only, plain } from './answers.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -41,7 +41,7 @@ export const SP = {
   requests: ['GET /health', 'GET /tasks', 'GET /tasks/:id', 'POST /tasks', 'PATCH /tasks/:id'],
 };
 
-const SEND_WORDS = ['send', 'send it', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'go', 'go ahead', 'do it', 'approve', 'approved', 'confirm'];
+const SEND_WORDS = ['send', 'send it', 'send now', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'go', 'go ahead', 'do it', 'approve', 'approved', 'confirm'];
 // Said to the Send bubble, or typed to a yes/no question. It sends only when what was said is nothing but send
 // words: one alone, repeated or combined ("yes, send it", "ok go ahead"), with "please" if they like. It declines
 // only when it is nothing but don't-send words, by the same rule. Anything else leaves the bubble open: a send word
@@ -514,7 +514,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       };
     });
     // Once the user has started talking, the answer is what they say: a bubble that closes meanwhile isn't a "no".
-    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: [auto ? 'Send now' : 'Send', "Don't send"] }, signals).then((a) => { if (a == null && approval?.listening) { approval.closed = true; return new Promise(() => {}); } return isSend(a); });
+    // A click is judged by which button it was, never by its label: the first sends, the other doesn't.
+    const buttons = [auto ? 'Send now' : 'Send', "Don't send"];
+    const clicked = ask({ placeholder: `${head}\n\n${body}`, choices: buttons }, signals).then((a) => { if (a == null && approval?.listening) { approval.closed = true; return new Promise(() => {}); } return firstButton(a, buttons); });
     // The countdown. Once the user starts talking it no longer counts: what they say decides.
     let timer = null;
     const timed = auto ? new Promise((resolve) => { timer = setTimeout(() => { if (approval?.talked) return; by = 'auto'; resolve(true); }, auto * 1000); }) : new Promise(() => {});
@@ -693,8 +695,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         const problem = projectProblem(hit.dir, home);
         if (problem) throw new Error(problem);
         if (hit.dir === settings.project) return `pi already works in ${hit.name} (${tilde(hit.dir, home)}).`;
-        const a = await ask({ placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: ['Switch', "Don't switch"] }, ctx?.signal);
-        if (!isSend(a)) throw new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`);
+        const buttons = ['Switch', "Don't switch"]; // answered by which button it was, not by its words
+        const a = firstButton(await ask({ placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: buttons }, ctx?.signal), buttons);
+        if (!a) throw new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`);
         // Kept in state.json, never settings.json (that file is the owner's), with "project" as the settings file has it
         // now: if the owner edits that later, their value wins over this choice.
         writeState(settings.dir, { ...readState(settings.dir), project: tilde(hit.dir, home), projectWas: tilde(settings.fileProject, home) });
