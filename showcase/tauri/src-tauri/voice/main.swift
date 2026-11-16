@@ -290,8 +290,33 @@ final class AutoGain {
     }
 }
 
+// Local-only build: an answer window. After Roamies has asked something, the sidecar opens the microphone for a set
+// time ({"cmd":"listen","seconds":n,"window":id}). This is the helper's own stop, which doesn't depend on the sidecar:
+// at the window's end the microphone closes whatever is being said, and the short tail after a phrase never runs
+// past that end. What was heard in a window is marked with its id, so the sidecar can tell it from a key press.
+enum AnswerWindow {
+    static let longest = 60.0
+    /// The seconds the sidecar gave: a positive number, at most `longest`. Anything else: no window.
+    static func seconds(_ v: Any?) -> Double? {
+        guard let s = (v as? NSNumber)?.doubleValue, s.isFinite, s > 0 else { return nil }
+        return min(s, longest)
+    }
+    /// The window is over: the microphone closes now.
+    static func over(now: Double, end: Double?) -> Bool { end.map { now >= $0 } ?? false }
+    /// How long the microphone stays on after a phrase ends, so a last word isn't clipped: never past the window's end.
+    static func tail(now: Double, end: Double?, usual: Double) -> Double { end.map { max(0, min(usual, $0 - now)) } ?? usual }
+}
+
 final class Voice {
     enum Phase { case idle, armed, holding, handsFree, finishing }
+
+    // Local-only build: the answer window this session belongs to, if any (see AnswerWindow).
+    private var windowEnd: Double?, windowId: Int?, windowAgain = false
+    private func windowed(_ m: [String: Any]) -> [String: Any] {
+        guard let id = windowId else { return m }
+        var out = m; out["window"] = id
+        return out
+    }
 
     private var phase = Phase.idle
     private var chordAt = 0.0, listenAt = 0.0, heardAt = 0.0, voiceAt = 0.0, levelAt = 0.0, releasedAt: Double?
@@ -410,12 +435,19 @@ final class Voice {
             if released { end("released"); finish(); return }
             if now - listenAt > Self.maxSession { end("max length"); finish() }
         case .handsFree:
+            // Local-only build: the answer window has run out: the microphone closes now.
+            if AnswerWindow.over(now: now, end: windowEnd) { end("answer window over"); cancel(); return }
             // Pressing again switches to push-to-talk; letting go then sends.
-            if chord && !prevChord && !blocked { phase = .holding; releasedAt = nil; return }
+            if chord && !prevChord && !blocked {
+                phase = .holding; releasedAt = nil
+                // Local-only build: a key press takes an answer window over: from here it is an ordinary talk.
+                if windowId != nil { windowEnd = nil; windowId = nil; emit(["type": "state", "state": "listening", "mode": "hold", "wave": true]) }
+                return
+            }
             let quiet = now - max(heardAt, voiceAt)
             // Steady sound in the room (a fan, music) keeps the level up, so words that stopped coming end it too.
             if !best.isEmpty && (quiet > Self.pauseEnds || now - heardAt > Self.wordsEnd) { end(quiet > Self.pauseEnds ? "pause" : "no new words"); finish() }
-            else if best.isEmpty && now - listenAt > 8 { end("nothing heard"); cancel() }
+            else if best.isEmpty && windowEnd == nil && now - listenAt > 8 { end("nothing heard"); cancel() }
             else if now - listenAt > Self.maxSession { end("max length"); finish() }
         case .finishing:
             break
@@ -430,6 +462,7 @@ final class Voice {
         phase = .armed
         chordAt = now
         best = ""
+        windowEnd = nil; windowId = nil; windowAgain = false // local-only build: a session is an ordinary talk unless listenNow says otherwise
         // The drawing layer first: starting the mic below holds this thread for a moment (longer with Bluetooth),
         // and a drag begun in that moment would otherwise land in the app underneath.
         ink.setArmed(true)
@@ -455,7 +488,9 @@ final class Voice {
         if !dryRun { OutputMute.begin() }
         wave.show()
         // wave: the cursor shows the listening, so the app shows no listening bubble.
-        emit(["type": "state", "state": "listening", "mode": mode, "wave": true])
+        var listening: [String: Any] = ["type": "state", "state": "listening", "mode": mode, "wave": true]
+        if windowId != nil && windowAgain { listening["again"] = true } // the same window, reopened after a phrase: no second chime
+        emit(windowed(listening))
         if !best.isEmpty { emit(["type": "partial", "text": best]) }
     }
 
@@ -468,10 +503,10 @@ final class Voice {
         wave.think()
         wave.setHidden(true)
         ink.capture { [weak self] in self?.wave.setHidden(false) }
-        if shown { emit(["type": "state", "state": "processing"]) }
+        if shown { emit(windowed(["type": "state", "state": "processing"])) }
         guard let r = rec, !failed else { stopAudio(); endedVia = "failed"; finalize(); return }
         // Keep the mic open a moment after release so a word said while letting go isn't clipped.
-        let tail = Timer(timeInterval: 0.3, repeats: false) { [weak self] _ in
+        let tail = Timer(timeInterval: AnswerWindow.tail(now: uptime(), end: windowEnd, usual: 0.3), repeats: false) { [weak self] _ in
             guard let self, self.phase == .finishing, self.rec === r else { return }
             self.stopAudio()
             r.end()
@@ -488,14 +523,17 @@ final class Voice {
         finishTimer?.invalidate(); finishTimer = nil
         rec?.cancel(); rec = nil
         phase = .idle
+        let win = windowId // local-only build: what this session heard is marked with its answer window
+        windowEnd = nil; windowId = nil
         let text = best.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty { wave.hide() } else { wave.awaitAnswer() }
         let empty = text.isEmpty && reportEmpty, spoke = voiceAt > listenAt + 0.05
         reportEmpty = false
+        let idle: [String: Any] = win.map { ["type": "state", "state": "idle", "window": $0] } ?? ["type": "state", "state": "idle"]
         let rest = {
-            emit(["type": "state", "state": "idle"])
-            // Listened but got no words: say so instead of closing silently.
-            if empty { emit(["type": "error", "code": "nothing_heard", "spoke": spoke]) }
+            emit(idle)
+            // Listened but got no words: say so instead of closing silently. (Not in an answer window: it just stays open.)
+            if empty && win == nil { emit(["type": "error", "code": "nothing_heard", "spoke": spoke]) }
         }
         if text.isEmpty {
             // Circled something but said nothing: drop it quietly and just go (no "I didn't hear you").
@@ -503,7 +541,7 @@ final class Voice {
                 guard let file = area?["file"] as? String else { return rest() }
                 try? FileManager.default.removeItem(atPath: file)
                 log("nothing said, dropped the circled area")
-                emit(["type": "state", "state": "idle"])
+                emit(idle)
             }
             return
         }
@@ -511,6 +549,7 @@ final class Voice {
         ink.take { area in
             var msg: [String: Any] = ["type": "final", "text": text, "ms": Int(((uptime() - self.finishedAt) * 1000).rounded()), "via": self.endedVia]
             if let area { msg["area"] = area }
+            if let win { msg["window"] = win }
             log("sent what was said\(area == nil ? "" : ", with the circled area")")
             emit(msg)
             rest()
@@ -525,14 +564,19 @@ final class Voice {
         reportEmpty = false
         ink.clear()
         wave.hide()
-        emit(["type": "state", "state": "idle", "cancelled": true])
+        let idle = windowed(["type": "state", "state": "idle", "cancelled": true])
+        windowEnd = nil; windowId = nil
+        emit(idle)
     }
 
     /// The shell saw ⌃⌥S: that ⌃⌥ was a shortcut, not a request to talk.
     /// Start listening hands-free without a key press (after an area snap). Ends on a pause or a tap.
-    func listenNow() {
+    /// Local-only build: with seconds, it is an answer window: it ends at that time whatever is said, and what is
+    /// heard carries the window's id.
+    func listenNow(seconds: Double? = nil, window: Int? = nil, again: Bool = false) {
         guard phase == .idle else { return }
         arm(uptime())
+        if let seconds { windowEnd = uptime() + seconds; windowId = window ?? 0; windowAgain = again }
         phase = .handsFree
         blocked = true // the snap shortcut's keys may still be held: don't read them as a tap
         showListening("handsfree", uptime())
@@ -704,6 +748,23 @@ if args.contains("--test-gain") {
     check("boost applies to every channel and never clips", (0 ..< 2).allSatisfy { c in buf.floatChannelData![c][3] == 1 })
     exit(bad == 0 ? 0 : 1)
 }
+// Local-only build. --test-window checks the answer window's own stop; exits 1 on a failure.
+if args.contains("--test-window") {
+    var bad = 0
+    func check(_ name: String, _ ok: Bool) { print("\(ok ? "ok" : "FAIL") \(name)"); if !ok { bad += 1 } }
+    check("no window: never over", !AnswerWindow.over(now: 1e9, end: nil))
+    check("before the end: open", !AnswerWindow.over(now: 109.99, end: 110))
+    check("at the end: over", AnswerWindow.over(now: 110, end: 110))
+    check("after the end: over", AnswerWindow.over(now: 110.5, end: 110))
+    check("no window: the usual tail", AnswerWindow.tail(now: 5, end: nil, usual: 0.3) == 0.3)
+    check("well before the end: the usual tail", AnswerWindow.tail(now: 100, end: 110, usual: 0.3) == 0.3)
+    check("near the end: the tail stops at the end", abs(AnswerWindow.tail(now: 109.9, end: 110, usual: 0.3) - 0.1) < 1e-9)
+    check("past the end: no tail", AnswerWindow.tail(now: 111, end: 110, usual: 0.3) == 0)
+    check("seconds: a number is taken", AnswerWindow.seconds(NSNumber(value: 10)) == 10 && AnswerWindow.seconds(NSNumber(value: 2.5)) == 2.5)
+    check("seconds: capped", AnswerWindow.seconds(NSNumber(value: 900)) == AnswerWindow.longest)
+    check("seconds: nothing, zero, negative, text or not a number is no window", AnswerWindow.seconds(nil) == nil && AnswerWindow.seconds(NSNumber(value: 0)) == nil && AnswerWindow.seconds(NSNumber(value: -3)) == nil && AnswerWindow.seconds("10") == nil && AnswerWindow.seconds(NSNumber(value: Double.nan)) == nil)
+    exit(bad == 0 ? 0 : 1)
+}
 // --test-snap checks which drawn paths count as a circled area; exits 1 on a failure.
 if args.contains("--test-snap") {
     var bad = 0
@@ -767,7 +828,10 @@ Thread.detachNewThread {
         guard let data = line.data(using: .utf8), let msg = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
         switch msg["cmd"] as? String {
         case "cancel": DispatchQueue.main.async { voice.externalCancel() }
-        case "listen": DispatchQueue.main.async { voice.listenNow() }
+        case "listen":
+            // Local-only build: "seconds" makes it an answer window (AnswerWindow); "window" is its id, "again" a reopening.
+            let seconds = AnswerWindow.seconds(msg["seconds"]), window = (msg["window"] as? NSNumber)?.intValue, again = msg["again"] as? Bool == true
+            DispatchQueue.main.async { voice.listenNow(seconds: seconds, window: window, again: again) }
         // The sidekick is answering (it appears where the cursor is): the listening pill can go.
         case "handoff": DispatchQueue.main.async { voice.wave.hide() }
         // The sidekick following the cursor in its cursor form, drawn here (buddy.swift) until the page takes it back.

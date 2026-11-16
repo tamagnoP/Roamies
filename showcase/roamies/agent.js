@@ -1014,6 +1014,8 @@
             return this;
           },
           focus(on) { bb.input.focused = on; bb.input.caretAt = now; return this; },
+          // Local-only build: the question's text changed while it is open (its last line says what was heard).
+          placeholder(text) { bb.input.placeholder = String(text ?? ''); return this; },
           close() { if (b === bb) close(bb); },
           get closed() { return h.closed; },
         };

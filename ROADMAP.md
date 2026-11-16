@@ -35,7 +35,7 @@ Last updated: 2026-11-16.
 | 19 | Roles for pi: coder and reviewer | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed | |
 | 21 | One orb as the only look | Idea, not designed | |
-| 22 | Conversation flow: spoken questions, answer window, pending questions | Next (prompt given 2026-11-16), before 18 | `voice-flow` |
+| 22 | Conversation flow: spoken questions, answer window, pending questions | Built, not merged; to be reviewed and tried on screen | `voice-flow` |
 
 Build order: 22, 18, 14, 19, 16, 17, 15, then 20 and 21.
 
@@ -85,7 +85,31 @@ stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answ
 
 ## 2. In progress
 
-Feature 22 (conversation flow) is next, on `voice-flow`.
+### 22. Conversation flow (branch `voice-flow`)
+
+Built 2026-11-16 from the owner's prompt and plan answers. When Roamies asks something, the owner answers by just
+speaking.
+
+- **Spoken.** In an exchange started by voice, what Roamies shows it also says: replies, its own questions (briefly),
+  sync lines, failures. Talking to an open bubble no longer ends the reply's voice.
+- **Answer window.** After a question has been said the microphone opens by itself for `limits.answerWindowSeconds`.
+  The end of speech is reported by the overlay's audio player (a mark), not estimated. Only answers count; anything
+  else is dropped, logged by shape, and shown as the bubble's last line. Closed by the voice helper's own stop, the
+  sidecar's timer, and the discarding of late phrases.
+- **Hands-free approval of an edit hand-off:** only "send" or "send it". After a key press the wider send words,
+  and filler words before or after an answer are ignored.
+- **Pending questions.** No answer: the bubble closes, the question is kept in `state.json`, nothing is sent or
+  changed. At the end of the next exchange the oldest is asked again; stale ones are dropped with one line, old ones
+  after `limits.pendingKeepHours`. `show_pending`; the morning briefing mentions them. Hook for the daily note in
+  place, connected to nothing.
+- **Auto Listen** for the model's own questions goes through the same window (`autoListenQuestions`).
+- Found on the installed `f5a30af` and fixed here: questions were never spoken; talking to an open bubble ended the
+  reply's voice for the rest of the turn; failures and sync lines were bubble only. The "send" that did nothing after
+  "OK wait" had reached the bubble with more words than a send phrase (3 words, 12 characters; 4 words, 20) and was
+  refused by the whole-phrase rule: after a key press, filler words no longer spoil an answer, and what was refused
+  is shown.
+
+Not merged: the owner reviews it first. Not rebuilt, not installed, not seen or heard on the Mac.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -93,7 +117,7 @@ parent folders of research work and data; list the OrbStack app's project under 
 
 ## 3. Queued, in this order
 
-Build order: 22 (next, branch `voice-flow`), 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
+Build order: 22 (built on `voice-flow`, in review; section 2), 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
 
 ### 18. Daily note (Prompt E)
 
@@ -252,6 +276,19 @@ the screen blocks clicks.
 - **2026-11-16.** Feature 13 approved by the owner and merged into `local-only` by fast-forward (`f5a30af`).
 - **2026-11-16.** Feature 22, conversation flow, comes next, before the daily note (18): when Roamies asks
   something, the owner answers by just speaking.
+- **2026-11-16.** Feature 22, decided with the plan: upstream's Auto Listen for the model's own questions is kept but
+  bounded by the answer window (opens on the overlay's report, lasts `limits.answerWindowSeconds`, same three stops),
+  with `autoListenQuestions` to switch it off. A refused spoken answer is shown as the bubble's last line, on screen
+  only. After a key press, filler words before or after an answer don't spoil it; hands-free approval of an edit
+  hand-off stays exact ("send", "send it", optional "please"). The closing acknowledgement is the setting
+  `closingReply`. The daily-note hook is built and left unconnected.
+- **2026-11-16.** Feature 22, decided while building: "the next exchange" is not the one a question went unanswered
+  in, so a question is not asked again at the end of that same exchange. A pending read-only hand-off has no
+  countdown when asked again. The answer window opening by itself doesn't move the overlay to the pointer's display
+  (that would have closed the question as a no). A phrase finished inside the window is judged up to 3 seconds after
+  its end, with the microphone already closed. Two tests that pin source lines were changed with the behaviour:
+  `calendar.test.mjs` (`speech.hush()` where it pinned `speech.stop()`) and `reference.test.mjs` (21 limits, and
+  `flow.mjs` among the files whose limits are counted).
 
 ## 6. Still to test
 
@@ -263,6 +300,12 @@ the screen blocks clicks.
 - [ ] A calendar bubble answered by voice on screen: it stays up while you talk, "yes" and "no" settle it, other
   words leave it, a click still works; after an unclear phrase the listening pill goes and a spoken "no" is taken.
   The same on pi's Send bubble: an unclear phrase, then "send".
+- [ ] Feature 22 on the Mac, after an install (none of it has been seen or heard): a question said in an exchange;
+  the microphone opening only after Roamies has stopped speaking, with the sound and the pill once; "ok" hands-free
+  leaving an edit hand-off open and "send" sending it; the "Heard" line; the window closing at 10 seconds and the
+  bubble with it; the question coming back at the end of the next exchange, after "thanks" and after 20 quiet
+  seconds; a stale question dropped with one line; Auto Listen after a reply ending in a question, and
+  `autoListenQuestions: false`; a second display with the pointer on it when the window opens; Bluetooth output.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.
@@ -294,6 +337,10 @@ the screen blocks clicks.
   only in the question about an overlap.
 - Two displays: starting to talk while the pointer is on the other display moves the overlay there, which closes an
   open bubble (Send, or a yes/no question) as a no.
+- Answer window: a phrase still being said when the window ends is cut off and dropped. With a key press during the
+  window the bubble waits as it used to, with no time limit. A pending hand-off's prompt is kept in `state.json` as
+  plain text until it is answered or dropped. The voice helper on Windows and Linux doesn't know the window: there
+  what is heard counts as said after a key press (this build is used on macOS).
 - Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Not yet known whether
   upstream has the same growth. Quitting and reopening Roamies clears it. Needs a diagnosis.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange

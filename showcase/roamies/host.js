@@ -357,6 +357,8 @@
       // Local-only build: a bubble with buttons (pi's Send bubble, a yes/no question) stays open while you talk, so
       // a spoken answer can settle it. It stays on screen as it is: the character doesn't step away and no
       // listening bubble takes its place, and clicking a button still works.
+      // An answer window reopened after a phrase (m.again) is the same listening: no second sound.
+      if (ask?.choices && m.again) return;
       if (ask?.choices) { Roamie.sfx?.play('listen'); return; }
       if (ask) finishAsk(null);
       endTalk();
@@ -367,7 +369,7 @@
         waveTurn = true;
         thought?.end(); thought = null;
         if (a.visible) a.hide();
-        Roamie.sfx?.play('listen');
+        if (!m.again) Roamie.sfx?.play('listen');
         return;
       }
       listen = a.listen({ placeholder: m.mode === 'handsfree' ? 'Listening… tap again to send' : 'Listening…' });
@@ -410,7 +412,10 @@
 
   window.__roamieHost = (m) => {
     Roamie.wake?.(); // the frame loop naps while the sidekick is hidden
-    if (m.kind === 'speech') { Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
+    // Local-only build: a mark asks when everything said so far has finished playing. The player answers once its last
+    // sample has sounded (voice-out.js); the sidecar opens the microphone only on that answer, never on a guess.
+    if (m.kind === 'speech' && m.mark && !Roamie.voiceOut) { send({ type: 'speech_mark', mark: m.mark }); return; }
+    if (m.kind === 'speech') { if (Roamie.voiceOut && !Roamie.voiceOut.onMark) Roamie.voiceOut.onMark = (mark) => send({ type: 'speech_mark', mark }); Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
     if (held) { held.q.push(m); return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
     if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }
@@ -446,6 +451,8 @@
     }
     if (m.kind === 'say') { if (!ask || ask.bar) getAgent().say(m.text, { mood: m.mood ?? null }); } // the field leaves the bubble free
     else if (m.kind === 'ask') openAsk(m);
+    // Local-only build: the open question's text with its last line changed (Heard "…"). On screen only.
+    else if (m.kind === 'ask_text') { if (ask && !ask.bar && ask.choices) ask.h.placeholder?.(m.text); }
     else if (m.kind === 'cancel_ask') { if (ask?.id === m.id) { ask.id = null; finishAsk(null); } }
     else if (m.kind === 'agent') onAgent(m.e);
     else if (m.kind === 'voice') onVoice(m);

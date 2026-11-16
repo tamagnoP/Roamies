@@ -92,6 +92,16 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     return checking;
   }
 
+  // Local-only build (feature 22). A mark asks the overlay to say when everything handed over before it has finished
+  // playing; the overlay answers with the mark's name (speech_mark). The microphone is opened on that answer only.
+  let marks = 0;
+  const markNow = (n) => emit({ kind: 'speech', mark: n });
+  /** A mark with nothing new said: answered when whatever is playing now has finished. */
+  function mark() { const n = `m${++marks}`; markNow(n); return n; }
+  /** Stops what is playing and drops what the open reply had waiting, but leaves its voice usable: what the reply
+   *  says next is spoken. (stop() ends the reply's voice for good.) */
+  function hush() { current?.cut(); emit({ kind: 'speech', stop: true }); }
+
   function stopAll() {
     if (current) { current.abort(); current = null; }
     emit({ kind: 'speech', stop: true });
@@ -118,6 +128,10 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         return true;
       },
       end() { if (done || ended) return; ended = true; v.end(); },
+      // Local-only build: see mark() and hush() above. The mark comes after everything said on this voice so far.
+      mark() { const n = `m${++marks}`; if (done || typeof v?.mark !== 'function') markNow(n); else v.mark(() => markNow(n)); return n; },
+      cut() { if (!done) v?.cut?.(); },
+      get done() { return done; },
       abort() { if (done) return; done = true; v?.abort(); if (current === me) current = null; },
     };
     // A reply that played to its end also says how much it said (without the voice cues), so the overlay can learn
@@ -182,5 +196,6 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     check,
     start,
     stop: stopAll,
+    mark, hush,
   };
 }

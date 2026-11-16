@@ -16,13 +16,19 @@ These are the reasons the fork exists. A change that weakens one needs the owner
 2. **Roamies does not touch files or run commands itself.** File work is handed to pi (`pi.mjs`). The only files it
    writes are notes inside the Obsidian vault (`notes.mjs`), where it can create and append but never change or delete,
    and its own files in `~/Documents/roamies-pi` (`state.json`, the records in `log`, `pending.txt`, and
-   `settings.default.json`). It never writes `settings.json` after making it, and never reads `settings.default.json`.
+   `settings.default.json`). Questions nobody answered are kept in `state.json` under `pending`, never in the vault. It never writes `settings.json` after making it, and never reads `settings.default.json`.
 3. **A hand-off that can edit is sent only after the owner says send.** Read-only hand-offs may send themselves after
-   the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first.
+   the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first. Heard hands-free (in
+   an answer window) only "send" or "send it" sends one that can edit. A pending hand-off is only ever asked again:
+   it is never sent because it was pending, and has no countdown.
 4. **An undo snapshot is taken before any hand-off that can edit** (git ref under `refs/roamies/`).
 5. **Apps on the never-look list are never captured, read or worked in** (`guard.mjs`), and the check fails closed.
 6. **`open` takes an app name only; `act_in_app` works the front app only.** Both limits live in `gateTools`.
 7. **pi is never started in the folder that holds `settings.json`**, or in any folder containing it.
+8. **The microphone opens by itself only in an answer window** (`flow.mjs`): after the overlay has reported that
+   Roamies has finished speaking, for `limits.answerWindowSeconds`, closed by the voice helper's own stop, the
+   sidecar's timer, and the discarding of late phrases. Nothing heard in a question's answer window reaches the model
+   unless it is an answer; it is logged by shape only. (After the model's own question, what is said is the answer.)
 
 Limits enforced in code stay in code. Do not replace one with an instruction in the model's prompt.
 
@@ -37,6 +43,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list mirrored in Super Productivity: the requests, the sync, its tools. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
+| `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
 | `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). One marked function of ours: `renameCommitment`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |

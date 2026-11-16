@@ -939,13 +939,27 @@ fn activate_window(app: &AppHandle, label: &str) {
 
 // ---------- overlays ----------
 
+/// Local-only build: the sidecar's "listen" as the voice helper takes it. An answer window's seconds, id and
+/// "again" (a reopening) go through as they are; without seconds it is the plain hands-free listen.
+fn listen_cmd(msg: &Value) -> Value {
+    let mut cmd = json!({ "cmd": "listen" });
+    for k in ["seconds", "window", "again"] {
+        if let Some(v) = msg.get(k).filter(|v| !v.is_null()) {
+            cmd[k] = v.clone();
+        }
+    }
+    cmd
+}
+
 /// Messages that make the sidekick appear or start something new (not the stream of an answer under way).
 fn starts_interaction(msg: &Value) -> bool {
     let kind = msg.get("kind").and_then(Value::as_str);
     let ty = |k: &str| msg.get(k).and_then(Value::as_str);
     match kind {
         Some("summon" | "say" | "ask" | "list") => true,
-        Some("voice") => ty("type") == Some("state") && ty("state") == Some("listening"),
+        // Local-only build: not the answer window's own listening ("window"): nobody pressed a key, the question is
+        // already on screen, and moving to the pointer's display would close its bubble.
+        Some("voice") => ty("type") == Some("state") && ty("state") == Some("listening") && msg.get("window").is_none_or(Value::is_null),
         Some("agent") => msg.pointer("/e/type").and_then(Value::as_str) == Some("start"),
         _ => false,
     }
@@ -1466,7 +1480,8 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
             WRITE_CHORD.store(write.unwrap_or(0), Ordering::Relaxed);
         }
         // Listen right away, hands-free (after an area snap: snap, then just talk).
-        Some("listen") => to_voice(app, &json!({ "cmd": "listen" })),
+        // Local-only build: with "seconds" it is an answer window: the helper closes the microphone at that time itself.
+        Some("listen") => to_voice(app, &listen_cmd(&msg)),
         // Linux: the sidecar's screenshot and copy go through the shell (GTK, X11 and the desktop portal).
         #[cfg(target_os = "linux")]
         Some("screenshot") => {
@@ -1624,6 +1639,13 @@ mod tests {
     fn words_taken_by_a_bubble_let_the_pill_go() {
         assert!(shows_answer(&json!({ "kind": "heard" })));
         assert!(!starts_interaction(&json!({ "kind": "heard" })));
+        // Local-only build: a key press starts an interaction; the answer window opening by itself does not.
+        assert!(starts_interaction(&json!({ "kind": "voice", "type": "state", "state": "listening", "mode": "hold" })));
+        assert!(!starts_interaction(&json!({ "kind": "voice", "type": "state", "state": "listening", "mode": "handsfree", "window": 4 })));
+        // Local-only build: an answer window's seconds and id reach the voice helper; a plain listen stays plain.
+        assert_eq!(listen_cmd(&json!({ "type": "listen" })), json!({ "cmd": "listen" }));
+        assert_eq!(listen_cmd(&json!({ "type": "listen", "seconds": 10, "window": 3, "again": true })), json!({ "cmd": "listen", "seconds": 10, "window": 3, "again": true }));
+        assert_eq!(listen_cmd(&json!({ "type": "listen", "seconds": null })), json!({ "cmd": "listen" }));
         assert!(shows_answer(&json!({ "kind": "ask", "id": "a1" })));
         assert!(!shows_answer(&json!({ "kind": "agent", "e": { "type": "start" } })));
     }

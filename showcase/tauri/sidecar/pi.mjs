@@ -15,7 +15,7 @@
 // Only the user edits that file: Roamies makes it the first time and never writes it again. The model can switch
 // between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
-import { NO_WORDS, YES_WORDS, firstButton, heardShape, only, plain } from './answers.mjs';
+import { CLOSING_PHRASES, FILLER_WORDS, NO_WORDS, Unanswered, YES_WORDS, firstButton, heardLine, heardShape, only, plain, unfilled } from './answers.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -30,7 +30,7 @@ const PATHS = { folder: path.join('Documents', 'roamies-pi'), settings: 'setting
 // Tools taken out of Roamies: files and commands are pi's job.
 export const REMOVED = new Set(['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'run_command', 'fetch_url']);
 // What still works while pi is busy.
-const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note', 'sync_todos', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'set_priority', 'sort_tasks', 'show_matrix']);
+const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note', 'show_pending', 'sync_todos', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'set_priority', 'sort_tasks', 'show_matrix']);
 
 // Super Productivity (calendar.mjs): the to-do list is mirrored there through that app's local REST API. Where it
 // listens, where its access token is kept (read when a request is made, never stored), the two tags its Eisenhower
@@ -51,6 +51,21 @@ const SEND = only(SEND_WORDS), DONT = only(DONT_WORDS);
 const said = (text) => plain(text).split(' ').filter((w) => w && w !== 'please').join(' ');
 export const isSend = (text) => SEND.test(said(text));
 export const isDontSend = (text) => DONT.test(said(text));
+// Feature 22. Heard hands-free, in an answer window, a hand-off that can edit goes only on one of these, said alone
+// ("please" may come with it): no "ok", no "yes", no filler words. After a key press the wider send words above
+// count, and filler words before or after them don't spoil the answer (answers.mjs).
+export const HANDS_FREE_SEND = ['send', 'send it'];
+export const isHandsFreeSend = (text) => HANDS_FREE_SEND.includes(said(text));
+// How long after an answer window's end a phrase that was finished inside it may still arrive and be judged (the
+// microphone is closed by then: only the recogniser is finishing), and the least time left for which the microphone
+// is opened again after a phrase that wasn't an answer.
+export const WINDOW = { graceSeconds: 3, reopenMinSeconds: 1 };
+/** A hand-off's prompt as it is said aloud: its first sentence, cut to max characters, and that there is more. */
+export function briefly(text, max) {
+  const all = forVoice(text), first = (/^.*?[.!?](?=\s|$)/s.exec(all)?.[0] ?? all).trim();
+  const cut = first.length > max ? `${first.slice(0, max).replace(/\s+\S*$/, '')}…` : first;
+  return cut.length < all.length ? `${cut} The rest is on screen.` : cut;
+}
 
 const tilde = (p, home) => (p === home ? '~' : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const expand = (p, home) => path.resolve(String(p).replace(/^~(?=$|\/)/, home));
@@ -262,12 +277,17 @@ export const LIMITS = {
   frontLookupMs: { default: 900, min: 100, max: 5000, whole: true }, // how long the look-up of the app in front may take
   frontReuseSeconds: { default: 8, min: 1, max: 60 }, // how long the look-up made when you stop talking stays good
   calendarTimeoutSeconds: { default: 20, min: 2, max: 60 }, // each request to Super Productivity (not the 1-second "is it there?" check)
+  answerWindowSeconds: { default: 10, min: 3, max: 30 }, // how long the microphone stays open by itself after Roamies has asked something
+  exchangeEndSeconds: { default: 20, min: 5, max: 600 }, // quiet time after Roamies' last reply that ends an exchange (a pending question is then raised)
+  pendingKeepHours: { default: 24, min: 1, max: 720 }, // a question nobody answered is dropped when it is older than this
+  spokenQuestionChars: { default: 200, min: 40, max: 1000, whole: true }, // characters of a question (or of a hand-off's first sentence) that are said aloud
+  heardLineChars: { default: 80, min: 20, max: 300, whole: true }, // characters of a phrase that wasn't taken, as shown in the bubble's last line
 };
 const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -315,6 +335,8 @@ const CLEAN = {
   sandbox: when((v) => typeof v === 'boolean'),
   readOnly: list, toolFolders: list, toolFoldersOff: list, docker: list,
   home: when((v) => (isStr(v) && HOME_CORNERS.includes(v.trim().toLowerCase())) || (isObj(v) && typeof v.x === 'number' && typeof v.y === 'number' && Number.isFinite(v.x) && Number.isFinite(v.y))),
+  autoListenQuestions: when((v) => typeof v === 'boolean'),
+  closingReply: when(full),
   limits: when(isObj),
   calendar: when(isObj),
 };
@@ -411,7 +433,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes) };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim() };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -473,7 +495,7 @@ export function snapshot(project, stampText, { init = false, limits = limitDefau
   } catch (e) { return { why: e.message }; }
 }
 
-export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now() } = {}) {
+export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now() } = {}) {
   let job = null; // the hand-off pi is working on
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
   let approval = null; // an approval waiting for Send: { answer(text) }
@@ -485,7 +507,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   const stamp = (d = new Date(now())) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
 
   /** Shows the hand-off and waits for Send (a click, the Y key, or the word "send"). */
-  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0, limits = limitDefaults() }, signal) {
+  // Feature 22: with `question` (flow.mjs) the bubble's question is said through it, and in an exchange started by
+  // voice the microphone then opens by itself for the answer. If that window runs out with no answer the bubble
+  // closes, nothing is sent, the hand-off is kept as a pending question and approve rejects with Unanswered.
+  // kept: the pending question this is, when it is being asked again (it keeps its age).
+  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0, limits = limitDefaults(), kept = null }, signal) {
     const where = tilde(project, home);
     // auto: a read-only task is sent after this many seconds unless it's stopped. One that can edit always waits for Send.
     const head = `${auto ? `Asking pi in ${auto} s` : 'Send to pi?'}  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}${notes.map((n) => `\n${n}`).join('')}`;
@@ -495,7 +521,14 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       fs.writeFileSync(pendingFile, `${head}\n\n${prompt}\n`);
       body = `${prompt.slice(0, limits.approvalBubbleChars - 100)}… (the whole text is in ${tilde(pendingFile, home)})`;
     }
-    tell(null, auto ? `Asking pi: ${forVoice(prompt)}` : `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}${followUp ? ', continuing the last task' : ''}. ${forVoice(prompt)} Say send to send it.`);
+    // Said briefly: what it is and the prompt's first sentence. The whole prompt is in the bubble.
+    const brief = briefly(prompt, limits.spokenQuestionChars);
+    const line = auto ? `Asking pi: ${brief}` : `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}${followUp ? ', continuing the last task' : ''}. ${brief} Say send to send it.`;
+    let noAnswer = () => {};
+    const unanswered = new Promise((_, reject) => { noAnswer = () => reject(new Unanswered('nothing went to pi')); });
+    unanswered.catch(() => {});
+    const keep = { ...(kept ? { id: kept.id, at: kept.at } : {}), kind: 'handoff', brief: `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}: ${briefly(prompt, limits.heardLineChars)}`, data: { prompt, mode, followUp: !!followUp, project } };
+    const window = question ? question({ brief: line, always: true, pending: keep, onTimeout: () => noAnswer() }) : (tell(null, line), null);
     const closing = new AbortController();
     const signals = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
     let by = 'click';
@@ -504,11 +537,21 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const voiced = new Promise((resolve) => {
       approval = {
         listening: false, closed: false, talked: false, // talked: they have said something, so the countdown is off for good
-        answer: (text) => {
+        // handsFree: heard in the answer window, not after a key press. Then a hand-off that can edit goes only on
+        // "send" or "send it"; a read-only one on the send words. After a key press: the send words, and filler words
+        // before or after them don't count.
+        answer: (text, { handsFree = false } = {}) => {
           approval.listening = false;
-          const send = isSend(text);
+          if (String(text ?? '').trim()) approval.talked = true;
+          const words = handsFree ? text : unfilled(text);
+          const send = handsFree && mode === 'edit' ? isHandsFreeSend(text) : isSend(words);
           // The bubble itself is gone (it closed while they talked): there is nothing left to answer later.
-          if (!send && !isDontSend(text) && !approval.closed) { log?.('send_heard', { taken: false, ...heardShape(text) }); return; }
+          if (!send && !isDontSend(words) && !approval.closed) {
+            log?.('send_heard', { taken: false, ...heardShape(text), sendWord: plain(text).split(' ').includes('send'), ...(handsFree ? { handsFree: true } : {}) });
+            // Shown, not swallowed: the bubble's last line says what was heard, until the next phrase. Screen only.
+            if (String(text ?? '').trim()) retext(`${head}\n\n${body}\n${heardLine(text, 'send or no', limits.heardLineChars)}`);
+            return;
+          }
           by = 'voice'; resolve(send);
         },
       };
@@ -521,10 +564,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     let timer = null;
     const timed = auto ? new Promise((resolve) => { timer = setTimeout(() => { if (approval?.talked) return; by = 'auto'; resolve(true); }, auto * 1000); }) : new Promise(() => {});
     try {
-      const ok = await Promise.race([clicked, voiced, timed]);
+      const ok = await Promise.race([clicked, voiced, timed, unanswered]);
       return { ok, by };
     } finally {
       clearTimeout(timer);
+      window?.close();
       approval = null;
       closing.abort(); // closes the bubble if it was answered by voice or went by itself
       fs.rmSync(pendingFile, { force: true });
@@ -630,15 +674,10 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     return true;
   }
 
-  const tools = [
-    {
-      name: 'ask_pi',
-      description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. ${userName} always sees the exact prompt first: a read-only task then goes by itself after a few seconds unless they stop it, and one that can edit goes only when they say send. pi then works in the background and the app shows its steps. Don't wait for it: you're told when pi has finished.`,
-      parameters: z.object({ prompt: z.string(), mode: z.enum(['read', 'edit']), follow_up: z.boolean().optional() }),
-      executionMode: 'sequential', timeoutMs: limitsFor(home).answerWaitMinutes * 60_000, // time to read the prompt and answer; pi itself runs in the background
-      execute: async ({ prompt, mode, follow_up: followUp }, ctx) => {
-        if (job) throw new Error('pi is still working on the last task. Wait for its reply, or stop it with stop_pi.');
-        const text = String(prompt ?? '').trim();
+  /** One hand-off: its checks, the Send bubble, and pi started on a yes. → { ok, mode, project }. kept: the pending
+   *  question this is, when it is asked again: then there is no countdown, whatever its mode, so a hand-off is never
+   *  sent because it was pending. Throws Unanswered when the answer window ran out (it is kept, or kept again). */
+  async function handoff({ text, mode, followUp }, signal, { kept = null } = {}) {
         if (!text) throw new Error('The prompt is empty.');
         const settings = loadSettings(home);
         if (text.length > settings.limits.promptChars) throw new Error(`The prompt is over ${settings.limits.promptChars} characters. Make it shorter: name the files instead of pasting them.`);
@@ -671,10 +710,72 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
             if (box.docker) notes.push('Docker allowed: containers can reach folders outside this project.');
           }
         }
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: m === 'read' && !unconfined ? settings.autoSendReadOnly : 0, limits: settings.limits }, ctx?.signal);
-        if (!ok) { log('pi_declined', { mode: m }); throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`); }
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: !kept && m === 'read' && !unconfined ? settings.autoSendReadOnly : 0, limits: settings.limits, kept }, signal);
+        if (!ok) { log('pi_declined', { mode: m }); return { ok: false, mode: m, project: settings.project }; }
         start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box });
-        return `Sent to pi (${m === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(settings.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
+        return { ok: true, mode: m, project: settings.project };
+  }
+  /** A pending hand-off, asked again in full: a new Send bubble with the whole prompt, and no countdown. */
+  async function reask(q) {
+    if (job) return { later: true };
+    const d = q?.data ?? {};
+    let settings;
+    try { settings = loadSettings(home); } catch { return { later: true }; }
+    if (typeof d.prompt !== 'string' || !d.prompt.trim()) return { dropped: 'A task for pi was waiting for your answer, but I can no longer read it, so I dropped it.' };
+    if (settings.project !== d.project || projectProblem(settings.project, home)) return { dropped: 'A task for pi was waiting for your answer, but pi now works in another folder, so I dropped it.' };
+    const r = await handoff({ text: d.prompt.trim(), mode: d.mode, followUp: d.followUp }, undefined, { kept: q });
+    if (r.ok) tell('Sent to pi.', 'Sent to pi.');
+    return { answered: true };
+  }
+  /** The folder pi works in, changed after a yes. → what to say. A no throws (declined: true). */
+  async function switchTo(name, signal, kept = null) {
+        const settings = loadSettings(home);
+        const want = String(name ?? '').trim().toLowerCase();
+        const hit = settings.projects.find((p) => p.name.toLowerCase() === want) ?? settings.projects.find((p) => p.name.toLowerCase().includes(want) && want.length > 2);
+        if (!hit) throw new Error(`No project called "${name}". The list: ${settings.projects.map((p) => p.name).join(', ')}. ${userName} adds projects in ${tilde(settings.file, home)}.`);
+        const problem = projectProblem(hit.dir, home);
+        if (problem) throw new Error(problem);
+        if (hit.dir === settings.project) return { same: true, text: `pi already works in ${hit.name} (${tilde(hit.dir, home)}).` };
+        const buttons = ['Switch', "Don't switch"]; // answered by which button it was, not by its words
+        const opts = { placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: buttons };
+        // Feature 22: with askYesNo (answers.mjs) it also takes a spoken yes or no, and is kept when nobody answers.
+        const answer = askYesNo ? await askYesNo({ ...opts, pending: { ...(kept ? { id: kept.id, at: kept.at } : {}), kind: 'project', brief: `Have pi work in ${hit.name} from now on?`, data: { name: hit.name } } }, signal) : await ask(opts, signal);
+        const a = firstButton(answer, buttons);
+        if (!a) throw Object.assign(new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`), { declined: true });
+        // Kept in state.json, never settings.json (that file is the owner's), with "project" as the settings file has it
+        // now: if the owner edits that later, their value wins over this choice.
+        writeState(settings.dir, { ...readState(settings.dir), project: tilde(hit.dir, home), projectWas: tilde(settings.fileProject, home) });
+        log('pi_project', {});
+        onChange();
+        return { text: `pi now works in ${hit.name} (${tilde(hit.dir, home)}).` };
+  }
+  /** A pending folder question, asked again. It no longer applies when the project is gone from the list or is
+   *  already the one pi works in. */
+  async function reswitch(q) {
+    if (job) return { later: true };
+    const gone = { dropped: `You hadn't answered whether pi should work in ${q?.data?.name ?? 'another folder'}. That no longer applies, so I dropped the question.` };
+    try {
+      const r = await switchTo(q?.data?.name, undefined, q);
+      if (r.same) return gone;
+      tell(r.text, r.text);
+      return { answered: true };
+    } catch (e) {
+      if (e instanceof Unanswered) throw e;
+      return e.declined ? { answered: true } : gone;
+    }
+  }
+
+  const tools = [
+    {
+      name: 'ask_pi',
+      description: `Hand a task to pi, ${userName}'s coding agent: the only way anything is read from, searched in, written to or run on ${userName}'s files. Write prompt as a complete instruction in ${userName}'s own words and intent, adding nothing they didn't ask for; pi has not seen this conversation or the screen, so include what it needs (file names, what was said, text you read on screen if they asked about it). mode "read" lets pi only read and search; "edit" also lets it change files and run commands: use "edit" only when ${userName} asked for something to be changed, made or run. follow_up true continues the last pi task in this project, e.g. to pass on ${userName}'s answer to a question pi asked. ${userName} always sees the exact prompt first: a read-only task then goes by itself after a few seconds unless they stop it, and one that can edit goes only when they say send. pi then works in the background and the app shows its steps. Don't wait for it: you're told when pi has finished.`,
+      parameters: z.object({ prompt: z.string(), mode: z.enum(['read', 'edit']), follow_up: z.boolean().optional() }),
+      executionMode: 'sequential', timeoutMs: limitsFor(home).answerWaitMinutes * 60_000, // time to read the prompt and answer; pi itself runs in the background
+      execute: async ({ prompt, mode, follow_up: followUp }, ctx) => {
+        if (job) throw new Error('pi is still working on the last task. Wait for its reply, or stop it with stop_pi.');
+        const r = await handoff({ text: String(prompt ?? '').trim(), mode, followUp }, ctx?.signal);
+        if (!r.ok) throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`);
+        return `Sent to pi (${r.mode === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(r.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
       },
     },
     {
@@ -688,22 +789,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       parameters: z.object({ name: z.string() }), executionMode: 'sequential',
       execute: async ({ name }, ctx) => {
         if (job) throw new Error('pi is working. Switch projects after it finishes, or stop it first.');
-        const settings = loadSettings(home);
-        const want = String(name ?? '').trim().toLowerCase();
-        const hit = settings.projects.find((p) => p.name.toLowerCase() === want) ?? settings.projects.find((p) => p.name.toLowerCase().includes(want) && want.length > 2);
-        if (!hit) throw new Error(`No project called "${name}". The list: ${settings.projects.map((p) => p.name).join(', ')}. ${userName} adds projects in ${tilde(settings.file, home)}.`);
-        const problem = projectProblem(hit.dir, home);
-        if (problem) throw new Error(problem);
-        if (hit.dir === settings.project) return `pi already works in ${hit.name} (${tilde(hit.dir, home)}).`;
-        const buttons = ['Switch', "Don't switch"]; // answered by which button it was, not by its words
-        const a = firstButton(await ask({ placeholder: `Have pi work in ${hit.name} (${tilde(hit.dir, home)}) from now on?`, choices: buttons }, ctx?.signal), buttons);
-        if (!a) throw new Error(`${userName} said no, so pi stays in ${tilde(settings.project, home)}.`);
-        // Kept in state.json, never settings.json (that file is the owner's), with "project" as the settings file has it
-        // now: if the owner edits that later, their value wins over this choice.
-        writeState(settings.dir, { ...readState(settings.dir), project: tilde(hit.dir, home), projectWas: tilde(settings.fileProject, home) });
-        log('pi_project', {});
-        onChange();
-        return `pi now works in ${hit.name} (${tilde(hit.dir, home)}).`;
+        return (await switchTo(name, ctx?.signal)).text;
       },
     },
   ];
@@ -768,7 +854,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     busy: () => !!job,
     /** Something said while a Send bubble is open is for the bubble: "send" sends, "no" doesn't, anything else leaves
      *  it open. True when a bubble was open. */
-    heard(text) { if (!approval) return false; approval.answer(text); return true; },
+    heard(text, opts) { if (!approval) return false; approval.answer(text, opts); return true; },
+    /** Pending questions of these kinds, asked again (flow.mjs): a hand-off, and the folder pi works in. */
+    resume: { handoff: reask, project: reswitch },
     /** The user started talking. True while a Send bubble is open: what they say will answer it. */
     listening() { if (!approval) return false; approval.listening = approval.talked = true; return true; },
     /** They stopped and nothing was heard: nothing is sent, and the bubble stays open. True when one was listening. */
@@ -810,6 +898,12 @@ export function codeReference() {
     },
     tools: { removed: [...REMOVED], piReadOnly: READ_TOOLS.split(','), allowedWhilePiWorks: [...DURING] },
     sendWords: [...SEND_WORDS],
+    handsFreeSendWords: { edit: [...HANDS_FREE_SEND], optional: 'please', readOnly: 'the send words', rule: 'heard in an answer window, a hand-off that can edit is sent only on one of these, said alone' },
+    fillerWords: [...FILLER_WORDS],
+    fillerRule: 'after a key press, these words before or after an answer are ignored; never hands-free for a hand-off that can edit',
+    closingPhrases: [...CLOSING_PHRASES],
+    answerWindow: { judgedAfterTheEndSeconds: WINDOW.graceSeconds, reopenedWhenAtLeastSecondsLeft: WINDOW.reopenMinSeconds, endOfSpeech: 'reported by the overlay when the last sample has played', microphoneClosedBy: ['the voice helper, at the window\'s end', 'the sidecar\'s own timer', 'a phrase from a window that is over is discarded'] },
+    pendingQuestions: { keptIn: PATHS.state, kinds: ['handoff', 'project', 'start', 'overlap', 'plan', 'sort', 'deleted'] },
     dontSendWords: [...DONT_WORDS],
     spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },

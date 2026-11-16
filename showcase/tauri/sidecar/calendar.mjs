@@ -127,6 +127,9 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
 export function createCalendar({ home = os.homedir(), todos, ask = async () => null, log = () => {}, now = () => Date.now(), port, tokenFile } = {}) {
   const client = createClient({ home, port, tokenFile });
   const yesTo = byButton(ask); // its bubbles are answered by which button it was (a spoken answer arrives the same way)
+  // Feature 22: what is kept of a question when its answer window runs out with no answer (answers.mjs, flow.mjs):
+  // its kind, a short wording, and what is needed to ask it again. kept: the pending question this already is.
+  const keep = (kept, kind, brief, data) => ({ ...(kept ? { id: kept.id, at: kept.at } : {}), kind, brief, data });
   const settings = () => loadSettings(home);
   const wait = () => limitsFor(home).calendarTimeoutSeconds * 1000;
 
@@ -363,7 +366,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const answered = (id) => inTurn(() => edit((cal) => { delete cal.waiting[id]; }));
 
   /** The question about a to-do whose task was deleted in the app. → true when the to-do is to go too. */
-  const askDeleted = (a, signal) => yesTo({ placeholder: `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'] }, signal);
+  const askDeleted = (a, signal, kept = null) => yesTo({ placeholder: `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'], pending: keep(kept, 'deleted', `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off the to-do list as well?`, { todo: a.todo, title: a.title }) }, signal);
 
   /** At start-up: a create that was begun and never finished is said once. */
   function startup() {
@@ -387,11 +390,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return open.map((t) => t.text);
   }
   /** Shows the count and the titles, and waits for a yes. Nothing is created before it. → true when it's on. */
-  async function offerStart(signal) {
+  async function offerStart(signal, kept = null) {
     const titles = await firstRun();
     if (get().started) return true;
     if (!titles) return false;
-    const a = await yesTo({ placeholder: `Put my to-do list in Super Productivity? ${titles.length} to-do${titles.length === 1 ? '' : 's'}, each as a task there:\n${titles.map((t) => `- ${t}`).join('\n')}`, choices: ['Add them', 'Not now'] }, signal);
+    const a = await yesTo({ placeholder: `Put my to-do list in Super Productivity? ${titles.length} to-do${titles.length === 1 ? '' : 's'}, each as a task there:\n${titles.map((t) => `- ${t}`).join('\n')}`, choices: ['Add them', 'Not now'], spoken: `Put my to-do list in Super Productivity? ${titles.length} to-do${titles.length === 1 ? '' : 's'}.`, pending: keep(kept, 'start', 'Put the to-do list in Super Productivity?', {}) }, signal);
     if (!a) return false;
     await inTurn(() => edit((cal) => { cal.started = true; }));
     log('calendar_started', { todos: titles.length });
@@ -436,18 +439,27 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return { day, start: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, at).getTime() };
   };
   /** Puts one block on the calendar. If it would overlap something, the owner is shown what and asked. */
-  async function place(id, title_, start, mins, signal) {
+  async function place(id, title_, start, mins, signal, kept = null) {
     const cal = get(), day = new Date(start); day.setHours(0, 0, 0, 0);
     const { mine, theirs } = dayBlocks(day, cal);
     const block = { start, minutes: mins };
     const hits = [...mine.filter((b) => b.todo !== id && !b.done && overlap(block, b)), ...theirs.filter((b) => overlap(block, b))];
-    if (hits.length) {
+    // kept: the question is being asked again. It is asked even if nothing is in the way any more: a block that
+    // waited for a yes is never placed without one.
+    if (hits.length || kept) {
       const what = hits.map((b) => `${quote(b.title)} (${span(b)})`).join(' and ');
-      const a = await yesTo({ placeholder: `${quote(title_)}, ${span(block)} on ${dayName(day)}, overlaps ${what}. Put it there anyway?`, choices: ['Put it there', 'Don\'t'] }, signal);
-      if (!a) throw new Error(`It would overlap ${what}, and they didn't say to put it there anyway. Nothing was changed. Ask what time suits instead.`);
+      const pending = keep(kept, 'overlap', `Put ${quote(title_)} on ${dayName(day)}, ${span(block)}, although it overlaps something?`, { todo: id, title: title_, start, minutes: mins });
+      const a = await yesTo({ placeholder: hits.length ? `${quote(title_)}, ${span(block)} on ${dayName(day)}, overlaps ${what}. Put it there anyway?` : `${quote(title_)}, ${span(block)} on ${dayName(day)}: nothing is in the way any more. Put it there?`, choices: ['Put it there', 'Don\'t'], pending }, signal);
+      if (!a) throw Object.assign(new Error(`It would overlap ${what}, and they didn't say to put it there anyway. Nothing was changed. Ask what time suits instead.`), { declined: true });
     }
     await setLocal(id, { start, minutes: mins });
   }
+  /** The day plan, shown whole; said as the day and how many blocks. → true on a yes. */
+  const askPlan = (day, shown, placed, left, signal, kept = null) => yesTo({
+    placeholder: shown, choices: ['Plan it', 'Don\'t'],
+    spoken: `Plan for ${dayName(day)}: ${placed.length} block${placed.length === 1 ? '' : 's'}, from ${hm(placed[0].start)}. Put it on the calendar?`,
+    pending: keep(kept, 'plan', `Put the plan for ${dayName(day)} on the calendar (${placed.length} block${placed.length === 1 ? '' : 's'})?`, { date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`, shown, placed: placed.map((p) => ({ todo: p.todo, title: p.title, start: p.start, minutes: p.minutes })), left: left.map((l) => ({ title: l.title })) }),
+  }, signal);
   const minutesArg = z.number().int().min(5).max(720);
   const blockTools = [
     {
@@ -545,7 +557,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         const { placed, left } = placeDay(want, { from: Math.max(at(a), soonest), until: at(b), busy, gap: c.gapMinutes });
         if (!placed.length) throw new Error(`Nothing fits ${dayName(day)} between ${hm(Math.max(at(a), soonest))} and ${hm(at(b))} with what is already there. Nothing was changed.`);
         const shown = [`Plan for ${dayName(day)}:`, ...placed.map((p) => `${span(p)}  ${p.title}`), ...(left.length ? [`No room for: ${left.map((l) => l.title).join('; ')}`] : [])].join('\n');
-        const yes = await yesTo({ placeholder: shown, choices: ['Plan it', 'Don\'t'] }, ctx?.signal);
+        const yes = await askPlan(day, shown, placed, left, ctx?.signal);
         if (!yes) throw new Error('They didn\'t say yes to the plan, so nothing was put on the calendar.');
         for (const p of placed) await setLocal(p.todo, { start: p.start, minutes: p.minutes });
         log('calendar_plan', { blocks: placed.length, left: left.length });
@@ -569,6 +581,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     if (!get().started) throw new Error(NOT_YET.replace('so there is nowhere to put a block', 'and urgent and important are kept with each to-do\'s task there'));
     return (await sync('tool')).text;
   }
+  /** The sorting proposal, shown whole. → true on a yes. */
+  const askSort = (proposals, all, signal, kept = null) => {
+    const shown = ['Sort these to-dos like this?', ...QUADRANTS.map(([name, u, i]) => { const here = proposals.filter((p) => p.urgent === u && p.important === i).map((p) => all.find((x) => x.id === p.todo).title); return here.length ? `${name}: ${here.join('; ')}` : null; }).filter(Boolean)].join('\n');
+    return yesTo({ placeholder: shown, choices: ['Sort them', 'Don\'t'], spoken: `Sort ${proposals.length} to-do${proposals.length === 1 ? '' : 's'} the way it's shown?`, pending: keep(kept, 'sort', `Sort ${proposals.length} to-do${proposals.length === 1 ? '' : 's'} into the matrix as proposed?`, { proposals: proposals.map((p) => ({ todo: p.todo, urgent: p.urgent, important: p.important })) }) }, signal);
+  };
   const matrixTools = [
     {
       name: 'set_priority',
@@ -597,8 +614,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
           if (!it) { await todoFor(p.todo); throw new Error(`${p.todo} can't be sorted.`); } // todoFor says why not
           if (it.sorted) throw new Error(`${quote(it.title)} already has its place (${quadrant(it.urgent, it.important).toLowerCase()}). sort_tasks is for the unsorted ones; set_priority changes one they name.`);
         }
-        const shown = ['Sort these to-dos like this?', ...QUADRANTS.map(([name, u, i]) => { const here = proposals.filter((p) => p.urgent === u && p.important === i).map((p) => all.find((x) => x.id === p.todo).title); return here.length ? `${name}: ${here.join('; ')}` : null; }).filter(Boolean)].join('\n');
-        const yes = await yesTo({ placeholder: shown, choices: ['Sort them', 'Don\'t'] }, ctx?.signal);
+        const yes = await askSort(proposals, all, ctx?.signal);
         if (!yes) throw new Error('They didn\'t say yes to the proposal, so nothing was sorted.');
         for (const p of proposals) await setFlags(p.todo, { urgent: p.urgent, important: p.important });
         log('calendar_priority', { set: proposals.length });
@@ -655,6 +671,69 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
   ];
 
+  // ---- feature 22: a question nobody answered, asked again when an exchange ends (flow.mjs). Each first checks that
+  // it still applies (the to-do is still there and open, the time hasn't passed): if not it is dropped, with one line
+  // to say so. → { answered, say } | { dropped: line } | { later: true } (the app isn't answering: it stays kept).
+  // A second time without an answer throws Unanswered, and the question is kept again with its first age.
+  const up = async () => (await reach()).ok && get().started;
+  const stillOpen = async (id) => { const t = (await todos.all()).find((x) => x.id === id); return t && t.status === 'open' && get().links[id] ? t : null; };
+  const resume = {
+    async start(q) {
+      if (get().started) return { dropped: 'I had asked about putting the to-do list in Super Productivity. It is there now, so I dropped the question.' };
+      if (!(await there())) return { later: true };
+      if (!(await firstRun())) return { dropped: 'I had asked about putting the to-do list in Super Productivity. There are no open to-dos now, so I dropped the question.' };
+      return { answered: true, say: (await offerStart(undefined, q)) ? 'The to-do list is in Super Productivity now.' : '' };
+    },
+    async deleted(q) {
+      const { todo, title: name } = q.data ?? {};
+      const t = (await todos.all()).find((x) => x.id === todo);
+      if (!t || t.status !== 'open' || !get().waiting[todo]) return { dropped: `I had asked about ${quote(name ?? 'a to-do')}, whose task was deleted in Super Productivity. That is settled now, so I dropped the question.` };
+      const yes = await askDeleted({ todo, title: t.text }, undefined, q);
+      if (yes) await todos.update(todo, { status: 'dropped' });
+      await answered(todo);
+      sync('change').catch(() => {});
+      return { answered: true, say: yes ? `${quote(t.text)} is off the to-do list.` : `${quote(t.text)} stays on the to-do list.` };
+    },
+    async overlap(q) {
+      const { todo, title: name, start, minutes: mins } = q.data ?? {};
+      const gone = (why) => ({ dropped: `I had asked whether to put ${quote(name ?? 'a to-do')} on the calendar although it overlapped something. ${why}, so I dropped the question.` });
+      if (!(await up())) return { later: true };
+      const t = await stillOpen(todo);
+      if (!t) return gone('That to-do is no longer open');
+      if (!(start + mins * 60_000 > now())) return gone('That time has passed');
+      if (!(await sync('tool')).ok) return { later: true };
+      try { await place(todo, t.text, start, mins, undefined, q); } catch (e) { if (e.declined) return { answered: true }; throw e; }
+      log('calendar_block', { what: 'placed' });
+      sync('change').catch(() => {});
+      return { answered: true, say: `${quote(t.text)} is on the calendar ${dayName(new Date(start))}, ${span({ start, minutes: mins })}.` };
+    },
+    async plan(q) {
+      const { date, shown, placed = [], left = [] } = q.data ?? {};
+      const day = dayOf(date);
+      const gone = (why) => ({ dropped: `The day plan${day ? ` for ${dayName(day)}` : ''} was waiting for your answer. ${why}, so I dropped it.` });
+      if (!day || !placed.length) return gone('I can no longer read it');
+      if (placed.some((p) => p.start < now())) return gone(new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime() <= now() ? 'That day has passed' : 'Its first times have passed');
+      if (!(await up())) return { later: true };
+      for (const p of placed) if (!(await stillOpen(p.todo))) return gone(`${quote(p.title)} is no longer open`);
+      if (!(await askPlan(day, shown, placed, left, undefined, q))) return { answered: true };
+      for (const p of placed) await setLocal(p.todo, { start: p.start, minutes: p.minutes });
+      log('calendar_plan', { blocks: placed.length, left: left.length });
+      sync('change').catch(() => {});
+      return { answered: true, say: `The plan for ${dayName(day)} is on the calendar.` };
+    },
+    async sort(q) {
+      if (!get().started) return { dropped: 'A sorting proposal was waiting for your answer. The to-do list is no longer in Super Productivity, so I dropped it.' };
+      const all = await sortable();
+      const proposals = (q.data?.proposals ?? []).filter((p) => all.some((x) => x.id === p.todo && !x.sorted));
+      if (!proposals.length) return { dropped: 'A sorting proposal was waiting for your answer. Those to-dos are sorted or gone now, so I dropped it.' };
+      if (!(await askSort(proposals, all, undefined, q))) return { answered: true };
+      for (const p of proposals) await setFlags(p.todo, { urgent: p.urgent, important: p.important });
+      log('calendar_priority', { set: proposals.length });
+      sync('change').catch(() => {});
+      return { answered: true, say: `Sorted ${proposals.length} to-do${proposals.length === 1 ? '' : 's'}.` };
+    },
+  };
+
   /** One line for the model's live state. */
   function live() {
     let cal;
@@ -664,5 +743,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, resume, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
 }

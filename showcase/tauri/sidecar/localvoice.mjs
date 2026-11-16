@@ -55,7 +55,8 @@ export function wavPcm(buf) {
 export class LocalVoice {
   constructor({ onAudio, onEnd, onError, voice, sayBin = SAY, spawnImpl = spawn, voiceName = named(voice) ?? named(process.env.ROAMIES_SAY_VOICE), platform = process.platform, timeout = 30_000 } = {}) {
     Object.assign(this, { onAudio, onEnd, onError, sayBin, spawnImpl, voiceName, platform, timeout });
-    this.queue = []; // sentences waiting their turn
+    this.queue = []; // sentences waiting their turn (and marks: functions called when everything before them has been handed over)
+    this.gen = 0; // goes up when what was waiting is cut: audio still being made for it is dropped
     this.state = 'open'; // open → ending → done
     this.heard = false;
     this.busy = false;
@@ -72,6 +73,22 @@ export class LocalVoice {
     this.pump();
   }
 
+  /** Feature 22: calls fn once every sentence said before this has been handed over as audio (at once if it's over). */
+  mark(fn) {
+    if (this.state === 'done') return fn();
+    this.queue.push(fn);
+    this.pump();
+  }
+
+  /** Feature 22: what hasn't been handed over yet isn't said (marks among it are called now). The voice stays usable. */
+  cut() {
+    if (this.state === 'done') return;
+    this.gen++;
+    const marks = this.queue.filter((x) => typeof x === 'function');
+    this.queue.length = 0;
+    for (const fn of marks) fn();
+  }
+
   end() {
     if (this.state !== 'open') return;
     this.state = 'ending';
@@ -83,7 +100,9 @@ export class LocalVoice {
   close() {
     if (this.state === 'done') return;
     this.state = 'done';
+    const marks = this.queue.filter((x) => typeof x === 'function');
     this.queue.length = 0;
+    for (const fn of marks) fn(); // nothing more will be handed over
     try { this.child?.kill(); } catch { /* already gone */ }
     this.child = null;
   }
@@ -100,8 +119,12 @@ export class LocalVoice {
     this.busy = true;
     try {
       while (this.queue.length && this.state !== 'done') {
-        const pcm = await this.make(this.queue.shift());
+        const next = this.queue.shift();
+        if (typeof next === 'function') { next(); continue; }
+        const gen = this.gen;
+        const pcm = await this.make(next);
         if (this.state === 'done') return;
+        if (gen !== this.gen) continue; // cut while it was being made
         for (let at = 0; at < pcm.length; at += CHUNK) {
           this.heard = true;
           this.onAudio?.(pcm.subarray(at, Math.min(pcm.length, at + CHUNK)));

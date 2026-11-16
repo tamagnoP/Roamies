@@ -261,13 +261,14 @@ fn handle_voice(app: &AppHandle, msg: Value) {
     match msg.get("type").and_then(Value::as_str) {
         Some("state") => {
             to_overlays(app, &ui);
-            to_sidecar(app, &json!({ "type": "voice_state", "state": msg.get("state") }));
+            // Local-only build: "window" is the answer window the session belongs to (none for a key press).
+            to_sidecar(app, &json!({ "type": "voice_state", "state": msg.get("state"), "window": msg.get("window") }));
         }
         Some("partial") | Some("level") => to_overlays(app, &ui),
         Some("final") => {
             to_overlays(app, &ui);
             // area: the part of the screen marked with the pen while talking (a PNG, its rect and the strokes).
-            to_sidecar(app, &json!({ "type": "voice", "text": msg.get("text"), "area": msg.get("area"), "ms": msg.get("ms"), "via": msg.get("via") }));
+            to_sidecar(app, &json!({ "type": "voice", "text": msg.get("text"), "area": msg.get("area"), "ms": msg.get("ms"), "via": msg.get("via"), "window": msg.get("window") }));
         }
         Some("error") => {
             let mut m = msg.clone();

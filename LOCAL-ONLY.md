@@ -24,7 +24,8 @@ or named an app) is a rule in its instructions, which the model follows but the 
 
 1. You ask Roamies for something that needs a file ("ask pi to explain segment.py").
 2. A bubble shows exactly what will be sent, the folder, and the mode, with **Send** and **Don't send**. With spoken
-   replies on, it is read out too.
+   replies on, it is said too, briefly: what it is and the prompt's first sentence ("For pi, with editing allowed.
+   Rename the helper in util.py. The rest is on screen. Say send to send it."). The whole prompt is in the bubble.
 3. A task that can edit is sent only when you click Send, press Y, or say "send". A read-only task goes by itself
    after a few seconds (`autoSendReadOnly`), so you only act to stop it: click Don't send, or say "no". Starting to
    talk stops the countdown for good: from then on it is sent only by "send" or a click.
@@ -34,6 +35,13 @@ or named an app) is a rule in its instructions, which the model follows but the 
    by the same rule. Anything else leaves the bubble open as it was, any number of times, and is not taken as a new
    request: a send word followed by other words ("OK, wait, change the prompt", "go back", "send it to the other
    project"), mixed ones ("yes no", "send, no wait"), and nothing heard.
+   After a key press, filler words before or after the answer don't spoil it ("um, send it now", "and send it",
+   "Jarvis, go ahead then"): `fillerWords` under `reference`. In the middle they still do ("send it and then stop").
+   Heard hands-free, in an answer window (see "Conversation flow"), a task that can edit is sent only on "send" or
+   "send it", said alone, with "please" if you like: no "ok", no "yes", no filler words. A read-only task takes
+   the send words there, without filler words.
+   What you said and wasn't taken is shown, not swallowed: the bubble's last line becomes `Heard "…". Say send or
+   no.` until your next phrase or until the bubble closes. It is on screen only: not logged, not sent, not kept.
    A click is never judged by words: the first button sends and the other doesn't, whatever the buttons are called
    ("Send" or "Send now"). The same holds for the folder-change question and the Super Productivity bubbles. Both lists are under `reference`
    in `settings.default.json` (`sendWords`, `dontSendWords`).
@@ -199,6 +207,8 @@ setup guide is open, the bubble waits until it closes.
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
   "vault": "~/Documents/roamies-vault",
+  "autoListenQuestions": true,
+  "closingReply": "Any time.",
   "limits": {
     "approvalBubbleChars": 600,
     "promptChars": 8000,
@@ -215,7 +225,12 @@ setup guide is open, the bubble waits until it closes.
     "noteTitleOnlyBytes": 300000,
     "frontLookupMs": 900,
     "frontReuseSeconds": 8,
-    "calendarTimeoutSeconds": 20
+    "calendarTimeoutSeconds": 20,
+    "answerWindowSeconds": 10,
+    "exchangeEndSeconds": 20,
+    "pendingKeepHours": 24,
+    "spokenQuestionChars": 200,
+    "heardLineChars": 80
   },
   "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60 }
 }
@@ -260,6 +275,10 @@ setup guide is open, the bubble waits until it closes.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
 - `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
   `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
+- `autoListenQuestions`: `true` or `false`. With Auto Listen on, whether the microphone opens after a reply of
+  Roamies' own that ends in a question. `false` switches that off; the answer windows of bubbles are not affected.
+- `closingReply`: what Roamies says when you end an exchange with a closing phrase ("thanks"). The default is
+  "Any time.".
 - `limits`: the sizes, times and counts. Each is a number in the range below; one that is missing or outside its
   range uses its default and is named in the start-up bubble. Leaving `limits` out altogether counts as one missing
   setting. An edit counts from the next request, except `answerWaitMinutes`, which is read when Roamies starts.
@@ -282,6 +301,11 @@ setup guide is open, the bubble waits until it closes.
   | `frontLookupMs` | 900 | 100 to 5000, whole | Milliseconds the look-up of the app in front may take. |
   | `frontReuseSeconds` | 8 | 1 to 60 | Seconds the look-up made when you stop talking stays good. |
   | `calendarTimeoutSeconds` | 20 | 2 to 60 | Seconds each request to Super Productivity may take. The check that the app is there at all always gives up after 1 second. |
+  | `answerWindowSeconds` | 10 | 3 to 30 | Seconds the microphone stays open by itself after Roamies has asked something. |
+  | `exchangeEndSeconds` | 20 | 5 to 600 | Quiet seconds after Roamies' last reply that end an exchange. |
+  | `pendingKeepHours` | 24 | 1 to 720 | Hours a question nobody answered is kept before it is dropped. |
+  | `spokenQuestionChars` | 200 | 40 to 1000, whole | Characters of a question, or of a hand-off's first sentence, that are said aloud. |
+  | `heardLineChars` | 80 | 20 to 300, whole | Characters of a phrase that wasn't taken, as shown in the bubble's last line. |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
   missing setting.
@@ -303,8 +327,9 @@ are deleted.
 
 `state.json`: Roamies' own memory, which it writes itself: the project you last switched to (with what `project` was at
 that moment, so a later edit of yours is noticed), the days the
-briefings were given, and under `calendar` which to-do goes with which Super Productivity task, with the values both
-had after the last sync. Deleting it is safe for the first two; without `calendar`, Roamies no longer knows which
+briefings were given, under `pending` the questions nobody answered (see "Conversation flow"; a pending hand-off's
+prompt is kept there as plain text), and under `calendar` which to-do goes with which Super Productivity task, with the values both
+had after the last sync. Deleting it is safe for the first two, and forgets the pending questions; without `calendar`, Roamies no longer knows which
 tasks are its own: it asks again before putting the list in the app, and the tasks already there would be made a
 second time.
 
@@ -358,11 +383,75 @@ the pointer, followed it, and hopped out of its way; in these two sizes it now d
 ## Talking with it
 
 - **Answering without a key.** With "Auto Listen" on (the menu, or the panel's Voice page), the microphone opens by
-  itself after Roamies asks you something. That now includes questions pi sends back: Roamies ends its spoken gist
-  with pi's question and listens for your answer.
+  itself after a reply of Roamies' own that ends in a question. That includes questions pi sends back: Roamies ends
+  its spoken gist with pi's question and listens for your answer. It is bounded like the answer window below: it
+  opens only when the reply has finished playing, lasts `limits.answerWindowSeconds`, and closes by the same three
+  stops. What you say goes to the model as your answer. `"autoListenQuestions": false` switches it off.
 - **Long tasks.** While pi works, Roamies says now and then that it's still going and what it's on.
 - **Read-only trust.** A read-only pi can still read any file the sandbox lets it reach, and what it reads goes to pi's AI
   provider. If a project holds things you'd rather approve each time, set `autoSendReadOnly` to `0`.
+
+## Conversation flow
+
+When Roamies asks you something, you answer by just speaking. No key press. (`flow.mjs`.)
+
+**An exchange** starts when you make a request by voice. It ends when you say a closing phrase alone ("thanks",
+"thank you", "thanks mate", "that's all"; `closingPhrases` under `reference`), or `limits.exchangeEndSeconds` after
+Roamies' last reply has finished playing. A closing phrase is answered by the app itself with `closingReply`,
+spoken, and is not sent to the model.
+
+**Spoken.** Inside an exchange, what Roamies shows it also says: its replies, the questions it raises itself (the
+Send bubble, the folder question, the Super Productivity questions), what a sync has to say, and failures (a request
+that failed, a microphone problem). A question is said briefly: a yes/no question by its first line, a hand-off by
+what it is and its first sentence. Outside an exchange (a typed request, a sync on the timer) those bubbles stay
+silent, as before, and wait for a click or a key press. Talking to an open bubble stops what is playing but no longer
+ends the reply's voice, so what Roamies says after your answer is spoken.
+
+**The answer window.** After a question has been said, the microphone opens by itself for
+`limits.answerWindowSeconds` (10; 3 to 30), with the usual listening sound and pill.
+
+- It opens only when the speaker has finished. The end of speech is not estimated: the overlay, which plays the
+  audio, reports it. After the question's last sentence the sidecar sends a mark; the overlay answers the mark when
+  every buffer handed over before it has ended (the audio player's own "ended" event), and the output has then been
+  silent for the delay the output device reports plus a margin (at least 0.4 s). The microphone is opened on that
+  answer and on nothing else. If the answer never comes, the window never opens.
+- While the window is open nothing is played: speech is held back until it closes. The voice helper also mutes the
+  Mac's output while it listens, as it always did.
+- Only answers count. A yes/no question takes the yes and no phrases; a read-only hand-off the send words; a
+  hand-off that can edit only "send" or "send it" (with "please"). Anything else is dropped: it is not sent to the
+  model, not kept in the conversation or the activity record, and logged only by its shape (size, whether a yes, no
+  or send word was in it). It is shown as the bubble's last line (`Heard "…". Say yes or no.`), on screen only.
+  The window stays open until it runs out: after a phrase that wasn't an answer the microphone opens again for the
+  time that is left, without a second sound.
+- A read-only countdown still sends itself when nothing is said. The microphone opening by itself doesn't stop it;
+  anything you say does.
+- A key press to talk works at any time and takes the window over: what you say then is judged the wider way (the
+  send words, filler words allowed), and the bubble waits as it used to. A click always works.
+- The microphone is closed at the window's end three times over, each on its own: the voice helper is given the
+  window's length and stops listening at that time itself; the sidecar's timer sends the cancel at the same time; and
+  a phrase marked with a window that is over is discarded. A phrase you finished inside the window is still judged
+  if its words arrive within 3 seconds of the end; the microphone is already closed by then.
+- Speech is turned into text on the Mac: on macOS 26 and later by Apple's SpeechAnalyzer, which runs on the device.
+  (On older macOS, upstream's fallback is Apple's dictation, kept on the device only where the Mac supports that.)
+  The helper keeps audio in memory only while it listens and writes none to disk.
+
+**No answer.** When the window runs out with no answer, the bubble closes and the question becomes pending, in
+`state.json` under `pending`. Nothing is sent or changed. The model is told that the question is kept and not to ask
+again.
+
+**Pending questions come back.** When your next exchange ends (not the one the question went unanswered in),
+Roamies asks the oldest pending question again, one at a time, spoken and with its answer window.
+
+- A pending hand-off is asked again in full: a new Send bubble with the whole prompt, a new undo snapshot if it can
+  edit, and no countdown, even when it is read only. It is never sent because it was pending.
+- A question that no longer applies is dropped and you are told in one line: the to-do is gone or done, the time or
+  the day has passed, the to-dos are sorted already, pi works in another folder.
+- A question older than `limits.pendingKeepHours` is dropped. The morning briefing mentions the ones that remain,
+  and "what's pending?" has them read out (`show_pending`).
+- If it goes unanswered again it stays pending, as old as it was. If Super Productivity isn't answering, a calendar
+  question stays pending until it is.
+- Pending questions are never written to the notes vault. A hook for the daily note (feature 18: a Log line when a
+  question becomes pending, and one when it is answered or dropped) is in place and connected to nothing yet.
 
 ## Safeguards
 
@@ -562,7 +651,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
-- `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count.
+- `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler
+  words, closing phrases, the "Heard" line.
+- `showcase/tauri/sidecar/flow.mjs` (new): the exchange, the answer window, pending questions, `show_pending`.
 - `showcase/tauri/sidecar/store.mjs`: one function added, `renameCommitment`, so a title changed in the app reaches
   the list.
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
@@ -572,16 +663,23 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   settings bubble.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
 - `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging.
+  `speaker.mjs` also has marks (the overlay reports when a line has finished playing) and `hush` (stops what is
+  playing without ending the reply's voice).
+- `showcase/roamies/voice-out.js`: answers a mark when what was handed over has finished playing.
+- `showcase/tauri/src-tauri/voice/main.swift`: an answer window (`listen` with `seconds`): the helper closes the
+  microphone at its end itself, and marks what it heard with the window's id. `--test-window` checks it.
+- `showcase/tauri/src-tauri/src/main.rs`, `voice.rs`: pass the window's seconds and id through; the window opening
+  by itself doesn't move the overlay to the pointer's display.
 - `showcase/roamies/home.js` (new): where the home spot is, and its margins for the reference file.
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question; the home position.
 - `showcase/roamies/core.js`: the frame loop stops while the character rests at home; no dozing off there.
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
-  with buttons stays on screen as it is while you talk.
+  with buttons stays on screen as it is while you talk; reports marks; shows the "Heard" line.
 - `showcase/desktop.html`: loads `home.js`.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs` (new),
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/flow.test.mjs` (new),
   `package.json`: tests.
 
 ## Build (macOS)

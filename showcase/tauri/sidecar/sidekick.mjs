@@ -37,7 +37,8 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
+import { createPi, forVoice, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
+import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
@@ -53,8 +54,18 @@ let intro = null; // the get-to-know-you chat, while it's on
 // The get-to-know-you chat runs in the guide window: its replies and voice go there, not to the desktop.
 // A reply's voice keeps going where it started, even after the chat ends mid-sentence; "stop" goes to both.
 const guideVoices = new Set();
+// Local-only build (feature 22): while an answer window is open the microphone is on, so nothing is played: speech
+// is held here and goes out when the window closes. If a key press took the window over, what was held is dropped
+// (talking over Roamies stops it), except the marks and ends that say a line is over.
+let micWindow = false;
+const heldSpeech = [];
+function releaseSpeech(drop) {
+  micWindow = false;
+  for (const m of heldSpeech.splice(0)) if (!drop || m.mark || m.end) ui(m);
+}
 const ui = (msg) => {
   if (msg.kind === 'speech') {
+    if (micWindow && !msg.stop) { heldSpeech.push(msg); return; }
     if (msg.stop) { send({ type: 'onboard', msg }); return send({ type: 'ui', msg }); }
     if (guideVoices.has(msg.id)) { if (msg.end) guideVoices.delete(msg.id); return send({ type: 'onboard', msg }); }
   }
@@ -268,18 +279,32 @@ const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: where
 
 // ---------- local-only build: file work is handed to pi (pi.mjs) ----------
 // A line read aloud by the app itself: in the reply's own voice while a reply is being made, else in a voice of its own.
-function voiceLine(text) {
-  if (!text || !VOICE_ON()) return;
+// Feature 22: with mark it returns a mark's name: the overlay reports that name when the line has finished playing
+// (null when replies aren't spoken). A reply's voice that was ended or stopped is not used.
+function voiceLine(text, mark = false) {
+  if (!text || !VOICE_ON()) return null;
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
-  if (turnVoice) { for (const p of parts) turnVoice.say(p); return; }
+  if (turnVoice && !turnVoice.done) { for (const p of parts) turnVoice.say(p); return mark ? turnVoice.mark() : null; }
   lineUntil = Date.now() + 1500 + String(text).length * 75; // roughly how long it takes to say: sync lines wait for it (calQuiet)
   speech.setVoice(lookVoice());
   const v = speech.start();
   for (const p of parts) v.say(p);
+  const name = mark ? v.mark() : null;
   v.end();
+  return name;
 }
+// Feature 22: the end of speech, as the overlay reports it. A mark is answered (speech_mark) when everything handed
+// over before it has finished playing; nothing here guesses that from the length of a line.
+const played = new Map(); // a mark's name → what waits for it
+const whenPlayed = (mark) => new Promise((resolve) => { played.set(mark, resolve); if (played.size > 200) played.delete(played.keys().next().value); }); // one never answered (no overlay) just never resolves
+/** Says a line when replies are spoken, and resolves once the overlay reports that nothing of it is still playing. */
+const lineDone = (text) => whenPlayed((text && voiceLine(text, true)) || speech.mark());
+/** In an exchange started by voice, what is shown is also said. */
+const aloud = (text, mood) => { say(text, mood); if (flow.spoken()) voiceLine(forVoice(text)); };
 const pi = createPi({
   userName, ask,
+  // Feature 22: the Send bubble and the folder question are said, get an answer window, and are kept when unanswered.
+  askYesNo: (opts, signal) => answers.ask(opts, signal), question: (q) => flow.question(q), retext: (text) => ui({ kind: 'ask_text', text }),
   say: (text) => say(text),
   tell: (text, spoken) => { if (text) say(text, 'happy'); voiceLine(spoken); },
   // pi has finished. With spoken replies on, Roamies first says the gist in its own voice (a short turn of its own);
@@ -309,7 +334,7 @@ const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) }
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
-const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data) });
+const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text }), heardChars: () => limitsFor(HOME).heardLineChars });
 const cal = createCalendar({
   ask: answers.ask, log: (kind, data) => logLine(kind, data),
   todos: {
@@ -321,7 +346,8 @@ const cal = createCalendar({
 });
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
 // nothing else is going on: no reply being made or spoken, nobody talking, no bubble waiting for an answer. It is
-// shown in a bubble then, never spoken, and never dropped (it is kept in state.json until shown).
+// shown in a bubble then, and never dropped (it is kept in state.json until shown). Feature 22: inside an exchange
+// started by voice it is also said, and a question gets its answer window; outside one it stays silent, as before.
 let voiceState = 'idle', lineUntil = 0, calOffered = false, calAsking = false;
 const calQuiet = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!config.onboarded || guideClosed) && !loggingIn, busy, queued, asking: pending.size > 0 || calAsking, voice: voiceState, speakingUntil: lineUntil });
 async function calShow() {
@@ -329,10 +355,12 @@ async function calShow() {
     if (!calQuiet()) return;
     if (cal.hasHeld()) {
       const { lines, asks } = cal.takeHeld();
-      if (lines.length) { logLine('calendar_lines', { lines: lines.length }); say(lines.join('\n'), 'concerned'); }
+      if (lines.length) { logLine('calendar_lines', { lines: lines.length }); say(lines.join('\n'), 'concerned'); if (flow.spoken()) await lineDone(forVoice(lines.join('\n'))); }
       for (const a of asks) {
         calAsking = true;
-        const yes = await cal.askDeleted(a).finally(() => { calAsking = false; });
+        let yes;
+        // Unanswered: its answer window ran out. Nothing is changed, and flow.mjs keeps the question for later.
+        try { yes = await cal.askDeleted(a).finally(() => { calAsking = false; }); } catch (e) { if (e?.name === 'Unanswered') continue; throw e; }
         if (yes) { await updateCommitment(a.todo, { status: 'dropped' }); menu(); scheduleReminders(); }
         await cal.answered(a.todo); cal.sync('change'); // kept: it gets a new task
       }
@@ -341,13 +369,27 @@ async function calShow() {
     // The first time, once per start: the to-dos that would go into the app, and a yes before any is created.
     if (!calOffered && !cal.state().started && await cal.there()) {
       calOffered = true; calAsking = true;
-      await cal.offerStart().finally(() => { calAsking = false; });
+      await cal.offerStart().finally(() => { calAsking = false; }).catch((e) => { if (e?.name !== 'Unanswered') throw e; });
     }
   } catch (e) { console.error('calendar', e); }
 }
 // Apps on the never-look list are checked before any screen tool runs.
 const guard = createGuard({ windows: async () => (await hands('windows')).windows ?? [] });
-tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools])); // Local-only build: cal
+// Local-only build (feature 22): conversation flow (flow.mjs). The microphone is opened for an answer only through
+// here, and only after the overlay has reported that the question has finished playing.
+const flow = createFlow({
+  home: HOME,
+  speak: (text) => lineDone(text),
+  announce: (text) => { say(text, 'happy'); return lineDone(forVoice(text)); },
+  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding) send({ type: 'listen', seconds, window, again }); },
+  cancel: () => send({ type: 'listen_cancel' }),
+  bubbles: () => [pi, answers],
+  idle: () => calQuiet() && !pi.bubble() && !answers.open(),
+  onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key'); },
+  log: (kind, data) => logLine(kind, data),
+});
+for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);
+tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools])); // Local-only build: cal, flow
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -621,6 +663,7 @@ let credsBaseUrl;
 let queued = 0;
 function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false } = {}) {
   if (interrupt && busy) interruptQuietly();
+  if (interrupt && byVoice) flow.start(); // Local-only build (feature 22): a request made by voice opens the exchange
   queued++;
   running = running.then(() => prompt(text, image, note, byVoice)).catch((e) => console.error('prompt', e))
     .finally(() => { if (--queued === 0) maybeCompact(); });
@@ -875,8 +918,10 @@ let autoTurn = null;
 const autoListenOn = () => VOICE_OK && !!config.voice && !!config.autoListen && voiceReady() && !intro;
 async function prompt(text, image = null, note = '', byVoice = false) {
   const problem = await readyAgent();
-  if (problem) return say(problem, 'concerned');
+  if (problem) return aloud(problem, 'concerned'); // Local-only build: said too, in an exchange started by voice
   busy = true; quiet = false; autoTurn = null;
+  flow.activity(); // Local-only build (feature 22): the exchange's quiet time starts again after this reply
+  let replyDone = null; // resolves when the overlay reports that this reply has finished playing
   if (!intro && !text.startsWith('(')) activity.asked(text);
   menu();
   controller = new AbortController();
@@ -987,27 +1032,36 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     releaseBeat(false);
     // Stop from the menu ends the stream quietly; an interruption by a new request (quiet) doesn't count.
     if (controller.signal.aborted && !quiet) lastFailed = true;
-    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); voice?.end(); }
+    // Local-only build (feature 22): a mark after the reply's last sentence; the overlay reports when it has played.
+    if (controller.signal.aborted) { voice?.abort(); replyDone = whenPlayed(speech.mark()); } else { spoken?.flush(); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
     trail.end();
     ink.endRequest();
-    // Asked by voice and answered with a question: the overlay opens the mic once the reply has been typed and said.
-    const listen = byVoice && !stalled && !controller.signal.aborted && autoListenOn() && endsWithQuestion(lastReply) ? { turn, speech: voice?.id ?? null } : null;
-    autoTurn = listen ? turn : null;
-    ui({ kind: 'agent', e: stalled ? { type: 'error', message: stallMessage() } : { type: 'done', ...(listen ? { listen } : {}) } });
+    // Asked by voice and answered with a question (Auto Listen): the microphone opens for the answer. Local-only
+    // build: through flow.mjs's answer window, so it opens only on the overlay's report that the reply has finished
+    // playing, lasts "limits.answerWindowSeconds", and is off when "autoListenQuestions" is false. The overlay's own
+    // timer (the listen field of "done") is no longer used.
+    const listen = byVoice && !stalled && !controller.signal.aborted && autoListenOn() && endsWithQuestion(lastReply) && flow.replyWindow(replyDone);
+    if (listen) logLine('auto_listen', { turn });
+    autoTurn = null;
+    ui({ kind: 'agent', e: stalled ? { type: 'error', message: stallMessage() } : { type: 'done' } });
+    if (stalled && flow.spoken()) voiceLine(stallMessage()); // a failure is said too
     logUsage({ ...use, ms: Date.now() - use.t });
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
     lastFailed = true;
-    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); voice?.end(); }
+    const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
+    // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
+    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); if (flow.spoken()) voice?.say(forVoice(msg)); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
     if (controller.signal.aborted && quiet) ui({ kind: 'agent', e: { type: 'done' } });
     else {
-      const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
       console.error('prompt failed', err);
       ui({ kind: 'agent', e: { type: 'error', message: msg } });
+      if (stalled && flow.spoken()) voiceLine(msg);
     }
   } finally {
     watch?.stop();
     busy = false; turnVoice = null;
+    flow.settle(replyDone ?? whenPlayed(speech.mark())); // Local-only build (feature 22)
     // A tool cut off by Stop never reports back: end its tag too, or the Sidekick kept showing it ("looking at
     // CapCut") on every later request, with their own tags queued behind it.
     for (const id of activity.stopped()) ui({ kind: 'agent', e: { type: 'tool_end', id, isError: true } });
@@ -1454,15 +1508,18 @@ const startVoiceDownload = () => {
 const PRIVACY = { microphone: 'Privacy_Microphone', speech: 'Privacy_SpeechRecognition' };
 function onVoice(m) {
   if (m.type === 'voice_state') voiceState = String(m.state ?? 'idle'); // Local-only build: sync lines wait while the owner talks (calQuiet)
-  if (m.type === 'voice_state' && m.state === 'listening') {
-    if (pi.listening() || answers.listening()) speech.stop(); // local-only build: a Send bubble or a yes/no bubble is open; talking answers it instead of cancelling the request
+  // Local-only build (feature 22): m.window is the answer window the helper's session belongs to (none: a key press).
+  if (m.type === 'voice_state') flow.voice(voiceState, m.window ?? null);
+  if (m.type === 'voice_state' && m.state === 'listening' && m.window != null) { /* the answer window's own listening: nothing is interrupted, and no bubble is told that someone is talking */ }
+  else if (m.type === 'voice_state' && m.state === 'listening') {
+    if (pi.listening() || answers.listening()) speech.hush(); // local-only build: a Send bubble or a yes/no bubble is open; talking answers it instead of cancelling the request. hush, not stop: what is playing stops, but the reply's voice stays usable, so what Roamies says after the answer is spoken
     else { interruptQuietly(); speech.stop(); warmUp(); } // talking over it stops it
   }
   else if (m.type === 'voice_state' && m.state === 'processing') frontSoon = { at: Date.now(), p: whereFront() }; // Local-only build: whereFront, not whereNow
   else if (m.type === 'voice' && m.text?.trim()) {
     // Key release to the words arriving (mic tail and the recogniser finishing), to see what that step costs.
     if (typeof m.ms === 'number') logLine('voice_final', { ms: m.ms, via: String(m.via ?? ''), chars: m.text.trim().length });
-    onSpoken(m.text.trim(), m.area);
+    onSpoken(m.text.trim(), m.area, m.window ?? null);
   }
   else if (m.type === 'voice_state' && m.state === 'idle' && (pi.unheard() || answers.unheard())) { /* local-only build: nothing was heard for the bubble that is open: nothing is sent or answered, and it stays open */ }
   else if (m.type === 'voice_state' && m.state === 'idle' && snap?.waitingVoice) snap.waitingVoice = false;
@@ -1470,21 +1527,21 @@ function onVoice(m) {
     if (m.code === 'nothing_heard' && snap) { snap.waitingVoice = false; return; }
     if (m.code === 'model_missing') startVoiceDownload();
     else if (m.code === 'permission' && !MAC) {
-      say('Windows is blocking the microphone. In the Privacy settings I just opened, turn on microphone access and "Let desktop apps access your microphone".', 'concerned');
+      aloud('Windows is blocking the microphone. In the Privacy settings I just opened, turn on microphone access and "Let desktop apps access your microphone".', 'concerned');
       openUrl('ms-settings:privacy-microphone');
     } else if (m.code === 'permission') {
       const what = m.what === 'speech' ? 'speech recognition' : 'the microphone';
-      say(`I need access to ${what} to hear you. Turn on Roamies in the Privacy settings I just opened.`, 'concerned');
+      aloud(`I need access to ${what} to hear you. Turn on Roamies in the Privacy settings I just opened.`, 'concerned');
       openUrl(`x-apple.systempreferences:com.apple.preference.security?${PRIVACY[m.what] ?? 'Privacy'}`);
     } else if (m.code === 'no_input') {
       if (m.reason === 'blocked' && process.platform === 'win32') openUrl('ms-settings:privacy-microphone');
-      say(micTrouble(process.platform, m.reason, m.message), 'concerned');
+      aloud(micTrouble(process.platform, m.reason, m.message), 'concerned');
     }
-    else if (m.code === 'nothing_heard') say(m.spoke ? "I heard you but couldn't make out the words. Try again a little closer to the mic?" : `I didn't hear anything. ${talkHowLong()}.`, 'concerned');
+    else if (m.code === 'nothing_heard') aloud(m.spoke ? "I heard you but couldn't make out the words. Try again a little closer to the mic?" : `I didn't hear anything. ${talkHowLong()}.`, 'concerned');
     else if (m.code === 'dictation_off') {
-      say('This version of macOS needs Dictation on for me to hear you. Turn it on in the Keyboard settings I just opened.', 'concerned');
+      aloud('This version of macOS needs Dictation on for me to hear you. Turn it on in the Keyboard settings I just opened.', 'concerned');
       openUrl('x-apple.systempreferences:com.apple.Keyboard-Settings.extension');
-    } else say(`Speech recognition failed: ${String(m.message ?? 'unknown error').slice(0, 120)}`, 'concerned');
+    } else aloud(`Speech recognition failed: ${String(m.message ?? 'unknown error').slice(0, 120)}`, 'concerned');
   }
 }
 
@@ -1630,7 +1687,13 @@ async function areaSnap() {
 }
 let snapping = false;
 // Words said while ⌃⌥ was held, maybe with an area marked by drawing on the screen at the same time.
-async function onSpoken(text, area) {
+async function onSpoken(text, area, window = null) {
+  // Local-only build (feature 22). Heard in an answer window (the helper marks those words with the window's id):
+  // flow.mjs judges them. Only the answer to the model's own question comes back as a request; everything else was
+  // an answer to the open question or is dropped there, and never goes further.
+  if (window != null) { if (flow.windowPhrase(text, window) !== 'request') { ui({ kind: 'heard' }); return; } }
+  // A closing phrase said alone ("thanks") ends the exchange: answered by the app, not sent to the model.
+  else if (!pi.bubble() && !answers.open() && flow.closing(text)) { ui({ kind: 'heard' }); return; }
   // Local-only build: a Send bubble or a yes/no bubble is open, and what was said is for it: a clear answer settles
   // it, anything else leaves it open. Either way no reply follows these words, so the shell is told they were dealt
   // with ("heard"): the listening pill by the cursor goes, instead of waiting for an answer that isn't coming.
@@ -1841,6 +1904,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   else if (m.type?.startsWith('voice')) onVoice(m);
   else if (m.type === 'snap') areaSnap();
   else if (m.type === 'write_tap') onWriteTap();
+  // Local-only build (feature 22): the overlay reports that everything before this mark has finished playing.
+  else if (m.type === 'speech_mark') { const done = played.get(m.mark); played.delete(m.mark); done?.(); }
   else if (m.type === 'auto_listen') {
     // Still the latest reply, nothing running since, and still switched on: listen once, hands-free.
     if (m.turn !== autoTurn || busy || !autoListenOn()) return;
@@ -1949,7 +2014,7 @@ setInterval(() => {
     if (!b) return;
     pi.briefing.done(b.kind);
     logLine('briefing', { kind: b.kind });
-    cal.sync('briefing').catch(() => {}).finally(() => enqueue(b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note)); // Local-only build: the to-do list is in step with Super Productivity first
+    cal.sync('briefing').catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`)); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the
