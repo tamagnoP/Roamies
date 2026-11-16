@@ -8,7 +8,7 @@ rules for working on it; this file tracks the work itself.
 same commit: move it between sections, fill in the branch and commit, and add a dated line to the decisions log when
 something is decided or reversed.
 
-Last updated: 2026-11-14.
+Last updated: 2026-11-16.
 
 ## Status at a glance
 
@@ -26,7 +26,7 @@ Last updated: 2026-11-14.
 | 10 | `settings.json` written only by the owner | Done | `2ac8919`, `add0dd3` |
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
-| 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Built, not merged; to be reviewed and tried against the app | `sp-calendar` |
+| 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
 | 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
 | 16 | Natural local voice (Kokoro or Piper) | Later | |
@@ -35,8 +35,9 @@ Last updated: 2026-11-14.
 | 19 | Roles for pi: coder and reviewer | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed | |
 | 21 | One orb as the only look | Idea, not designed | |
+| 22 | Conversation flow: spoken questions, answer window, pending questions | Next (prompt given 2026-11-16), before 18 | `voice-flow` |
 
-Build order: 13, 18, 14, 19, 16, 17, 15, then 20 and 21.
+Build order: 22, 18, 14, 19, 16, 17, 15, then 20 and 21.
 
 ## 1. Done
 
@@ -59,6 +60,14 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `c23db76` | 2026-11-13 | Never-look fix: the "what's in front" line is hidden by the front app's name alone. Before, a word in the line's own fixed wording ("messages") hid every app. |
 | `85a86c5` | 2026-11-13 | Install step: after a build is copied to `/Applications`, the ScreenCapture and Accessibility permissions are reset with `tccutil` and the owner grants both again. |
 | `7a48e05` | 2026-11-13 | Settings reference: `settings.default.json` is written beside `settings.json` at start-up (every setting with its default, and under `reference` what stays in code) and never read; missing or unusable settings are named once per start-up in a bubble; the sizes, times and counts became settings under `limits`. |
+| `5b563a8` | 2026-11-15 | Feature 13, part 1: the to-do list is mirrored in Super Productivity and synced both ways (seven fields, per field, the app winning a clash; identity by task id in `state.json`; never `DELETE`; the token read per request). Settings `calendar` and `limits.calendarTimeoutSeconds`. |
+| `1bb136c` | 2026-11-15 | Feature 13, part 2: blocks. Place, move, unschedule, read a day back, plan a day; an overlap is shown and asked about; the morning briefing says what is on the calendar. |
+| `02471e1` | 2026-11-15 | Feature 13, part 3: the Eisenhower matrix (`set_priority`, `sort_tasks`, `show_matrix`, one block offer). |
+| `ec067fe` | 2026-11-15 | A sync that fails says which step failed and why. |
+| `6d91f9c` | 2026-11-15 | The calendar's bubbles take a spoken yes or no (`answers.mjs`); talking neither closes the bubble nor cancels the turn. |
+| `d42f3ba` | 2026-11-15 | A bubble that ignored what was said is as ready as when it opened; the Send bubble stays open after unclear words. |
+| `a5efb88` | 2026-11-15 | The Send bubble sends only on nothing but send words and declines only on nothing but don't-send words. |
+| `f5a30af` | 2026-11-15 | A click is resolved by which button it was, never by the spoken-word rule. |
 
 Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
 `local-only` by fast-forward on 2026-11-13.
@@ -67,33 +76,16 @@ Feature 12 was built on `home-position` by Claude Code on the Mac from Prompt A,
 fast-forward on 2026-11-14 with the owner's approval. The never-look fix, the permission reset in the install step
 and the settings reference file were added on the same branch, each as its own commit, and merged with it.
 
+Feature 13 was built on `sp-calendar` by Claude Code on the Mac from Prompt D (widened by the owner before any code:
+the whole to-do list mirrored, with the matrix on top), checked against the installed Super Productivity 20.0.0,
+approved by the owner and merged into `local-only` by fast-forward on 2026-11-16.
+
 Confirmed working on the MacBook Air (M3): voice in and out, Send by click and by voice, notes, pi relay, countdown,
 stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answers, undo snapshots.
 
 ## 2. In progress
 
-### 13. To-dos, calendar blocks and the Eisenhower matrix in Super Productivity (branch `sp-calendar`)
-
-Started from Prompt D on 2026-11-14 and widened by the owner the same day, before any code: no longer only calendar
-blocks, but the whole to-do list mirrored in the app and kept in step both ways, with the matrix on top. Three
-commits, in this order:
-
-1. **Mirror and sync. Built.** Every to-do of kind commitment has a task in the app (after a first yes); seven
-   fields synced both ways (title, done, start, length, urgent, important, due time as the app's deadline), per
-   field, the app winning a clash; identity by task id in `state.json`; never `DELETE`; the token read per request
-   and kept nowhere; from other tasks only title, start, length and done, in memory. Settings `calendar` and
-   `limits.calendarTimeoutSeconds`. One marked function added to upstream's `store.mjs`.
-2. **Blocks. Built.** A block is a to-do's start and length. Place (a new title becomes a to-do first), move,
-   unschedule, read a day back, plan a day (times worked out by code; shown whole; created after a yes). An overlap
-   is shown and asked about. Refused when the app isn't answering or the list isn't mirrored yet. The morning
-   briefing says what is on the calendar.
-3. **Matrix. Built.** Urgent and important as two flags on each to-do, synced with the app's tags `EM_URGENT` and
-   `EM_IMPORTANT`, other tags preserved: `set_priority`, `sort_tasks` (a proposal, applied after a yes),
-   `show_matrix`, and one offer of a block for a to-do that is urgent and important and has none.
-
-Checked against the installed Super Productivity 20.0.0, by reading the API code inside the app and with test tasks
-the owner removes by hand. The code itself has only been run against a stand-in server (`test/calendar.test.mjs`),
-never against the real app. Not merged: the owner reviews it first.
+Feature 22 (conversation flow) is next, on `voice-flow`.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -101,7 +93,7 @@ parent folders of research work and data; list the OrbStack app's project under 
 
 ## 3. Queued, in this order
 
-Build order: 13 (in progress, section 2), 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
+Build order: 22 (next, branch `voice-flow`), 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
 
 ### 18. Daily note (Prompt E)
 
@@ -257,6 +249,9 @@ the screen blocks clicks.
   which step failed and why.
 - **2026-11-14.** Home position test 9 (clicks near the character are blocked) accepted by the owner, pending the
   orb redesign.
+- **2026-11-16.** Feature 13 approved by the owner and merged into `local-only` by fast-forward (`f5a30af`).
+- **2026-11-16.** Feature 22, conversation flow, comes next, before the daily note (18): when Roamies asks
+  something, the owner answers by just speaking.
 
 ## 6. Still to test
 
