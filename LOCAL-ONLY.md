@@ -444,8 +444,16 @@ Roamies asks the oldest pending question again, one at a time, spoken and with i
 
 - A pending hand-off is asked again in full: a new Send bubble with the whole prompt, a new undo snapshot if it can
   edit, and no countdown, even when it is read only. It is never sent because it was pending.
-- A question that no longer applies is dropped and you are told in one line: the to-do is gone or done, the time or
-  the day has passed, the to-dos are sorted already, pi works in another folder.
+- The same question is pending once. Asked again while it is pending (you made the request again and again didn't
+  answer), the new one takes the old one's place. "The same" is: for a hand-off, the same prompt for the same folder
+  in the same mode; for the folder question, the same project; for an overlap and for a deleted task, the same to-do;
+  for a day plan, the same day; the sorting proposal and the first-time question exist once each.
+- When a question is answered, every pending copy of it is cleared without a word: by a spoken yes or no, by a
+  click, or because a later request asked the same thing and you answered there.
+- A question whose thing was done meanwhile is dropped without a word: the to-dos are sorted, the block or the plan
+  is on the calendar, the to-do is done or gone, pi already works in that folder.
+- You are told, in one line, only when something you still wanted is lost: the time of a block or a plan has passed,
+  a to-do in a plan is no longer open, pi now works in another folder, the project is off the list.
 - A question older than `limits.pendingKeepHours` is dropped. The morning briefing mentions the ones that remain,
   and "what's pending?" has them read out (`show_pending`).
 - If it goes unanswered again it stays pending, as old as it was. If Super Productivity isn't answering, a calendar

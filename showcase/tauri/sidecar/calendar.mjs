@@ -448,7 +448,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     // waited for a yes is never placed without one.
     if (hits.length || kept) {
       const what = hits.map((b) => `${quote(b.title)} (${span(b)})`).join(' and ');
-      const pending = keep(kept, 'overlap', `Put ${quote(title_)} on ${dayName(day)}, ${span(block)}, although it overlaps something?`, { todo: id, title: title_, start, minutes: mins });
+      const pending = keep(kept, 'overlap', `Put ${quote(title_)} on ${dayName(day)}, ${span(block)}, although it overlaps something?`, { todo: id, title: title_, start, minutes: mins, was: cal.links[id]?.local.start ?? null });
       const a = await yesTo({ placeholder: hits.length ? `${quote(title_)}, ${span(block)} on ${dayName(day)}, overlaps ${what}. Put it there anyway?` : `${quote(title_)}, ${span(block)} on ${dayName(day)}: nothing is in the way any more. Put it there?`, choices: ['Put it there', 'Don\'t'], pending }, signal);
       if (!a) throw Object.assign(new Error(`It would overlap ${what}, and they didn't say to put it there anyway. Nothing was changed. Ask what time suits instead.`), { declined: true });
     }
@@ -671,66 +671,85 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
   ];
 
-  // ---- feature 22: a question nobody answered, asked again when an exchange ends (flow.mjs). Each first checks that
-  // it still applies (the to-do is still there and open, the time hasn't passed): if not it is dropped, with one line
-  // to say so. → { answered, say } | { dropped: line } | { later: true } (the app isn't answering: it stays kept).
-  // A second time without an answer throws Unanswered, and the question is kept again with its first age.
+  // ---- feature 22: a question nobody answered, asked again when an exchange ends (flow.mjs). Each first looks,
+  // without asking anything, at what has become of it:
+  //   { done: true }      the thing was done meanwhile (sorted, placed, settled): cleared without a word
+  //   { dropped: line }   it no longer applies and something they wanted is lost (the time has passed): one line
+  //   { later: true }     the app isn't answering: it stays kept
+  //   { ask }             it still applies: ask() asks it again → { say }. Without an answer it throws Unanswered,
+  //                       and the question is kept again with its first age.
   const up = async () => (await reach()).ok && get().started;
   const stillOpen = async (id) => { const t = (await todos.all()).find((x) => x.id === id); return t && t.status === 'open' && get().links[id] ? t : null; };
+  const DONE = { done: true };
   const resume = {
     async start(q) {
-      if (get().started) return { dropped: 'I had asked about putting the to-do list in Super Productivity. It is there now, so I dropped the question.' };
+      if (get().started) return DONE;
       if (!(await there())) return { later: true };
-      if (!(await firstRun())) return { dropped: 'I had asked about putting the to-do list in Super Productivity. There are no open to-dos now, so I dropped the question.' };
-      return { answered: true, say: (await offerStart(undefined, q)) ? 'The to-do list is in Super Productivity now.' : '' };
+      if (!(await firstRun())) return DONE; // no open to-dos: nothing to put there, and it counts as settled
+      return { ask: async () => ({ say: (await offerStart(undefined, q)) ? 'The to-do list is in Super Productivity now.' : '' }) };
     },
     async deleted(q) {
-      const { todo, title: name } = q.data ?? {};
+      const { todo } = q.data ?? {};
       const t = (await todos.all()).find((x) => x.id === todo);
-      if (!t || t.status !== 'open' || !get().waiting[todo]) return { dropped: `I had asked about ${quote(name ?? 'a to-do')}, whose task was deleted in Super Productivity. That is settled now, so I dropped the question.` };
-      const yes = await askDeleted({ todo, title: t.text }, undefined, q);
-      if (yes) await todos.update(todo, { status: 'dropped' });
-      await answered(todo);
-      sync('change').catch(() => {});
-      return { answered: true, say: yes ? `${quote(t.text)} is off the to-do list.` : `${quote(t.text)} stays on the to-do list.` };
+      if (!t || t.status !== 'open' || !get().waiting[todo]) return DONE; // the to-do is gone or done, or has a task again
+      return { ask: async () => {
+        const yes = await askDeleted({ todo, title: t.text }, undefined, q);
+        if (yes) await todos.update(todo, { status: 'dropped' });
+        await answered(todo);
+        sync('change').catch(() => {});
+        return { say: yes ? `${quote(t.text)} is off the to-do list.` : `${quote(t.text)} stays on the to-do list.` };
+      } };
     },
     async overlap(q) {
       const { todo, title: name, start, minutes: mins } = q.data ?? {};
-      const gone = (why) => ({ dropped: `I had asked whether to put ${quote(name ?? 'a to-do')} on the calendar although it overlapped something. ${why}, so I dropped the question.` });
-      if (!(await up())) return { later: true };
-      const t = await stillOpen(todo);
-      if (!t) return gone('That to-do is no longer open');
-      if (!(start + mins * 60_000 > now())) return gone('That time has passed');
-      if (!(await sync('tool')).ok) return { later: true };
-      try { await place(todo, t.text, start, mins, undefined, q); } catch (e) { if (e.declined) return { answered: true }; throw e; }
-      log('calendar_block', { what: 'placed' });
-      sync('change').catch(() => {});
-      return { answered: true, say: `${quote(t.text)} is on the calendar ${dayName(new Date(start))}, ${span({ start, minutes: mins })}.` };
+      const t = (await todos.all()).find((x) => x.id === todo);
+      if (!t || t.status !== 'open') return DONE; // done or taken off the list: no block is wanted for it
+      const link = get().links[todo];
+      // On the calendar since the question was asked, there or elsewhere: a later request settled it.
+      if (link && link.local.start !== null && link.local.start !== q.data?.was) return DONE;
+      if (!(start + mins * 60_000 > now())) return { dropped: `I had asked whether to put ${quote(name ?? t.text)} on the calendar ${dayName(new Date(start))}, ${span({ start, minutes: mins })}, although it overlapped something. That time has passed, so it isn't on the calendar.` };
+      if (!link || !(await up())) return { later: true };
+      return { ask: async () => {
+        if (!(await sync('tool')).ok) throw new Error('Super Productivity stopped answering.');
+        try { await place(todo, t.text, start, mins, undefined, q); } catch (e) { if (e.declined) return {}; throw e; }
+        log('calendar_block', { what: 'placed' });
+        sync('change').catch(() => {});
+        return { say: `${quote(t.text)} is on the calendar ${dayName(new Date(start))}, ${span({ start, minutes: mins })}.` };
+      } };
     },
     async plan(q) {
       const { date, shown, placed = [], left = [] } = q.data ?? {};
       const day = dayOf(date);
-      const gone = (why) => ({ dropped: `The day plan${day ? ` for ${dayName(day)}` : ''} was waiting for your answer. ${why}, so I dropped it.` });
+      const gone = (why) => ({ dropped: `The day plan${day ? ` for ${dayName(day)}` : ''} was waiting for your answer. ${why}, so it isn't on the calendar.` });
       if (!day || !placed.length) return gone('I can no longer read it');
-      if (placed.some((p) => p.start < now())) return gone(new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime() <= now() ? 'That day has passed' : 'Its first times have passed');
+      const links = get().links, all = await todos.all();
+      const open = placed.filter((p) => all.some((x) => x.id === p.todo && x.status === 'open'));
+      // Every to-do in it is done or gone, or already has a block that day: there is nothing left to plan.
+      const until = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+      if (open.every((p) => { const at = links[p.todo]?.local.start; return at != null && at >= day.getTime() && at < until; })) return DONE;
+      if (placed.some((p) => p.start < now())) return gone(until <= now() ? 'That day has passed' : 'Its first times have passed');
       if (!(await up())) return { later: true };
       for (const p of placed) if (!(await stillOpen(p.todo))) return gone(`${quote(p.title)} is no longer open`);
-      if (!(await askPlan(day, shown, placed, left, undefined, q))) return { answered: true };
-      for (const p of placed) await setLocal(p.todo, { start: p.start, minutes: p.minutes });
-      log('calendar_plan', { blocks: placed.length, left: left.length });
-      sync('change').catch(() => {});
-      return { answered: true, say: `The plan for ${dayName(day)} is on the calendar.` };
+      return { ask: async () => {
+        if (!(await askPlan(day, shown, placed, left, undefined, q))) return {};
+        for (const p of placed) await setLocal(p.todo, { start: p.start, minutes: p.minutes });
+        log('calendar_plan', { blocks: placed.length, left: left.length });
+        sync('change').catch(() => {});
+        return { say: `The plan for ${dayName(day)} is on the calendar.` };
+      } };
     },
     async sort(q) {
-      if (!get().started) return { dropped: 'A sorting proposal was waiting for your answer. The to-do list is no longer in Super Productivity, so I dropped it.' };
+      if (!get().started) return DONE;
       const all = await sortable();
       const proposals = (q.data?.proposals ?? []).filter((p) => all.some((x) => x.id === p.todo && !x.sorted));
-      if (!proposals.length) return { dropped: 'A sorting proposal was waiting for your answer. Those to-dos are sorted or gone now, so I dropped it.' };
-      if (!(await askSort(proposals, all, undefined, q))) return { answered: true };
-      for (const p of proposals) await setFlags(p.todo, { urgent: p.urgent, important: p.important });
-      log('calendar_priority', { set: proposals.length });
-      sync('change').catch(() => {});
-      return { answered: true, say: `Sorted ${proposals.length} to-do${proposals.length === 1 ? '' : 's'}.` };
+      if (!proposals.length) return DONE; // sorted meanwhile, done, or gone
+      return { ask: async () => {
+        if (!(await askSort(proposals, all, undefined, q))) return {};
+        for (const p of proposals) await setFlags(p.todo, { urgent: p.urgent, important: p.important });
+        log('calendar_priority', { set: proposals.length });
+        sync('change').catch(() => {});
+        return { say: `Sorted ${proposals.length} to-do${proposals.length === 1 ? '' : 's'}.` };
+      } };
     },
   };
 

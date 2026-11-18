@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, createAnswers, heardLine, isClosing, unfilled } from '../answers.mjs';
-import { createFlow } from '../flow.mjs';
+import { createFlow, SAME, sameKey } from '../flow.mjs';
 import { HANDS_FREE_SEND, LIMITS, WINDOW, briefly, codeReference, createPi, isHandsFreeSend, loadSettings, readState, settingsDefaults } from '../pi.mjs';
 import { createSpeaker } from '../speaker.mjs';
 import { LocalVoice } from '../localvoice.mjs';
@@ -427,7 +427,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   // asked again in full: a new Send bubble with the whole prompt, said, with its window, and no countdown
   assert.notEqual(bubble(), first); assert.ok(bubble().opts.placeholder.includes(prompt.slice(0, 400))); assert.match(bubble().opts.placeholder, /^Send to pi\? {2}CAN EDIT/);
   assert.match(overlay.said.at(-1), /^For pi, with editing allowed\. Rewrite the README\. The rest is on screen\. Say send to send it\.$/);
-  assert.deepEqual(pendingNow(), [], 'while it is being asked it is not also pending');
+  assert.deepEqual(pendingNow().map((q) => q.id), [kept[0].id], 'it stays kept while it is asked, once');
   await played(); assert.equal(flow.window().kind, 'bubble');
   // never sent because it was pending: unanswered again, it is kept again, with its first age
   await advance(10_000); await until(() => !pi.bubble(), 'closed again'); await tick();
@@ -468,7 +468,7 @@ const pendingNow = () => readState(dir).pending ?? [];
 }
 { // the oldest first, one per exchange; one that no longer applies is dropped with one line; an old one is dropped
   const asked = [];
-  flow.resume('test', async (q) => { asked.push(q.data.n); if (q.data.stale) return { dropped: `Question ${q.data.n} no longer applies, so I dropped it.` }; const yes = await answers.ask({ placeholder: `Question ${q.data.n}?`, choices: ['Yes', 'No'], pending: q }); return { answered: true, say: yes ? `Did ${q.data.n}.` : '' }; });
+  flow.resume('test', async (q) => { asked.push(q.data.n); if (q.data.stale) return { dropped: `Question ${q.data.n} no longer applies, so I dropped it.` }; return { ask: async () => { const yes = await answers.ask({ placeholder: `Question ${q.data.n}?`, choices: ['Yes', 'No'], pending: q }); return { say: yes ? `Did ${q.data.n}.` : '' }; } }; });
   await exchange();
   for (const [n, stale] of [[1, false], [2, true], [3, false]]) {
     const p = settled(answers.ask({ placeholder: `Question ${n}?`, choices: ['Yes', 'No'], pending: { kind: 'test', brief: `Question ${n}?`, data: { n, stale } } }));
@@ -527,9 +527,104 @@ const pendingNow = () => readState(dir).pending ?? [];
   writeSettings({ project: '~/Documents/cells', projects: ['~/Documents/cells'] });
   overlay.shown.length = 0;
   await exchange(); await advance(20_000); await tick(); await tick();
-  assert.equal(answers.open(), false); assert.match(overlay.shown.at(-1), /^You hadn't answered whether pi should work in workspace\. That no longer applies, so I dropped the question\.$/);
+  assert.equal(answers.open(), false); assert.match(overlay.shown.at(-1), /^You hadn't answered whether pi should work in workspace\. That project can no longer be used, so pi stays where it is\.$/);
   assert.deepEqual(pendingNow(), []);
   writeSettings(); await played(); await reset();
+}
+
+// ================= fault 1 (found on 4916c04): a question is pending once; an answer clears every copy without a
+// word; one whose thing was done is dropped without a word; only what is lost is said
+{
+  // what makes two questions the same, for each kind
+  const K = (kind, data) => sameKey({ kind, data });
+  assert.equal(K('sort', { proposals: [{ todo: 'a' }] }), K('sort', { proposals: [{ todo: 'b' }, { todo: 'c' }] }), 'sort: there is one');
+  assert.equal(K('start', {}), K('start', { x: 1 }));
+  assert.equal(K('overlap', { todo: 'a', start: 1 }), K('overlap', { todo: 'a', start: 2 }), 'overlap: the same to-do'); assert.notEqual(K('overlap', { todo: 'a' }), K('overlap', { todo: 'b' }));
+  assert.equal(K('deleted', { todo: 'a', title: 'x' }), K('deleted', { todo: 'a', title: 'y' })); assert.notEqual(K('deleted', { todo: 'a' }), K('deleted', { todo: 'b' }));
+  assert.equal(K('plan', { date: '2026-11-20', placed: [1] }), K('plan', { date: '2026-11-20', placed: [2] })); assert.notEqual(K('plan', { date: '2026-11-20' }), K('plan', { date: '2026-11-21' }));
+  assert.equal(K('project', { name: 'Cells' }), K('project', { name: 'cells' })); assert.notEqual(K('project', { name: 'cells' }), K('project', { name: 'notes' }));
+  assert.equal(K('handoff', { project: '/p', mode: 'edit', prompt: 'Do it. ', followUp: true }), K('handoff', { project: '/p', mode: 'edit', prompt: 'Do it.' }));
+  for (const other of [{ project: '/q', mode: 'edit', prompt: 'Do it.' }, { project: '/p', mode: 'read', prompt: 'Do it.' }, { project: '/p', mode: 'edit', prompt: 'Do that.' }]) assert.notEqual(K('handoff', other), K('handoff', { project: '/p', mode: 'edit', prompt: 'Do it.' }));
+  assert.notEqual(K('sort', {}), K('start', {})); assert.notEqual(K('other', { n: 1 }), K('other', { n: 2 })); assert.equal(K('other', { n: 1 }), K('other', { n: 1 }));
+  assert.deepEqual(Object.keys(SAME).sort(), [...codeReference().pendingQuestions.kinds].sort(), 'every kind of question says what makes it the same');
+  assert.deepEqual(Object.keys(codeReference().pendingQuestions.sameQuestion).sort(), Object.keys(SAME).sort(), 'and settings.default.json says it in words');
+
+  // what happened on 18 November, replayed: "sort my tasks" unanswered four times, then asked again and answered yes
+  const sorted = { yes: false }, asked = [];
+  const proposal = { proposals: [{ todo: 'c1', urgent: true, important: true }] };
+  const askSort = (kept = null) => answers.ask({ placeholder: 'Sort these to-dos like this?', choices: ['Sort them', 'Don\'t'], pending: { ...(kept ? { id: kept.id, at: kept.at } : {}), kind: 'sort', brief: 'Sort 1 to-do into the matrix as proposed?', data: proposal } });
+  flow.resume('sort', async (q) => { asked.push(q.id); if (sorted.yes) return { done: true }; return { ask: async () => { if (await askSort(q)) sorted.yes = true; return { say: sorted.yes ? 'Sorted 1 to-do.' : '' }; } }; });
+  hooks.length = 0; logs.length = 0;
+  for (let i = 0; i < 4; i++) {
+    await exchange('sort my tasks');
+    const p = settled(askSort());
+    await tick(); await played(); await advance(10_000);
+    assert.ok((await p).error instanceof Unanswered);
+    assert.equal(pendingNow().length, 1, `asked ${i + 1} time${i ? 's' : ''}, pending once`);
+    assert.equal(pendingNow()[0].at, new Date(t).toISOString(), 'the newest takes the older one\'s place');
+    await played(); await advance(5_000);
+  }
+  assert.deepEqual(logs.filter(([k]) => k === 'pending_kept').map(([, d]) => d.replaced), [0, 1, 1, 1]);
+  assert.deepEqual(hooks.filter(([e]) => e === 'pending').length, 4);
+  // the next exchange ends: asked again, a spoken yes sorts them, and every copy is gone
+  await quiet(); overlay.shown.length = 0; overlay.said.length = 0;
+  await exchange('how are you'); await advance(20_000);
+  await until(() => answers.open(), 'asked again'); await played();
+  assert.equal(await inWindow('yes'), 'heard'); await tick(); await played();
+  assert.equal(sorted.yes, true); assert.deepEqual(pendingNow(), []); assert.deepEqual(overlay.shown, ['Sorted 1 to-do.']);
+  // ...and at the end of the exchange after that, nothing is said about a dropped question (it was, on 18 November)
+  overlay.shown.length = 0; overlay.said.length = 0; logs.length = 0;
+  await exchange('book a slot on friday'); await advance(20_000); await tick(); await played();
+  assert.deepEqual(overlay.shown, []); assert.deepEqual(overlay.said, ['reply']); assert.ok(!logs.some(([k]) => k === 'pending_dropped' || k === 'pending_raised'));
+  await reset();
+
+  // a state.json left by 4916c04 with the same question twice: one stays (the newest), and since the to-dos are
+  // sorted it goes without a word, and the next question behind it is asked in the same breath
+  const iso = (ms) => new Date(ms).toISOString();
+  flow.resume('test', async (q) => ({ ask: async () => { const yes = await answers.ask({ placeholder: `Question ${q.data.n}?`, choices: ['Yes', 'No'], pending: q }); return { say: yes ? `Did ${q.data.n}.` : '' }; } }));
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ ...readState(dir), pending: [
+    { id: 'qold1', at: iso(t - 3000), kind: 'sort', brief: 'Sort 5 to-dos into the matrix as proposed?', data: proposal },
+    { id: 'qold2', at: iso(t - 2000), kind: 'sort', brief: 'Sort 5 to-dos into the matrix as proposed?', data: proposal },
+    { id: 'qnext', at: iso(t - 1000), kind: 'test', brief: 'Question 7?', data: { n: 7 } },
+  ] }));
+  assert.deepEqual(flow.pending().map((q) => q.id), ['qold2', 'qnext']); assert.deepEqual(pendingNow().map((q) => q.id), ['qold2', 'qnext']);
+  asked.length = 0; overlay.shown.length = 0; overlay.said.length = 0; logs.length = 0;
+  await exchange(); await advance(20_000);
+  await until(() => answers.open(), 'the next question'); 
+  assert.deepEqual(asked, ['qold2']); assert.deepEqual(overlay.shown, [], 'not a word about the sorted one'); assert.equal(overlay.said.at(-1), 'Question 7?');
+  assert.deepEqual(logs.filter(([k]) => k === 'pending_dropped').map(([, d]) => [d.kind, d.why]), [['sort', 'done']]);
+  assert.deepEqual(pendingNow().map((q) => q.id), ['qnext']);
+  // answered by a click this time: cleared, and said only what was done
+  await played(); click(true); await tick(); await played();
+  assert.deepEqual(pendingNow(), []); assert.deepEqual(overlay.shown, ['Did 7.']);
+  await reset();
+
+  // a later request that asks the same thing, answered there: the pending copy is cleared without a word, by a yes
+  // and by a no alike, by voice and by click; a bubble taken down with its request (not an answer) leaves it
+  sorted.yes = false;
+  for (const [how, cleared] of [['voice-yes', true], ['voice-no', true], ['click-no', true], ['stopped', false]]) {
+    await exchange('sort my tasks');
+    let p = settled(askSort()); await tick(); await played(); await advance(10_000); await p;
+    assert.equal(pendingNow().length, 1, how);
+    overlay.shown.length = 0; logs.length = 0;
+    const stop = new AbortController();
+    p = settled(answers.ask({ placeholder: 'Sort these to-dos like this?', choices: ['Sort them', 'Don\'t'], pending: { kind: 'sort', brief: 'x', data: { proposals: [{ todo: 'c9', urgent: false, important: false }] } } }, stop.signal));
+    await tick(); await played();
+    if (how === 'voice-yes') await byKey('um, yes please'); else if (how === 'voice-no') await inWindow('no'); else if (how === 'click-no') click(false); else stop.abort();
+    await p; await tick();
+    assert.equal(pendingNow().length, cleared ? 0 : 1, how); assert.deepEqual(overlay.shown, [], `${how}: without a word`);
+    assert.equal(logs.some(([k, d]) => k === 'pending_cleared' && d.kind === 'sort' && d.copies === 1), cleared, how);
+    await reset();
+  }
+
+  // show_pending and the morning briefing's note don't list one whose thing was done
+  sorted.yes = false;
+  await exchange('sort my tasks');
+  const p = settled(askSort()); await tick(); await played(); await advance(10_000); await p;
+  assert.match(await flow.tools[0].execute({}), /^1 question is waiting/);
+  sorted.yes = true;
+  assert.equal(await flow.tools[0].execute({}), 'No question is waiting for an answer.'); assert.deepEqual(pendingNow(), []);
+  await reset();
 }
 
 // ================= Q2: the model's own question (Auto Listen), bounded by the same window

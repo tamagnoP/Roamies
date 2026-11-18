@@ -524,7 +524,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     // Said briefly: what it is and the prompt's first sentence. The whole prompt is in the bubble.
     const brief = briefly(prompt, limits.spokenQuestionChars);
     const line = auto ? `Asking pi: ${brief}` : `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}${followUp ? ', continuing the last task' : ''}. ${brief} Say send to send it.`;
-    let noAnswer = () => {};
+    let noAnswer = () => {}, answered = false;
     const unanswered = new Promise((_, reject) => { noAnswer = () => reject(new Unanswered('nothing went to pi')); });
     unanswered.catch(() => {});
     const keep = { ...(kept ? { id: kept.id, at: kept.at } : {}), kind: 'handoff', brief: `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}: ${briefly(prompt, limits.heardLineChars)}`, data: { prompt, mode, followUp: !!followUp, project } };
@@ -565,10 +565,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const timed = auto ? new Promise((resolve) => { timer = setTimeout(() => { if (approval?.talked) return; by = 'auto'; resolve(true); }, auto * 1000); }) : new Promise(() => {});
     try {
       const ok = await Promise.race([clicked, voiced, timed, unanswered]);
+      answered = !signal?.aborted; // a bubble taken down with its request is not an answer
       return { ok, by };
     } finally {
       clearTimeout(timer);
-      window?.close();
+      window?.close(answered); // answered: every pending copy of this hand-off is cleared (flow.mjs)
       approval = null;
       closing.abort(); // closes the bubble if it was answered by voice or went by itself
       fs.rmSync(pendingFile, { force: true });
@@ -715,17 +716,21 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box });
         return { ok: true, mode: m, project: settings.project };
   }
-  /** A pending hand-off, asked again in full: a new Send bubble with the whole prompt, and no countdown. */
+  /** A pending hand-off (flow.mjs). Looked at first, without asking: it is lost when its prompt can't be read or pi
+   *  now works in another folder (said in one line). Otherwise ask() asks it again in full: a new Send bubble with
+   *  the whole prompt, and no countdown. */
   async function reask(q) {
     if (job) return { later: true };
     const d = q?.data ?? {};
     let settings;
     try { settings = loadSettings(home); } catch { return { later: true }; }
-    if (typeof d.prompt !== 'string' || !d.prompt.trim()) return { dropped: 'A task for pi was waiting for your answer, but I can no longer read it, so I dropped it.' };
-    if (settings.project !== d.project || projectProblem(settings.project, home)) return { dropped: 'A task for pi was waiting for your answer, but pi now works in another folder, so I dropped it.' };
-    const r = await handoff({ text: d.prompt.trim(), mode: d.mode, followUp: d.followUp }, undefined, { kept: q });
-    if (r.ok) tell('Sent to pi.', 'Sent to pi.');
-    return { answered: true };
+    if (typeof d.prompt !== 'string' || !d.prompt.trim()) return { dropped: 'A task for pi was waiting for your answer, but I can no longer read it, so it was not sent.' };
+    if (settings.project !== d.project || projectProblem(settings.project, home)) return { dropped: 'A task for pi was waiting for your answer, but pi now works in another folder, so it was not sent.' };
+    return { ask: async () => {
+      const r = await handoff({ text: d.prompt.trim(), mode: d.mode, followUp: d.followUp }, undefined, { kept: q });
+      if (r.ok) tell('Sent to pi.', 'Sent to pi.');
+      return {};
+    } };
   }
   /** The folder pi works in, changed after a yes. → what to say. A no throws (declined: true). */
   async function switchTo(name, signal, kept = null) {
@@ -749,20 +754,23 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         onChange();
         return { text: `pi now works in ${hit.name} (${tilde(hit.dir, home)}).` };
   }
-  /** A pending folder question, asked again. It no longer applies when the project is gone from the list or is
-   *  already the one pi works in. */
+  /** A pending folder question (flow.mjs). pi already works there: done, cleared without a word. The project is
+   *  gone from the list: said in one line. Otherwise ask() asks it again. */
   async function reswitch(q) {
     if (job) return { later: true };
-    const gone = { dropped: `You hadn't answered whether pi should work in ${q?.data?.name ?? 'another folder'}. That no longer applies, so I dropped the question.` };
-    try {
-      const r = await switchTo(q?.data?.name, undefined, q);
-      if (r.same) return gone;
-      tell(r.text, r.text);
-      return { answered: true };
-    } catch (e) {
-      if (e instanceof Unanswered) throw e;
-      return e.declined ? { answered: true } : gone;
-    }
+    let settings;
+    try { settings = loadSettings(home); } catch { return { later: true }; }
+    const want = String(q?.data?.name ?? '').trim().toLowerCase();
+    const hit = settings.projects.find((p) => p.name.toLowerCase() === want);
+    if (hit && hit.dir === settings.project) return { done: true };
+    if (!hit || projectProblem(hit.dir, home)) return { dropped: `You hadn't answered whether pi should work in ${q?.data?.name ?? 'another folder'}. That project can no longer be used, so pi stays where it is.` };
+    return { ask: async () => {
+      try {
+        const r = await switchTo(hit.name, undefined, q);
+        if (!r.same) tell(r.text, r.text);
+      } catch (e) { if (!e.declined) throw e; }
+      return {};
+    } };
   }
 
   const tools = [
@@ -903,7 +911,7 @@ export function codeReference() {
     fillerRule: 'after a key press, these words before or after an answer are ignored; never hands-free for a hand-off that can edit',
     closingPhrases: [...CLOSING_PHRASES],
     answerWindow: { judgedAfterTheEndSeconds: WINDOW.graceSeconds, reopenedWhenAtLeastSecondsLeft: WINDOW.reopenMinSeconds, endOfSpeech: 'reported by the overlay when the last sample has played', microphoneClosedBy: ['the voice helper, at the window\'s end', 'the sidecar\'s own timer', 'a phrase from a window that is over is discarded'] },
-    pendingQuestions: { keptIn: PATHS.state, kinds: ['handoff', 'project', 'start', 'overlap', 'plan', 'sort', 'deleted'] },
+    pendingQuestions: { keptIn: PATHS.state, kinds: ['handoff', 'project', 'start', 'overlap', 'plan', 'sort', 'deleted'], onceEach: 'The same question is pending once: asked again, the new one takes the old one\'s place. An answer clears every copy.', sameQuestion: { handoff: 'the same prompt, for the same folder, in the same mode', project: 'the same project', start: 'there is only one', overlap: 'the same to-do', plan: 'the same day', sort: 'there is only one', deleted: 'the same to-do' } },
     dontSendWords: [...DONT_WORDS],
     spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },

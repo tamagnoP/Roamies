@@ -2014,7 +2014,7 @@ setInterval(() => {
     if (!b) return;
     pi.briefing.done(b.kind);
     logLine('briefing', { kind: b.kind });
-    cal.sync('briefing').catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`)); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
+    cal.sync('briefing').catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`)); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the

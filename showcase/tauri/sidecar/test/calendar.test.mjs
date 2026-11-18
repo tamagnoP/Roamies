@@ -769,44 +769,57 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   // ---- which way each answer came is on record, without what was asked
   assert.ok(heardLog.some(([k, d]) => k === 'bubble_answer' && d.by === 'voice' && d.yes) && heardLog.some(([, d]) => d.by === 'click' && !d.yes)); assert.ok(!JSON.stringify(heardLog).includes('Voice:'));
 
-  // ---- feature 22: a question nobody answered, asked again (resume). Each checks first that it still applies.
+  // ---- feature 22: a question nobody answered (resume). Each is looked at first, without asking: done meanwhile
+  // (cleared without a word), lost (one line), or still to be asked (ask).
   {
     const answerNext = async (words) => { await shown(); voiced.heard(words); };
+    const askAgain = async (look) => { const r = await look; assert.equal(typeof r.ask, 'function', JSON.stringify(r)); return r.ask(); };
+    const DONE = { done: true };
     // a sorting proposal: asked again whole; a yes applies it
     const sa = addV('Voice: later a'), sb = addV('Voice: later b'); await calV.sync('timer');
     const q = (kind, data) => ({ id: 'q1', at: new Date(clock).toISOString(), kind, brief: '', data });
-    let r = calV.resume.sort(q('sort', { proposals: [{ todo: sa.id, urgent: true, important: true }, { todo: sb.id, urgent: false, important: true }, { todo: 'v-gone', urgent: true, important: true }] }));
+    const openBefore = overlay.seq;
+    let r = askAgain(calV.resume.sort(q('sort', { proposals: [{ todo: sa.id, urgent: true, important: true }, { todo: sb.id, urgent: false, important: true }, { todo: 'v-gone', urgent: true, important: true }] })));
     assert.match((await shown()).placeholder, /^Sort these to-dos like this\?\nUrgent and important: Voice: later a\nImportant, not urgent: Voice: later b\n/, 'without the to-do that is gone');
     await answerNext('yes');
-    assert.deepEqual(await r, { answered: true, say: 'Sorted 2 to-dos.' }); assert.deepEqual([linkV(sa).local.urgent, linkV(sb).local.important], [true, true]);
-    // ...and once they are sorted it no longer applies: one line, no bubble
-    assert.match((await calV.resume.sort(q('sort', { proposals: [{ todo: sa.id, urgent: false, important: false }] }))).dropped, /^A sorting proposal was waiting for your answer\. Those to-dos are sorted or gone now, so I dropped it\.$/);
-    assert.equal(overlay.open.size, 0);
-    // a day plan: the day has passed → dropped; still ahead → asked again, and a no changes nothing
+    assert.deepEqual(await r, { say: 'Sorted 2 to-dos.' }); assert.deepEqual([linkV(sa).local.urgent, linkV(sb).local.important], [true, true]);
+    // ...and once they are sorted the thing is done: no line, no bubble (fault 1: it was announced as dropped)
+    let seen = overlay.seq;
+    assert.deepEqual(await calV.resume.sort(q('sort', { proposals: [{ todo: sa.id, urgent: false, important: false }, { todo: sb.id, urgent: false, important: true }] })), DONE);
+    assert.equal(overlay.seq, seen); assert.equal(overlay.open.size, 0);
+    // a day plan: the day has passed → lost, one line; still ahead → asked again, and a no changes nothing
     const plan = (date, start) => q('plan', { date, shown: 'Plan for then:\n09:00 to 10:00  Voice: later a', placed: [{ todo: sa.id, title: sa.text, start, minutes: 60 }], left: [] });
-    assert.match((await calV.resume.plan(plan('2026-11-13', at(13, 9)))).dropped, /^The day plan for Friday 13 November was waiting for your answer\. That day has passed, so I dropped it\.$/);
+    assert.match((await calV.resume.plan(plan('2026-11-13', at(13, 9)))).dropped, /^The day plan for Friday 13 November was waiting for your answer\. That day has passed, so it isn't on the calendar\.$/);
     assert.match((await calV.resume.plan(plan('2026-11-14', at(14, 7)))).dropped, /Its first times have passed/);
     await calV.sync('timer'); // what the yes above changed has gone over to the app
     const before = app.log.length;
-    r = calV.resume.plan(plan('2026-11-23', at(23, 9)));
+    r = askAgain(calV.resume.plan(plan('2026-11-23', at(23, 9))));
     assert.match((await shown()).placeholder, /^Plan for then:/); await answerNext('no');
-    assert.deepEqual(await r, { answered: true }); assert.deepEqual(writes(before), []); assert.equal(linkV(sa).local.start, null);
-    r = calV.resume.plan(plan('2026-11-23', at(23, 9))); await answerNext('yes');
-    assert.deepEqual(await r, { answered: true, say: 'The plan for Monday 23 November is on the calendar.' }); assert.equal(linkV(sa).local.start, at(23, 9));
-    // a to-do in the plan that is done meanwhile: dropped
+    assert.deepEqual(await r, {}); assert.deepEqual(writes(before), []); assert.equal(linkV(sa).local.start, null);
+    r = askAgain(calV.resume.plan(plan('2026-11-23', at(23, 9)))); await answerNext('yes');
+    assert.deepEqual(await r, { say: 'The plan for Monday 23 November is on the calendar.' }); assert.equal(linkV(sa).local.start, at(23, 9));
+    // its to-dos are on the calendar that day now: the thing is done
+    assert.deepEqual(await calV.resume.plan(plan('2026-11-23', at(23, 14))), DONE);
+    // a to-do in a plan that is done meanwhile: the plan as it was is lost, and said; if all of them are, it is done
     sb.status = 'done';
-    assert.match((await calV.resume.plan(q('plan', { date: '2026-11-24', shown: 'x', placed: [{ todo: sb.id, title: sb.text, start: at(24, 9), minutes: 30 }], left: [] }))).dropped, /"Voice: later b" is no longer open, so I dropped it\.$/);
-    // an overlap: the to-do is gone or the time has passed → dropped; otherwise asked again even with nothing in the way
-    assert.match((await calV.resume.overlap(q('overlap', { todo: sb.id, title: sb.text, start: at(25, 9), minutes: 30 }))).dropped, /That to-do is no longer open, so I dropped the question\.$/);
-    assert.match((await calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(13, 9), minutes: 30 }))).dropped, /That time has passed, so I dropped the question\.$/);
-    r = calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(25, 9), minutes: 30 }));
+    const two = [{ todo: sb.id, title: sb.text, start: at(24, 9), minutes: 30 }, { todo: sa.id, title: sa.text, start: at(24, 10), minutes: 30 }];
+    assert.match((await calV.resume.plan(q('plan', { date: '2026-11-24', shown: 'x', placed: two, left: [] }))).dropped, /"Voice: later b" is no longer open, so it isn't on the calendar\.$/);
+    assert.deepEqual(await calV.resume.plan(q('plan', { date: '2026-11-24', shown: 'x', placed: two.slice(0, 1), left: [] })), DONE);
+    // an overlap: the to-do is done → done; the time has passed → lost, said; otherwise asked again even with nothing in the way
+    assert.deepEqual(await calV.resume.overlap(q('overlap', { todo: sb.id, title: sb.text, start: at(25, 9), minutes: 30, was: null })), DONE);
+    assert.match((await calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(13, 9), minutes: 30, was: at(23, 9) }))).dropped, /^I had asked whether to put "Voice: later a" on the calendar Friday 13 November, 09:00 to 09:30, although it overlapped something\. That time has passed, so it isn't on the calendar\.$/);
+    r = askAgain(calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(25, 9), minutes: 30, was: at(23, 9) })));
     assert.match((await shown()).placeholder, /^"Voice: later a", 09:00 to 09:30 on Wednesday 25 November: nothing is in the way any more\. Put it there\?\n/, 'never placed without a yes');
-    await answerNext('no'); assert.deepEqual(await r, { answered: true }); assert.equal(linkV(sa).local.start, at(23, 9));
-    r = calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(25, 9), minutes: 30 })); await answerNext('yes');
+    await answerNext('no'); assert.deepEqual(await r, {}); assert.equal(linkV(sa).local.start, at(23, 9));
+    r = askAgain(calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(25, 9), minutes: 30, was: at(23, 9) }))); await answerNext('yes');
     assert.match((await r).say, /^"Voice: later a" is on the calendar Wednesday 25 November, 09:00 to 09:30\.$/); assert.equal(linkV(sa).local.start, at(25, 9));
-    // a deleted task and the first mirror, when they are settled already: dropped
-    assert.match((await calV.resume.deleted(q('deleted', { todo: sa.id, title: sa.text }))).dropped, /whose task was deleted in Super Productivity\. That is settled now, so I dropped the question\.$/);
-    assert.match((await calV.resume.start(q('start', {}))).dropped, /It is there now, so I dropped the question\.$/);
+    // ...and a block placed since the question was asked (by a later request) settles it: done
+    assert.deepEqual(await calV.resume.overlap(q('overlap', { todo: sa.id, title: sa.text, start: at(26, 9), minutes: 30, was: at(23, 9) })), DONE);
+    // a deleted task and the first mirror, when they are settled already: done
+    seen = overlay.seq;
+    assert.deepEqual(await calV.resume.deleted(q('deleted', { todo: sa.id, title: sa.text })), DONE);
+    assert.deepEqual(await calV.resume.start(q('start', {})), DONE);
+    assert.equal(overlay.seq, seen, 'none of the done ones opened a bubble'); assert.ok(overlay.seq > openBefore);
     await calV.setLocal(sa.id, { start: null }); await calV.sync('timer');
 
     // ...and the first time round: when the answer window runs out, the tool is told so, nothing is written, and what
@@ -825,7 +838,7 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
     assert.match(keptQ.at(-1).brief, /^Put the plan for Sunday 29 November on the calendar \(1 block\)\?$/);
     const wall2 = hand('Voice: wall two', { dueWithTime: at(28, 10), timeEstimate: 60 * 60_000 });
     out = await settled(T('schedule_block').execute({ todo: sc.id, date: '2026-11-28', start: '10:30', minutes: 30 }));
-    assert.match(out.error, /^They gave no answer/); assert.deepEqual([keptQ.at(-1).kind, keptQ.at(-1).data], ['overlap', { todo: sc.id, title: 'Voice: later c', start: at(28, 10, 30), minutes: 30 }]);
+    assert.match(out.error, /^They gave no answer/); assert.deepEqual([keptQ.at(-1).kind, keptQ.at(-1).data], ['overlap', { todo: sc.id, title: 'Voice: later c', start: at(28, 10, 30), minutes: 30, was: null }]);
     out = await settled(calT.askDeleted({ todo: sc.id, title: sc.text }));
     assert.match(out.error, /^They gave no answer/); assert.deepEqual([keptQ.at(-1).kind, keptQ.at(-1).data], ['deleted', { todo: sc.id, title: 'Voice: later c' }]);
     assert.deepEqual(writes(w0), [], 'nothing was written for any of them'); assert.deepEqual([linkV(sc).local.urgent, linkV(sc).local.start], [false, null]);

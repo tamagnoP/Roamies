@@ -10,8 +10,14 @@
 //     so it never reaches the model, the session or the activity record. The window stays open until it runs out.
 //   - Pending questions. A question whose window ran out with no answer is closed and kept in state.json under
 //     "pending" (never in the notes vault). Nothing is sent or changed. When the next exchange ends (not the one it
-//     went unanswered in), the oldest one is asked again, one at a time, spoken and with its window. One that no longer applies is dropped with one
-//     line; one that is too old is dropped. A hand-off is asked again in full and never sent because it was pending.
+//     went unanswered in), the oldest one is asked again, one at a time, spoken and with its window. A hand-off is
+//     asked again in full and never sent because it was pending.
+//     The same question is pending once (SAME, below, says what "the same" is for each kind): asked again while it
+//     is pending, the new one takes the old one's place. When a question is answered, however that happens (a
+//     spoken answer, a click, the same question asked again by a later request), every pending copy of it is cleared
+//     without a word. One that no longer applies because the thing was done is dropped without a word too; one that
+//     no longer applies and loses something the owner still wanted (its time has passed) is dropped with one line;
+//     one that is too old is dropped.
 //
 // The microphone is closed at the window's end three times over, each on its own:
 //   1. the voice helper has the window's length and stops listening at that time itself (voice/main.swift);
@@ -27,6 +33,19 @@ import os from 'node:os';
 import { z } from 'zod';
 import { heardShape, isClosing } from './answers.mjs';
 import { WINDOW, loadSettings, readState, writeState } from './pi.mjs';
+
+/** What makes two pending questions the same one, for each kind: the parts of its data that are compared. A kind
+ *  that isn't here is the same only when all of its data is. */
+export const SAME = {
+  handoff: (d) => [d.project, d.mode, String(d.prompt ?? '').trim()], // the same prompt, for the same folder, in the same mode
+  project: (d) => [String(d.name ?? '').toLowerCase()], // the same project
+  start: () => [], // there is one: putting the to-do list in Super Productivity
+  deleted: (d) => [d.todo], // the same to-do
+  overlap: (d) => [d.todo], // the same to-do: it has one block, so a newer time takes the older one's place
+  plan: (d) => [d.date], // the same day
+  sort: () => [], // there is one: the newest proposal takes the older one's place
+};
+export const sameKey = (q) => `${q?.kind}:${JSON.stringify((SAME[q?.kind] ?? ((d) => [d]))(q?.data ?? {}))}`;
 
 /**
  * speak(text | null): says a line when replies are spoken, and resolves when the overlay reports that everything
@@ -45,7 +64,12 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   let win = null, wins = 0; // the answer window that is open: { id, q, until, timer, processing, expired }
   let qseq = 0;
   const fresh = new Set(); // the questions that became pending in the exchange that is open: they wait for the next one
-  const resumers = new Map(); // kind → (question) → { answered, say } | { dropped: line } | { later: true }
+  // kind → (question) → what has become of it, found without asking anything:
+  //   { done: true }      the thing was done meanwhile: cleared without a word
+  //   { dropped: line }   it no longer applies and something they wanted is lost: cleared, and said in one line
+  //   { later: true }     it can't be asked now (the app isn't answering): it stays
+  //   { ask: async () => ({ say }) }   it still applies: ask() asks it again (throws Unanswered when nobody answers)
+  const resumers = new Map();
   const spokenNow = () => !!ex || raising;
   const hook = (event, q) => { try { onPending(event, q); } catch (e) { console.error('pending hook', e); } };
 
@@ -53,50 +77,87 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   const usable = (q) => !!q && typeof q === 'object' && typeof q.id === 'string' && typeof q.kind === 'string' && Number.isFinite(Date.parse(q.at));
   const stored = () => { const s = readState(settings().dir); return Array.isArray(s.pending) ? s.pending.filter(usable) : []; };
   const store = (all) => { const dir = settings().dir; writeState(dir, { ...readState(dir), pending: all }); };
-  /** The pending questions, oldest first. The ones older than "limits.pendingKeepHours" are dropped here. */
+  /** The pending questions, oldest first. The ones older than "limits.pendingKeepHours" are dropped here, and of
+   *  two that are the same question only the newest stays. */
   function pending() {
     let all, limits;
     try { all = stored().sort((a, b) => Date.parse(a.at) - Date.parse(b.at)); ({ limits } = settings()); } catch { return []; }
     const old = all.filter((q) => now() - Date.parse(q.at) > limits.pendingKeepHours * 3600_000);
-    if (!old.length) return all;
-    const rest = all.filter((q) => !old.includes(q));
+    const twice = all.filter((q, i) => !old.includes(q) && all.some((x, j) => j > i && !old.includes(x) && sameKey(x) === sameKey(q)));
+    if (!old.length && !twice.length) return all;
+    const rest = all.filter((q) => !old.includes(q) && !twice.includes(q));
     store(rest);
     for (const q of old) { log('pending_dropped', { kind: q.kind, why: 'old' }); hook('dropped', q); }
+    for (const q of twice) log('pending_dropped', { kind: q.kind, why: 'twice' });
     return rest;
   }
-  /** Keeps a question: { kind, brief, data }, or one that was pending already ({ id, at } too: it keeps its age). */
+  /** Keeps a question: { kind, brief, data }, or one that was pending already ({ id, at } too: it keeps its age).
+   *  It takes the place of any that is the same question: a question is pending once. */
   function keep(p) {
     const again = typeof p.id === 'string' && Number.isFinite(Date.parse(p.at));
     const q = { id: again ? p.id : `q${now().toString(36)}${(++qseq).toString(36)}`, at: again ? p.at : new Date(now()).toISOString(), kind: String(p.kind), brief: String(p.brief ?? ''), data: p.data ?? {} };
-    try { store([...stored().filter((x) => x.id !== q.id), q]); } catch (e) { console.error('pending', e); return null; }
-    log('pending_kept', { kind: q.kind, again });
+    let replaced = 0;
+    try { const was = stored(), rest = was.filter((x) => x.id !== q.id && sameKey(x) !== sameKey(q)); replaced = was.filter((x) => x.id !== q.id).length - rest.length; store([...rest, q]); } catch (e) { console.error('pending', e); return null; }
+    log('pending_kept', { kind: q.kind, again, replaced });
     if (ex) fresh.add(q.id);
     if (!again) hook('pending', q);
     return q;
   }
   const forget = (id) => { try { store(stored().filter((q) => q.id !== id)); } catch (e) { console.error('pending', e); } };
+  /** The question was answered: every pending copy of it goes, without a word. */
+  function clear(q) {
+    try {
+      const was = stored(), gone = was.filter((x) => sameKey(x) === sameKey(q));
+      if (!gone.length) return;
+      store(was.filter((x) => !gone.includes(x)));
+      log('pending_cleared', { kind: q.kind, copies: gone.length });
+      for (const x of gone) hook('answered', x);
+    } catch (e) { console.error('pending', e); }
+  }
+  const done = (q) => { forget(q.id); log('pending_dropped', { kind: q.kind, why: 'done' }); hook('answered', q); };
+  /** What has become of a pending question, without asking anything. null: nothing here knows how to ask it. */
+  const look = async (q) => { const run = resumers.get(q.kind); return run ? ((await run(q)) ?? { later: true }) : null; };
+
+  /** Clears, without a word, the pending questions whose thing was done meanwhile. */
+  async function tidy() {
+    for (const q of pending()) {
+      try { if ((await look(q))?.done) done(q); } catch (e) { console.error('pending question', e); }
+    }
+  }
 
   /** Asks the oldest pending question again, if nothing else is going on. One at a time. skip: the ones that became
-   *  pending in the exchange that has just ended: "the next exchange" is not the one they went unanswered in. */
+   *  pending in the exchange that has just ended: "the next exchange" is not the one they went unanswered in.
+   *  One whose thing was done meanwhile is cleared without a word, and the next one is looked at. */
   async function raise(skip = new Set()) {
     if (raising || win || !idle()) return false;
-    const q = pending().find((x) => !skip.has(x.id));
-    if (!q) return false;
-    const run = resumers.get(q.kind);
-    forget(q.id);
-    if (!run) { log('pending_dropped', { kind: q.kind, why: 'unknown' }); hook('dropped', q); return false; }
+    const passed = new Set(skip);
     raising = true;
-    log('pending_raised', { kind: q.kind });
     try {
-      const r = await run(q);
-      if (r?.later) keep(q);
-      else if (r?.dropped) { log('pending_dropped', { kind: q.kind, why: 'stale' }); hook('dropped', q); await announce(String(r.dropped)); }
-      else { log('pending_answered', { kind: q.kind }); hook('answered', q); if (r?.say) await announce(String(r.say)); }
-    } catch (e) {
-      // Unanswered: its window ran out again, and the question itself was kept again (with its first age).
-      if (e?.name !== 'Unanswered') { keep(q); log('pending_failed', { kind: q.kind }); console.error('pending question', e); }
+      for (;;) {
+        const q = pending().find((x) => !passed.has(x.id));
+        if (!q) return false;
+        passed.add(q.id);
+        let r;
+        try { r = await look(q); } catch (e) { log('pending_failed', { kind: q.kind }); console.error('pending question', e); continue; }
+        if (!r) { forget(q.id); log('pending_dropped', { kind: q.kind, why: 'unknown' }); hook('dropped', q); continue; }
+        if (r.done) { done(q); continue; }
+        if (r.later) continue;
+        if (win || !idle()) return false; // something started while it was looked at: it stays for the next time
+        if (r.dropped) { forget(q.id); log('pending_dropped', { kind: q.kind, why: 'stale' }); hook('dropped', q); await announce(String(r.dropped)); return true; }
+        log('pending_raised', { kind: q.kind });
+        try {
+          // It stays kept while it is asked: an answer clears it (clear, from its bubble closing), no answer keeps
+          // it with its first age, and anything going wrong leaves it where it was.
+          const a = await r.ask();
+          clear(q);
+          log('pending_answered', { kind: q.kind });
+          if (a?.say) await announce(String(a.say));
+        } catch (e) {
+          if (e?.name !== 'Unanswered') { log('pending_failed', { kind: q.kind }); console.error('pending question', e); }
+        }
+        return true;
+      }
     } finally { raising = false; }
-    return true;
   }
 
   /** After the closing line: the microphone and the request that carried the phrase may need a moment to settle. */
@@ -194,7 +255,8 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   /** A question is open (a bubble with buttons). In an exchange started by voice, or when a pending question is
    *  asked again, it is said and its answer window opens once it has finished playing. always: said whenever replies
    *  are spoken (pi's Send bubble always was). pending: what is kept if the window runs out; onTimeout() then closes
-   *  the bubble. → { close(), windowed } */
+   *  the bubble. → { close(answered), windowed }. close(): the question was answered (a yes or a no, said or
+   *  clicked), so every pending copy of it is cleared; close(false): it was taken down without an answer. */
   function question({ brief = '', pending: kept = null, onTimeout = () => {}, always = false } = {}) {
     const voiced = spokenNow();
     const q = { kind: 'bubble', open: true, pending: kept, onTimeout };
@@ -205,9 +267,10 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     }
     return {
       windowed: voiced,
-      close() {
+      close(answered = true) {
         if (!q.open) return;
         q.open = false;
+        if (answered && kept) clear(kept);
         if (win?.q === q) closeWindow('answered');
         settle();
       },
@@ -265,6 +328,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     description: 'The questions the app asked that got no answer and are waiting to be asked again (a hand-off to pi, a calendar question). Use it when they ask what is pending or still open between you. Read them out briefly. The app asks them again by itself when the conversation pauses: don\'t ask them yourself and don\'t act on them.',
     parameters: z.object({}),
     execute: async () => {
+      await tidy();
       const all = pending();
       if (!all.length) return 'No question is waiting for an answer.';
       const hm = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -281,7 +345,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     open: () => !!ex,
     window: () => (win ? { id: win.id, kind: win.q.kind, expired: win.expired } : null),
     resume(kind, run) { resumers.set(kind, run); },
-    pending,
+    pending, tidy, clear,
     /** For the morning briefing: the questions still waiting, as a note for the model. '' when there are none. */
     note() {
       const all = pending();

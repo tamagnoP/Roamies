@@ -101,7 +101,7 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
           waiting.splice(i, 1);
           log('bubble_answer', { by, yes: answer === FIRST });
           resolve(answer);
-          entry.window?.close();
+          entry.window?.close(!signal?.aborted); // an answer clears every pending copy of the question (flow.mjs); a bubble taken down with its request is not one
           closing.abort(); // answered by voice: the bubble is taken down
         },
         // The answer window ran out: the bubble closes, nothing is changed, and the caller is told so.

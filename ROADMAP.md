@@ -289,6 +289,13 @@ the screen blocks clicks.
   its end, with the microphone already closed. Two tests that pin source lines were changed with the behaviour:
   `calendar.test.mjs` (`speech.hush()` where it pinned `speech.stop()`) and `reference.test.mjs` (21 limits, and
   `flow.mjs` among the files whose limits are counted).
+- **2026-11-18.** Feature 22, first fault found on the installed `4916c04`: "sort my tasks" went unanswered four
+  times and was kept four times; after the yes to the first copy, the second was raised, found sorted, and announced
+  as dropped (log, 22:10 to 22:16). Decided by the owner: a question is pending once, and a new one replaces the same
+  one; an answer clears every copy without a word; a question whose thing was done goes without a word; only a loss
+  is said. Decided while fixing: what makes two questions the same (`SAME` in `flow.mjs`); a question stays kept
+  while it is asked again; a question that can't be asked now no longer holds up the ones behind it; a bubble taken
+  down with its request is not an answer and clears nothing.
 
 ## 6. Still to test
 
