@@ -61,7 +61,7 @@ const click = (first) => bubble().resolve(first ? 'yes' : null);
 const speak = (text) => new Promise((resolve) => { if (text) overlay.said.push(text); overlay.speaking.push(resolve); });
 const played = async () => { for (const done of overlay.speaking.splice(0)) done(); await tick(); };
 const mic = { listens: [], cancels: [], windows: [] };
-const logs = [], hooks = [], told = [], enqueued = [];
+const logs = [], hooks = [], told = [], enqueued = [], keptBlocks = [];
 let busy = false;
 const flow = createFlow({
   home, speak, timers, now: () => t,
@@ -71,6 +71,7 @@ const flow = createFlow({
   idle: () => !busy && !pi.bubble() && !answers.open(),
   onWindow: (open, by) => mic.windows.push([open, by]),
   onPending: (event, q) => hooks.push([event, q.kind]),
+  actions: () => keptBlocks,
   log: (k, d) => logs.push([k, d]),
 });
 const answers = createAnswers({ ask, log: (k, d) => logs.push([k, d]), question: (q) => flow.question(q), retext: (text) => overlay.retexts.push(text) });
@@ -624,6 +625,26 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.match(await flow.tools[0].execute({}), /^1 question is waiting/);
   sorted.yes = true;
   assert.equal(await flow.tools[0].execute({}), 'No question is waiting for an answer.'); assert.deepEqual(pendingNow(), []);
+  await reset();
+}
+
+// ================= fault 2: what is kept until Super Productivity is open (calendar.mjs) is listed with the pending
+// questions, as not done yet, and is never asked or run from here
+{
+  const show = () => flow.tools[0].execute({});
+  keptBlocks.push({ at: new Date(2026, 10, 18, 22, 16).toISOString(), brief: 'Put "Flow test" on the calendar Thursday 19 November, 10:00 to 10:30' });
+  assert.equal(await show(), '1 request is kept until Super Productivity is open. Not done yet: the app does it by itself then.\n- Put "Flow test" on the calendar Thursday 19 November, 10:00 to 10:30 (asked 22:16)');
+  assert.match(flow.note(), /^\nKept until Super Productivity is open, and not on the calendar yet \(the app places them itself then; mention them in one sentence, and don't say they are booked\):\n- Put "Flow test" on the calendar Thursday 19 November, 10:00 to 10:30$/);
+  await exchange();
+  const p = settled(answers.ask({ placeholder: 'Question 8?', choices: ['Yes', 'No'], pending: { kind: 'other', brief: 'Question 8?', data: { n: 8 } } }));
+  await tick(); await played(); await advance(10_000); await p;
+  assert.match(await show(), /^1 question is waiting for an answer, oldest first:\n- Question 8\? \(asked \d\d:\d\d\)\n1 request is kept until Super Productivity is open\./);
+  assert.match(flow.note(), /still waiting for their answer.*\n- Question 8\?\nKept until Super Productivity is open/s);
+  // the exchanges end: nothing is raised for a kept block, and the list is untouched
+  overlay.shown.length = 0; await quiet(); await exchange(); await advance(20_000); await tick(); await played();
+  assert.equal(keptBlocks.length, 1); assert.equal(answers.open(), false);
+  keptBlocks.length = 0;
+  assert.equal(await show(), 'No question is waiting for an answer.');
   await reset();
 }
 

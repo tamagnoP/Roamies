@@ -56,8 +56,10 @@ export const sameKey = (q) => `${q?.kind}:${JSON.stringify((SAME[q?.kind] ?? ((d
  * idle(): nothing is going on (no request running or waiting, nobody talking, no question open).
  * onWindow(open, by): the answer window opened or closed (speech is held back meanwhile).
  * onPending(event, question): 'pending' | 'answered' | 'dropped'. The daily note's hook (feature 18); unused for now.
+ * actions(): what is kept until Super Productivity is open (calendar.mjs), [{ at, brief }]. show_pending and the
+ *   morning briefing's note list them. They are not questions: nothing here asks or runs them.
  */
-export function createFlow({ home = os.homedir(), settings = () => loadSettings(home), speak = async () => {}, announce = async () => {}, listen = () => {}, cancel = () => {}, bubbles = () => [], idle = () => true, onWindow = () => {}, onPending = () => {}, log = () => {}, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) } } = {}) {
+export function createFlow({ home = os.homedir(), settings = () => loadSettings(home), speak = async () => {}, announce = async () => {}, listen = () => {}, cancel = () => {}, bubbles = () => [], idle = () => true, onWindow = () => {}, onPending = () => {}, actions = () => [], log = () => {}, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) } } = {}) {
   let ex = null; // the exchange started by voice, while it is open: { gen, timer }
   let raising = false; // a pending question is being asked again
   let replyQ = null; // the model's own question, until its reply has finished playing
@@ -323,16 +325,19 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     return 'kept';
   }
 
+  const kept = () => { try { return (actions() ?? []).filter((a) => a && a.brief); } catch { return []; } };
   const tools = [{
     name: 'show_pending',
-    description: 'The questions the app asked that got no answer and are waiting to be asked again (a hand-off to pi, a calendar question). Use it when they ask what is pending or still open between you. Read them out briefly. The app asks them again by itself when the conversation pauses: don\'t ask them yourself and don\'t act on them.',
+    description: 'The questions the app asked that got no answer and are waiting to be asked again (a hand-off to pi, a calendar question), and the calendar blocks kept until Super Productivity is open. Use it when they ask what is pending or still open between you. Read them out briefly. The app asks the questions again by itself when the conversation pauses, and places the kept blocks itself: don\'t ask them yourself and don\'t act on them.',
     parameters: z.object({}),
     execute: async () => {
       await tidy();
-      const all = pending();
-      if (!all.length) return 'No question is waiting for an answer.';
+      const all = pending(), later = kept();
       const hm = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-      return `${all.length} question${all.length === 1 ? ' is' : 's are'} waiting for an answer, oldest first:\n${all.map((q) => `- ${q.brief || q.kind} (asked ${hm(q.at)})`).join('\n')}`;
+      const parts = [];
+      if (all.length) parts.push(`${all.length} question${all.length === 1 ? ' is' : 's are'} waiting for an answer, oldest first:\n${all.map((q) => `- ${q.brief || q.kind} (asked ${hm(q.at)})`).join('\n')}`);
+      if (later.length) parts.push(`${later.length} request${later.length === 1 ? ' is' : 's are'} kept until Super Productivity is open. Not done yet: the app does ${later.length === 1 ? 'it' : 'them'} by itself then.\n${later.map((a) => `- ${a.brief} (asked ${hm(a.at)})`).join('\n')}`);
+      return parts.join('\n') || 'No question is waiting for an answer.';
     },
   }];
 
@@ -348,8 +353,9 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     pending, tidy, clear,
     /** For the morning briefing: the questions still waiting, as a note for the model. '' when there are none. */
     note() {
-      const all = pending();
-      return all.length ? `\nQuestions the app asked that are still waiting for their answer (it asks them again by itself; mention in one sentence how many and what about, and don't ask them yourself):\n${all.map((q) => `- ${q.brief || q.kind}`).join('\n')}` : '';
+      const all = pending(), later = kept();
+      return (all.length ? `\nQuestions the app asked that are still waiting for their answer (it asks them again by itself; mention in one sentence how many and what about, and don't ask them yourself):\n${all.map((q) => `- ${q.brief || q.kind}`).join('\n')}` : '')
+        + (later.length ? `\nKept until Super Productivity is open, and not on the calendar yet (the app places them itself then; mention them in one sentence, and don't say they are booked):\n${later.map((a) => `- ${a.brief}`).join('\n')}` : '');
     },
   };
 }

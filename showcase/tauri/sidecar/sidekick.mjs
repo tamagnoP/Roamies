@@ -354,7 +354,7 @@ async function calShow() {
   try {
     if (!calQuiet()) return;
     if (cal.hasHeld()) {
-      const { lines, asks } = cal.takeHeld();
+      const { lines, asks, blocks } = cal.takeHeld();
       if (lines.length) { logLine('calendar_lines', { lines: lines.length }); say(lines.join('\n'), 'concerned'); if (flow.spoken()) await lineDone(forVoice(lines.join('\n'))); }
       for (const a of asks) {
         calAsking = true;
@@ -363,6 +363,12 @@ async function calShow() {
         try { yes = await cal.askDeleted(a).finally(() => { calAsking = false; }); } catch (e) { if (e?.name === 'Unanswered') continue; throw e; }
         if (yes) { await updateCommitment(a.todo, { status: 'dropped' }); menu(); scheduleReminders(); }
         await cal.answered(a.todo); cal.sync('change'); // kept: it gets a new task
+      }
+      // A block kept while Super Productivity was closed, which overlaps something now that it is open: the usual
+      // question. Unanswered, flow.mjs keeps it as a pending question.
+      for (const b of blocks) {
+        calAsking = true;
+        try { const line = await cal.placeKept(b).finally(() => { calAsking = false; }); if (line) aloud(line, 'happy'); } catch (e) { if (e?.name !== 'Unanswered') throw e; }
       }
       return;
     }
@@ -386,6 +392,7 @@ const flow = createFlow({
   bubbles: () => [pi, answers],
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),
   onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key'); },
+  actions: () => cal.kept(), // blocks kept until Super Productivity is open: listed by show_pending and the morning briefing
   log: (kind, data) => logLine(kind, data),
 });
 for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);

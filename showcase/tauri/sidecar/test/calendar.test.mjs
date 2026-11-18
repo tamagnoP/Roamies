@@ -257,11 +257,11 @@ assert.ok(app.log.slice(mark).some((q) => q.query === '?includeDone=true&source=
 assert.equal(arch.status, 'done'); assert.equal(state().retired[arch.id], archTask); assert.deepEqual(writes(mark), []);
 assert.equal(state().links[gone.id], undefined); assert.equal(gone.status, 'open', 'the to-do is left alone until the owner answers');
 assert.deepEqual(state().held, [{ ask: { todo: gone.id, title: 'Delete me' } }], 'a question, kept until it can be shown');
-assert.deepEqual(cal.takeHeld(), { lines: [], asks: [{ todo: gone.id, title: 'Delete me' }] }); assert.deepEqual(state().held, []);
+assert.deepEqual(cal.takeHeld(), { lines: [], asks: [{ todo: gone.id, title: 'Delete me' }], blocks: [] }); assert.deepEqual(state().held, []);
 mark = app.log.length; await cal.sync('timer'); await cal.sync('tool');
-assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [] }, 'asked once');
+assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [], blocks: [] }, 'asked once');
 // the owner keeps it: it is a to-do without a task, so it gets a new one
-await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [] });
+await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [], blocks: [] });
 
 // ---- 9. taken off Roamies' list: the time is cleared, the link dropped, the owner told; never a DELETE
 await cal.setLocal(gone.id, { start: at(19, 10), minutes: 30 }); await cal.sync('timer');
@@ -362,7 +362,8 @@ const tight = P([{ k: 'a', minutes: 300 }, { k: 'b', minutes: 300 }, { k: 'c', m
 assert.deepEqual([tight.placed.map((p) => p.k), tight.left.map((p) => p.k)], [['a', 'c'], ['b']], 'what doesn\'t fit is left out and named, the rest still placed');
 assert.equal(day0 + 9 * 60 * M, at(24, 9));
 
-// ---- before the first yes, and with the app away: block tools refuse, in plain words, and change nothing
+// ---- before the first yes: block tools refuse, in plain words, and change nothing. With the app away, reading a
+// day and planning one refuse (a single block is kept for later since 2026-11-18: see "kept blocks" below)
 const home2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-home2-')));
 const unstarted = createCalendar({ home: home2, todos, port, tokenFile, ask: async () => null, now: () => clock });
 mark = app.log.length;
@@ -372,10 +373,11 @@ for (const [name, args] of [['schedule_block', { todo: paper.id, date: '2026-11-
 assert.deepEqual(writes(mark), []);
 app.hang = (m, p) => p === '/health';
 const stateBefore = JSON.stringify(state());
-for (const [name, args, doing] of [['schedule_block', { todo: paper.id, date: '2026-11-23', start: '10:00', minutes: 60 }, 'place a block'], ['schedule_block', { title: 'Something new', date: '2026-11-23', start: '10:00', minutes: 60 }, 'place a block'], ['move_block', { todo: paper.id, start: '11:00' }, 'move a block'], ['plan_day', { date: '2026-11-23', items: [{ todo: paper.id, minutes: 30 }] }, 'plan the day'], ['show_day', { date: '2026-11-23' }, 'read the calendar']]) {
+for (const [name, args, doing] of [['plan_day', { date: '2026-11-23', items: [{ todo: paper.id, minutes: 30 }] }, 'plan the day'], ['show_day', { date: '2026-11-23' }, 'read the calendar']]) {
   await assert.rejects(T(name).execute(args), new RegExp(`Error: Super Productivity didn't answer within 1 second when asked to say that it is running\\. .* So I can't ${doing}: I couldn't see what is already on the calendar\\.$`), name);
 }
-assert.equal(JSON.stringify(state()), stateBefore); assert.ok(!list.some((c) => c.text === 'Something new'), 'not even the to-do of a new block is made');
+await assert.rejects(T('schedule_block').execute({ title: 'Something new', date: '2026-11-23', start: '10:00' }), /How long does it take\?/);
+assert.equal(JSON.stringify(state()), stateBefore); assert.ok(!list.some((c) => c.text === 'Something new'), 'nothing is made for a request that can\'t be kept');
 app.hang = null;
 
 // ---- one block: a to-do, a day, a start, a length. It goes straight in.
@@ -565,6 +567,112 @@ assert.equal(out, '"Matrix: order tips": important, not urgent.\nSuper Productiv
 assert.deepEqual(writes(mark), []);
 app.hang = null; await cal.sync('timer');
 assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
+// ---- kept blocks (2026-11-18; before it these were refused): a block asked for while the app can't be reached is
+// kept in state.json, and placed by the first sync that reaches the app
+{
+  // the app closed: nothing listens on the port (a second calendar over the same files, as after a restart)
+  const logK = [];
+  const closed = createCalendar({ home, todos, port: 1, tokenFile, now: () => clock, ask: async (o) => { asked.push(o.placeholder); return answer; }, log: (kind, data) => logK.push({ kind, data }) });
+  const C = (n) => closed.tools.find((t) => t.name === n);
+  const D = (d, h, m = 0) => new Date(2026, 11, d, h, m).getTime(); // December: clear of everything above
+  const NOT_BOOKED = /^NOT on the calendar yet: Super Productivity isn't answering/, NEVER = /is on the calendar (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|now)|is now (Mon|Tue|Wed|Thu|Fri|Sat|Sun)|\bbooked\b(?! when)|moved from/;
+  const says = (out) => { assert.match(out, NOT_BOOKED); assert.match(out, /the task is saved, and the slot will be booked when Super Productivity is open\. Don't say it is added to the calendar, booked, scheduled or moved/); assert.doesNotMatch(out.split(' Tell them exactly that')[0], NEVER, 'what was done is said as what it is'); };
+  const ka = add('Kept: a'), kb = add('Kept: b'), km = add('Kept: mover'); await cal.sync('timer');
+  await T('schedule_block').execute({ todo: km.id, date: '2026-12-04', start: '16:00', minutes: 45 });
+  cal.takeHeld(); mark = app.log.length; const listBefore = list.length; asked.length = 0;
+  // something new: the to-do is made now (it works without the app), the slot is kept, and it is said as that
+  out = await C('schedule_block').execute({ title: 'Kept: flow test', date: '2026-12-03', start: '10:00', minutes: 30 });
+  const flowTest = list.at(-1);
+  assert.equal(list.length, listBefore + 1); assert.deepEqual([flowTest.text, flowTest.kind, flowTest.status], ['Kept: flow test', 'commitment', 'open']);
+  says(out); assert.match(out, new RegExp(`"Kept: flow test" is saved on the to-do list as ${flowTest.id}, and its slot, Thursday 3 December, 10:00 to 10:30, is kept\\.`));
+  // a to-do there already; and a move, which starts from the block as it is known here
+  out = await C('schedule_block').execute({ todo: ka.id, date: '2026-12-03', start: '10:15', minutes: 30 });
+  says(out); assert.match(out, /"Kept: a" is on the to-do list, and its slot, Thursday 3 December, 10:15 to 10:45, is kept\./);
+  out = await C('move_block').execute({ todo: km.id, start: '17:00' });
+  says(out); assert.match(out, /its slot, Friday 4 December, 17:00 to 17:45, is kept/);
+  // the same to-do asked for again takes the first one's place: one kept block for a to-do
+  out = await C('move_block').execute({ todo: km.id, start: '17:30', minutes: 20 });
+  assert.match(out, /Friday 4 December, 17:30 to 17:50, is kept/, 'from the slot already kept: the day stays');
+  assert.deepEqual(state().actions.map((a) => [a.todo, a.title, a.start, a.minutes]), [[flowTest.id, 'Kept: flow test', D(3, 10), 30], [ka.id, 'Kept: a', D(3, 10, 15), 30], [km.id, 'Kept: mover', D(4, 17, 30), 20]]);
+  assert.ok(state().actions.every((a) => a.at === new Date(clock).toISOString() && typeof a.id === 'string'));
+  assert.deepEqual(writes(mark), []); assert.equal(linkOf(flowTest), undefined); assert.equal(linkOf(km).local.start, D(4, 16), 'nothing has moved yet');
+  // what can be checked without the app still is; a day plan is not kept: it needs the whole day in view
+  await assert.rejects(C('schedule_block').execute({ todo: kb.id, date: '2026-12-03', start: '12:00' }), /How long does "Kept: b" take\?/);
+  await assert.rejects(C('schedule_block').execute({ todo: ping.id, date: '2026-12-03', start: '12:00', minutes: 30 }), /is a reminder/);
+  await assert.rejects(C('schedule_block').execute({ todo: 'c-none', date: '2026-12-03', start: '12:00', minutes: 30 }), /no to-do c-none/);
+  await assert.rejects(C('move_block').execute({ todo: kb.id, start: '12:00' }), /"Kept: b" has no block to move/);
+  await assert.rejects(C('schedule_block').execute({ title: 'Kept: too late', date: '2026-11-14', start: '07:00', minutes: 30 }), /Saturday 14 November, 07:00 to 07:30 has already passed, so there is nothing to keep for later\. Nothing was put on the calendar\./);
+  assert.ok(!list.some((c) => c.text === 'Kept: too late'));
+  await assert.rejects(C('plan_day').execute({ date: '2026-12-03', items: [{ todo: kb.id, minutes: 30 }] }), /^Error: Nothing is listening on port 1: Super Productivity is closed, or its local REST API is off\. .* So I can't plan the day: I couldn't see what is already on the calendar\.$/);
+  await assert.rejects(C('show_day').execute({ date: '2026-12-03' }), /So I can't read the calendar/);
+  assert.equal(state().actions.length, 3);
+  // they are listed for show_pending and the morning briefing, and the model's live state says they are not booked
+  assert.deepEqual(closed.kept().map((k) => k.brief), ['Put "Kept: flow test" on the calendar Thursday 3 December, 10:00 to 10:30', 'Put "Kept: a" on the calendar Thursday 3 December, 10:15 to 10:45', 'Put "Kept: mover" on the calendar Friday 4 December, 17:30 to 17:50']);
+  assert.match(closed.live(), /\n- Not on the calendar yet, kept until Super Productivity is open \(the app places them itself then; don't say they are booked\): "Kept: flow test", Thursday 3 December, 10:00 to 10:30; /);
+  assert.doesNotMatch(cal.live().split('\n')[0], /Not on the calendar yet/);
+  // a sync that doesn't reach the app changes nothing
+  r = await closed.sync('timer'); assert.equal(r.ok, false); assert.equal(state().actions.length, 3); assert.deepEqual(writes(mark), []);
+
+  // the app is open again: the first sync mirrors the new to-do, places what is free, and sends it over
+  r = await cal.sync('timer'); assert.equal(r.ok, true);
+  assert.deepEqual(writes(mark).map((w) => [w.method, w.body]), [
+    ['POST', { title: 'Kept: flow test', isIgnoreShortSyntax: true }],
+    ['PATCH', { dueWithTime: D(4, 17, 30), timeEstimate: 20 * M }],
+    ['PATCH', { dueWithTime: D(3, 10), timeEstimate: 30 * M }],
+  ], 'the to-do made while the app was closed is mirrored, then its block and the move go over');
+  assert.deepEqual([taskOf(flowTest).title, taskOf(flowTest).dueWithTime, taskOf(flowTest).timeEstimate], ['Kept: flow test', D(3, 10), 30 * M]);
+  assert.equal(taskOf(km).dueWithTime, D(4, 17, 30)); assert.equal(linkOf(ka).local.start, null, 'the one that would overlap is not placed');
+  assert.deepEqual(state().actions, [], 'placed or handed over: none is left to run again');
+  let held = cal.takeHeld();
+  assert.deepEqual(held.lines, ['"Kept: flow test" is on the calendar now, Thursday 3 December, 10:00 to 10:30: the slot I kept while Super Productivity was closed.', '"Kept: mover" is on the calendar now, Friday 4 December, 17:30 to 17:50: the slot I kept while Super Productivity was closed.']);
+  assert.deepEqual(held.blocks.map((b) => [b.todo, b.title, b.start, b.minutes]), [[ka.id, 'Kept: a', D(3, 10, 15), 30]], 'a clash becomes the usual question');
+  // never twice: the next runs write nothing and say nothing
+  mark = app.log.length; await cal.sync('timer'); await cal.sync('tool'); await make().sync('start');
+  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [], blocks: [] });
+  // the clash: asked as an overlap is; a no leaves it off, a yes places it
+  answer = null; asked.length = 0;
+  assert.equal(await cal.placeKept(held.blocks[0]), ''); assert.equal(linkOf(ka).local.start, null); assert.deepEqual(writes(mark), []);
+  assert.deepEqual(asked, ['"Kept: a", 10:15 to 10:45 on Thursday 3 December, overlaps "Kept: flow test" (10:00 to 10:30). Put it there anyway?']);
+  answer = 'yes';
+  assert.equal(await cal.placeKept(held.blocks[0]), '"Kept: a" is on the calendar Thursday 3 December, 10:15 to 10:45.'); await cal.sync('timer');
+  assert.equal(taskOf(ka).dueWithTime, D(3, 10, 15));
+  assert.equal(await cal.placeKept(held.blocks[0]), '', 'asked for again when it is there already: nothing'); 
+  // ...and if the app has gone again when the question's turn comes, the block is kept again, as old as it was
+  await cal.setLocal(ka.id, { start: null }); await cal.sync('timer');
+  assert.equal(await closed.placeKept(held.blocks[0]), ''); assert.deepEqual(state().actions.map((a) => [a.todo, a.at, a.start]), [[ka.id, held.blocks[0].at, D(3, 10, 15)]]);
+  // its block settled another way meanwhile (here: taken off the calendar): the kept slot is not placed as well
+  out = await C('unschedule_block').execute({ todo: ka.id });
+  assert.equal(out, 'The slot kept for "Kept: a" is dropped: it won\'t be put on the calendar. It is still on the to-do list.'); assert.deepEqual(state().actions, []);
+  await C('schedule_block').execute({ todo: ka.id, date: '2026-12-05', start: '09:00', minutes: 30 }); assert.equal(state().actions.length, 1);
+  await cal.setLocal(ka.id, { start: D(5, 11), minutes: 30 }); assert.deepEqual(state().actions, [], 'a block set meanwhile takes the kept one\'s place');
+  await cal.setLocal(ka.id, { start: null }); await cal.sync('timer'); cal.takeHeld();
+
+  // a to-do that is done or gone by the time the app is back: dropped without a word
+  await C('schedule_block').execute({ todo: kb.id, date: '2026-12-05', start: '09:00', minutes: 30 });
+  kb.status = 'done'; mark = app.log.length;
+  await cal.sync('timer');
+  assert.deepEqual(state().actions, []); assert.deepEqual(cal.takeHeld().lines, []); assert.ok(!writes(mark).some((w) => 'dueWithTime' in (w.body ?? {})));
+  // its time has passed before the app was back: dropped, and said once, even while the app is still closed
+  const clock0 = clock;
+  await C('schedule_block').execute({ todo: ka.id, date: '2026-11-14', start: '09:00', minutes: 30 });
+  clock = at(14, 9, 29); await closed.sync('timer'); assert.equal(state().actions.length, 1, 'still running: kept');
+  clock = at(14, 9, 30); await closed.sync('timer');
+  assert.deepEqual(state().actions, []);
+  assert.deepEqual(closed.takeHeld().lines, ['I had kept a slot for "Kept: a", Saturday 14 November, 09:00 to 09:30, until Super Productivity was open. That time has passed, so it isn\'t on the calendar.']);
+  mark = app.log.length; await closed.sync('timer'); await cal.sync('timer');
+  assert.deepEqual(cal.takeHeld().lines, [], 'once'); assert.deepEqual(writes(mark), []); assert.equal(linkOf(ka).local.start, null);
+  // older than limits.pendingKeepHours (24): dropped, and said once
+  await C('schedule_block').execute({ todo: ka.id, date: '2026-12-09', start: '09:00', minutes: 30 });
+  clock += 24 * 3600_000; await closed.sync('timer'); assert.equal(state().actions.length, 1);
+  clock += 1; r = await cal.sync('tool');
+  assert.deepEqual(state().actions, []); assert.equal(linkOf(ka).local.start, null);
+  assert.match(r.text, /^I had kept a slot for "Kept: a", Wednesday 9 December, 09:00 to 09:30, until Super Productivity was open\. That was more than 24 hours ago, so it isn't on the calendar\.$/);
+  clock = clock0;
+  assert.ok(logK.some((l) => l.kind === 'calendar_kept' && l.data.what === 'place') && logK.some((l) => l.data.what === 'move') && !JSON.stringify(logK).includes('Kept:'), 'logged by what it was, without the titles');
+  for (const c of [ka, km, flowTest]) c.status = 'done';
+  await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
+}
+
 // ---- over everything so far: the only tags Roamies ever adds are the two matrix tags
 for (const w of writes().filter((q) => q.body && 'tagIds' in q.body)) assert.ok(w.body.tagIds.every((id) => ['EM_URGENT', 'EM_IMPORTANT', 'PERSONAL', 'KANBAN_IN_PROGRESS'].includes(id)), JSON.stringify(w.body));
 for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);

@@ -557,9 +557,24 @@ block has a to-do behind it, and a to-do has one block at most.
 - "What's on Monday?": your to-dos' blocks, with times and lengths. Tasks you scheduled in the app yourself are given
   as taken time, without their names: what they are called is used only in the question about an overlap.
 - Ticking a to-do marks its task done in the app; its time stays where it was.
-- A block is never placed, moved or planned without the app's task list having just been read. So if the app isn't
-  answering, or the list isn't mirrored yet, these refuse and say why. Taking a block off the calendar still works,
-  and reaches the app at the next sync.
+- A block is never placed, moved or planned without the app's task list having just been read. If the list isn't
+  mirrored yet, these refuse and say why. Taking a block off the calendar still works, and reaches the app at the
+  next sync.
+- **Super Productivity closed: a block is kept, not refused.** Asked to place or move one block while the app
+  isn't answering, Roamies says the task is saved and the slot will be booked when Super Productivity is open. It
+  does not say "booked" or "scheduled". A new to-do is made straight away (the to-do list works without the app);
+  the slot is kept in `state.json`, under `calendar.actions`.
+  - The first sync that reaches the app (within `calendar.syncSeconds` of opening it) mirrors the to-do, reads the
+    task list, places the block, and you are told in one line. If it overlaps something you get the usual question
+    instead, and nothing is placed without your yes.
+  - One kept slot for a to-do: asking again for the same to-do replaces it. It is taken off the list in the same
+    write that places it, so it never runs twice. Taking the to-do off the calendar drops it.
+  - A slot whose time has passed before the app was open, or that is older than `limits.pendingKeepHours`, is
+    dropped and you are told once. One whose to-do is done or gone is dropped without a word. A request for a time
+    that has already passed is not kept at all.
+  - Kept slots are read out with "what's pending?" and named in the morning briefing, as not yet on the calendar.
+  - A day plan is not kept: it needs the whole day in view, so `plan_day` still refuses while the app is closed, as
+    does reading a day.
 - The morning briefing also says what is on the calendar today.
 - These tools work while pi is busy, like the to-do list.
 

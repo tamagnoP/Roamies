@@ -13,6 +13,8 @@
 //   - Only the two matrix tags are ever added to or taken from a task; its other tags are sent back as they were.
 //   - Every block has a to-do behind it, and a to-do has one block at most. A block is never placed without the task
 //     list having just been read, so a clash is always seen; a day plan is created only after a yes.
+//   - A block asked for while the app can't be reached is kept (state.json, calendar.actions) and placed by the
+//     first sync that reaches the app: once, after the task list has been read, with the usual question on a clash.
 //
 // A sync run: is the app there (1 second at most); read the task list once; for each link compare, field by field,
 // Roamies' value, the app's, and the value both had after the last run. What only one side changed goes to the other;
@@ -34,6 +36,8 @@ const HOW = 'Open Super Productivity, and check that Settings > Misc > Enable lo
 
 /** The app can't be reached, or won't let Roamies in. `message` is plain words for the owner. */
 export class Down extends Error {}
+/** A tool couldn't see the calendar because the app isn't answering. A block asked for then is kept for later. */
+export class Away extends Error {}
 
 const title = (t) => String(t ?? '').trim().slice(0, 200).trim();
 const stamp = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
@@ -138,8 +142,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   // (local: start, minutes, urgent, important, which Roamies' own list has no place for; agreed: the seven fields as
   // both sides had them after the last run; was: the to-do's state when last seen). retired: links whose to-do is
   // done on both sides. intents: creates that were begun. held: lines and questions waiting to be shown. waiting:
-  // to-dos whose task was deleted in the app, until the owner has said whether the to-do goes too.
-  const blank = () => ({ started: false, links: {}, retired: {}, waiting: {}, intents: [], held: [] });
+  // to-dos whose task was deleted in the app, until the owner has said whether the to-do goes too. actions: blocks
+  // asked for while the app couldn't be reached, [{ id, at, todo, title, start, minutes }], one for a to-do at most.
+  const blank = () => ({ started: false, links: {}, retired: {}, waiting: {}, intents: [], held: [], actions: [] });
   function get() {
     const c = readState(settings().dir).calendar;
     return c && typeof c === 'object' && !Array.isArray(c) ? { ...blank(), ...c } : blank();
@@ -334,12 +339,18 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   let toldWhy = null; // the failure the owner was last told about, so the timer doesn't say the same thing every minute
   function sync(from = 'timer') {
     return inTurn(async () => {
-      let r;
-      try { r = await run(); lastOk = r.ok && r.started !== false; } catch (e) {
+      let r, lost = [];
+      try { lost = expireKept(); } catch (e) { console.error('calendar', e); } // first, and whether the app answers or not: a kept block whose time has passed is dropped and said once
+      try {
+        r = await run(); lastOk = r.ok && r.started !== false;
+        // The blocks kept while the app was away: placed now that its task list has just been read, then sent over.
+        if (lastOk && applyKept(r.lines)) { const over = await run(); r.lines.push(...over.lines); r.asks.push(...over.asks); }
+      } catch (e) {
         lastOk = false;
         log('calendar_error', { message: scrub(e?.message ?? e) });
         r = { ok: false, reached: true, lines: [], asks: [], why: `The sync stopped on an error in Roamies itself, not in Super Productivity: ${scrub(e?.message ?? e)}` };
       }
+      r.lines.unshift(...lost);
       if (r.ok) toldWhy = null; else log('calendar_failed', { from, reached: !!r.reached }); // the reason names a to-do, so it isn't logged
       // A failure nobody asked about is said once, as what it is. The app simply being closed is not one: that is
       // said when something is asked of it. After the first yes it is said either way.
@@ -358,8 +369,16 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return sync('change');
   }
 
+  /** A to-do's kept slot, and the question about one that overlapped, taken off. → whether there was one. */
+  const unkeep = (cal, id) => { const n = cal.actions.length + cal.held.length; cal.actions = cal.actions.filter((a) => a.todo !== id); cal.held = cal.held.filter((h) => h.block?.todo !== id); return cal.actions.length + cal.held.length < n; };
   /** What Roamies' own list has no place for (start, minutes, urgent, important), set on a linked to-do. */
-  const setLocal = (id, changes) => inTurn(() => edit((cal) => { const l = cal.links[id]; if (!l) return false; for (const f of ['start', 'minutes', 'urgent', 'important']) if (f in changes) l.local[f] = changes[f]; return true; }));
+  const setLocal = (id, changes) => inTurn(() => edit((cal) => {
+    const l = cal.links[id];
+    if (!l) return false;
+    for (const f of ['start', 'minutes', 'urgent', 'important']) if (f in changes) l.local[f] = changes[f];
+    if ('start' in changes) unkeep(cal, id); // its block was settled now: a slot kept for it is not placed as well
+    return true;
+  }));
 
   /** The owner has answered the question about a to-do whose task was deleted in the app. If the to-do stays, it
    *  gets a new task at the next run. */
@@ -378,7 +397,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
 
   /** What is waiting to be shown, taken off the pile: { lines: [text], asks: [{ todo, title }] }. */
   function takeHeld() {
-    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), asks: h.filter((x) => x.ask).map((x) => x.ask) }; });
+    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), asks: h.filter((x) => x.ask).map((x) => x.ask), blocks: h.filter((x) => x.block).map((x) => x.block) }; });
   }
   const hasHeld = () => get().held.length > 0;
 
@@ -408,10 +427,10 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
    *  what is on the calendar is what the app has this moment. Otherwise the tool refuses, in plain words. */
   async function fresh(doing) {
     const up = await reach();
-    if (!up.ok) throw new Error(`${up.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
+    if (!up.ok) throw new Away(`${up.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
     if (!get().started) throw new Error(NOT_YET);
     const r = await sync('tool');
-    if (!r.ok) throw new Error(`${r.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
+    if (!r.ok) throw new Away(`${r.why} So I can't ${doing}: I couldn't see what is already on the calendar.`);
     return r.text;
   }
   /** What is on the calendar on a day: Roamies' own blocks (with their to-do), and the time other tasks take. */
@@ -421,12 +440,17 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     const mine = Object.entries(cal.links).filter(([, l]) => on(l.local)).map(([id, l]) => ({ todo: id, title: list.find((t) => t.id === id)?.text ?? l.title, start: l.local.start, minutes: l.local.minutes, done: l.was === 'done' }));
     return { mine: mine.sort((a, b) => a.start - b.start), theirs: others.filter((o) => !o.done && on(o)).sort((a, b) => a.start - b.start) };
   }
-  /** The open to-do a block is for: of kind commitment, and mirrored. */
-  async function todoFor(id) {
+  /** The open to-do a block is for: of kind commitment. */
+  async function openTodo(id) {
     const t = (await todos.all()).find((x) => x.id === id);
     if (!t) throw new Error(`There's no to-do ${id}. list_commitments shows the ids.`);
     if (t.kind !== 'commitment') throw new Error(`${quote(t.text)} is a reminder, and reminders aren't put on the calendar.`);
     if (t.status !== 'open') throw new Error(`${quote(t.text)} is already done.`);
+    return t;
+  }
+  /** ...and mirrored. */
+  async function todoFor(id) {
+    const t = await openTodo(id);
     const link = get().links[id];
     if (!link) throw new Error(`${quote(t.text)} has no task in Super Productivity right now (its task was deleted there, and they haven't said yet whether the to-do stays).`);
     return { t, link };
@@ -454,6 +478,83 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     }
     await setLocal(id, { start, minutes: mins });
   }
+  // ---- blocks asked for while the app couldn't be reached (the owner's decision of 2026-11-18; before it they were
+  // refused). The request is kept in state.json and placed by the first sync that reaches the app. One for a to-do
+  // at most: a newer one takes its place. It is taken off the list in the same write that places it, so it never
+  // runs twice. plan_day is not kept: it needs the whole day in view.
+  const slot = (a) => `${dayName(new Date(a.start))}, ${span(a)}`;
+  const withoutKept = (cal, id) => { cal.actions = cal.actions.filter((x) => x.id !== id); };
+  /** Keeps a block for later and says so, in words the model is to pass on as they are. */
+  async function keepBlock({ todo, name, start, mins, made = false, moved = false }) {
+    if (!(start + mins * 60_000 > now())) throw new Error(`Super Productivity isn't answering, and ${slot({ start, minutes: mins })} has already passed, so there is nothing to keep for later. Nothing was put on the calendar.`);
+    await inTurn(() => edit((cal) => { cal.actions = [...cal.actions.filter((x) => x.todo !== todo), { id: `a${now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: new Date(now()).toISOString(), todo, title: name, start, minutes: mins }]; }));
+    log('calendar_kept', { what: moved ? 'move' : 'place' });
+    return `NOT on the calendar yet: Super Productivity isn't answering (it is closed, or its local REST API is off). What was done: ${made ? `${quote(name)} is saved on the to-do list as ${todo}` : `${quote(name)} is on the to-do list`}, and its slot, ${slot({ start, minutes: mins })}, is kept. The app books that slot by itself as soon as Super Productivity is open, and asks them itself if it overlaps something. Tell them exactly that: the task is saved, and the slot will be booked when Super Productivity is open. Don't say it is added to the calendar, booked, scheduled or moved, and don't call this tool again for it.`;
+  }
+  /** Before every sync, whether the app answers or not: a kept block whose time has passed, or that is older than
+   *  "limits.pendingKeepHours", is dropped, and the owner told once. → the lines. */
+  function expireKept() {
+    const lines = [];
+    let hours;
+    try { if (!get().actions.length) return lines; hours = limitsFor(home).pendingKeepHours; } catch { return lines; }
+    edit((cal) => {
+      for (const a of [...cal.actions]) {
+        const passed = !(a.start + a.minutes * 60_000 > now()), old = now() - Date.parse(a.at) > hours * 3600_000;
+        if (!passed && !old) continue;
+        withoutKept(cal, a.id);
+        log('calendar_kept_dropped', { why: passed ? 'passed' : 'old' });
+        lines.push(`I had kept a slot for ${quote(a.title)}, ${slot(a)}, until Super Productivity was open. ${passed ? 'That time has passed' : `That was more than ${hours} hour${hours === 1 ? '' : 's'} ago`}, so it isn't on the calendar.`);
+      }
+    });
+    return lines;
+  }
+  /** Right after a run that reached the app (so the task list has just been read): each kept block is placed, or,
+   *  when it overlaps something, handed over as the usual question. One whose to-do is done or gone is dropped
+   *  without a word. → whether any was placed (then a second run sends it to the app). */
+  function applyKept(lines) {
+    let placed = false;
+    for (const a of [...get().actions].sort((x, y) => Date.parse(x.at) - Date.parse(y.at))) {
+      const cal = get(), link = cal.links[a.todo];
+      if (cal.waiting[a.todo]) continue; // its task was deleted in the app and the owner hasn't answered yet
+      if (!link || link.was !== 'open') { edit((c) => withoutKept(c, a.id)); log('calendar_kept_dropped', { why: 'done' }); continue; }
+      const day = new Date(a.start); day.setHours(0, 0, 0, 0);
+      const { mine, theirs } = dayBlocks(day, cal);
+      const hits = [...mine.filter((b) => b.todo !== a.todo && !b.done && overlap(a, b)), ...theirs.filter((b) => overlap(a, b))];
+      if (hits.length) {
+        // A clash: the question, asked when nothing else is going on (sidekick.mjs → placeKept).
+        edit((c) => { withoutKept(c, a.id); c.held.push({ block: { todo: a.todo, title: link.title, start: a.start, minutes: a.minutes, at: a.at } }); });
+        log('calendar_kept_asks', {});
+        continue;
+      }
+      // Off the list and onto the calendar in one write: it can't be placed twice.
+      edit((c) => { withoutKept(c, a.id); c.links[a.todo].local.start = a.start; c.links[a.todo].local.minutes = a.minutes; });
+      log('calendar_block', { what: 'placed', kept: true });
+      lines.push(`${quote(link.title)} is on the calendar now, ${slot(a)}: the slot I kept while Super Productivity was closed.`);
+      placed = true;
+    }
+    return placed;
+  }
+  /** A kept block that overlaps something: the usual question, then placed on a yes. → a line to say, or ''. */
+  async function placeKept(b, signal) {
+    try { await fresh('place a block'); } catch (e) {
+      if (!(e instanceof Away)) throw e;
+      await inTurn(() => edit((cal) => { if (!cal.actions.some((x) => x.todo === b.todo)) cal.actions.push({ id: `a${now().toString(36)}r`, at: b.at, todo: b.todo, title: b.title, start: b.start, minutes: b.minutes }); })); // the app went away again: kept again, as old as it was
+      return '';
+    }
+    let t;
+    try { ({ t } = await todoFor(b.todo)); } catch { return ''; } // done or gone meanwhile
+    if (get().links[b.todo].local.start === b.start) return ''; // placed meanwhile
+    if (!(b.start + b.minutes * 60_000 > now())) return `I had kept a slot for ${quote(t.text)}, ${slot(b)}, until Super Productivity was open. That time has passed, so it isn't on the calendar.`;
+    try { await place(b.todo, t.text, b.start, b.minutes, signal); } catch (e) { if (e.declined) return ''; throw e; }
+    log('calendar_block', { what: 'placed', kept: true });
+    sync('change').catch(() => {});
+    return `${quote(t.text)} is on the calendar ${slot(b)}.`;
+  }
+  /** The kept blocks, for show_pending and the morning briefing: [{ at, brief }]. */
+  function kept() {
+    try { return get().actions.map((a) => ({ at: a.at, brief: `Put ${quote(a.title)} on the calendar ${slot(a)}` })); } catch { return []; }
+  }
+
   /** The day plan, shown whole; said as the day and how many blocks. → true on a yes. */
   const askPlan = (day, shown, placed, left, signal, kept = null) => yesTo({
     placeholder: shown, choices: ['Plan it', 'Don\'t'],
@@ -464,12 +565,28 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const blockTools = [
     {
       name: 'schedule_block',
-      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title for something new, which also becomes a to-do. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself.',
+      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title for something new, which also becomes a to-do. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked.',
       parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), minutes: minutesArg.optional() }),
       execute: async ({ todo, title: name, date, start, minutes: mins }, ctx) => {
         if (!todo === !name?.trim()) throw new Error('Give either todo (an id) or title (something new), not both.');
         const at = when(date, start);
-        const pre = await fresh('place a block');
+        let pre;
+        try { pre = await fresh('place a block'); } catch (e) {
+          if (!(e instanceof Away)) throw e;
+          // The app isn't answering: the request is kept and placed when it is back. Everything that can be checked
+          // without the app is checked now.
+          if (!get().started) throw new Error(NOT_YET);
+          if (todo) {
+            const t = await openTodo(todo);
+            const length = mins ?? get().links[todo]?.local.minutes;
+            if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
+            return keepBlock({ todo, name: t.text, start: at.start, mins: length });
+          }
+          if (!mins) throw new Error('How long does it take? Ask, then give minutes.');
+          if (!(at.start + mins * 60_000 > now())) return keepBlock({ todo: '', name: title(name), start: at.start, mins }); // throws: nothing is made for a time that has passed
+          const made = await todos.add(title(name)); // every block has a to-do behind it: mirrored at the next sync
+          return keepBlock({ todo: made.id, name: title(name), start: at.start, mins, made: true });
+        }
         let id = todo;
         if (!id) {
           if (!mins) throw new Error('How long does it take? Ask, then give minutes.');
@@ -492,7 +609,22 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       parameters: z.object({ todo: z.string(), date: z.string().optional(), start: z.string().optional(), minutes: minutesArg.optional() }),
       execute: async ({ todo, date, start, minutes: mins }, ctx) => {
         if (!date && !start && !mins) throw new Error('Say what changes: date, start or minutes.');
-        const pre = await fresh('move a block');
+        let pre;
+        try { pre = await fresh('move a block'); } catch (e) {
+          if (!(e instanceof Away)) throw e;
+          // The app isn't answering: the move is kept. It starts from the slot already kept for this to-do, if there
+          // is one, else from the block as it is known here.
+          if (!get().started) throw new Error(NOT_YET);
+          const t = await openTodo(todo);
+          const local = get().links[todo]?.local, waiting = get().actions.find((a) => a.todo === todo);
+          const from = waiting ?? (local && local.start !== null ? local : null);
+          if (!from) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
+          const was = new Date(from.start);
+          const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(from.start));
+          const length = mins ?? from.minutes;
+          if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
+          return keepBlock({ todo, name: t.text, start: at.start, mins: length, moved: true });
+        }
         const { t, link } = await todoFor(todo);
         if (link.local.start === null) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
         const was = new Date(link.local.start);
@@ -512,7 +644,10 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         if (!get().started) throw new Error(NOT_YET);
         const pre = (await sync('tool')).text;
         const { t, link } = await todoFor(todo);
-        if (link.local.start === null) return `${quote(t.text)} has no block on the calendar.`;
+        if (link.local.start === null) {
+          const waiting = await inTurn(() => edit((cal) => unkeep(cal, todo)));
+          return waiting ? `The slot kept for ${quote(t.text)} is dropped: it won't be put on the calendar. It is still on the to-do list.` : `${quote(t.text)} has no block on the calendar.`;
+        }
         await setLocal(todo, { start: null });
         log('calendar_block', { what: 'unscheduled' });
         return settle(pre, `${quote(t.text)} is off the calendar. It is still on the to-do list.`);
@@ -757,10 +892,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   function live() {
     let cal;
     try { cal = get(); } catch { return '- Super Productivity: the settings file can\'t be read, so the to-do list isn\'t synced.'; }
-    const n = Object.keys(cal.links).length;
+    const n = Object.keys(cal.links).length, later = kept();
     const how = ' When a calendar tool needs a yes (the first time, an overlap, a day plan, a sorting proposal), the app opens a bubble itself and they answer it by saying yes or no, or by clicking: don\'t ask them yourself as well, and never tell them they have to click.';
-    return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how;
+    const waits = later.length ? `\n- Not on the calendar yet, kept until Super Productivity is open (the app places them itself then; don't say they are booked): ${later.map((a) => a.brief.replace(/^Put /, '').replace(' on the calendar ', ', ')).join('; ')}.` : '';
+    return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, resume, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, resume, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
 }

@@ -296,6 +296,14 @@ the screen blocks clicks.
   is said. Decided while fixing: what makes two questions the same (`SAME` in `flow.mjs`); a question stays kept
   while it is asked again; a question that can't be asked now no longer holds up the ones behind it; a bubble taken
   down with its request is not an answer and clears nothing.
+- **2026-11-18.** Reverses "no queueing" from the calendar plan (feature 13), on the owner's decision after trying
+  it: a single block asked for while Super Productivity can't be reached (`schedule_block`, `move_block`) is kept in
+  `state.json` (`calendar.actions`) and placed by the first sync that reaches the app, with the usual question on a
+  clash. It follows `limits.pendingKeepHours`, shows in `show_pending` and the morning briefing, and never runs
+  twice. `plan_day` and `show_day` still refuse. Decided while building: one kept block for a to-do, the newest
+  wins; a new to-do is made at once; a request for a time already past is refused, not kept; "passed" means the
+  block's end has passed; a to-do done or gone meanwhile drops its kept block without a word; a move starts from
+  the block as known here, or from the slot already kept. The test that pinned the refusal was changed with it.
 
 ## 6. Still to test
 
@@ -344,6 +352,9 @@ the screen blocks clicks.
   only in the question about an overlap.
 - Two displays: starting to talk while the pointer is on the other display moves the overlay there, which closes an
   open bubble (Send, or a yes/no question) as a no.
+- Kept blocks: if Roamies stops between taking a kept block's overlap question off its pile and your answer, that
+  block is lost (as with the other questions a sync raises). A kept block is placed up to `calendar.syncSeconds`
+  after the app opens, not at once.
 - Answer window: a phrase still being said when the window ends is cut off and dropped. With a key press during the
   window the bubble waits as it used to, with no time limit. A pending hand-off's prompt is kept in `state.json` as
   plain text until it is answered or dropped. The voice helper on Windows and Linux doesn't know the window: there
