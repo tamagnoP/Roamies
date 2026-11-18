@@ -20,7 +20,7 @@ for (const name of ['writeFileSync', 'appendFileSync']) { const real = fs[name];
 for (const name of ['writeFile', 'appendFile']) { const real = fs.promises[name]; fs.promises[name] = (file, data, ...rest) => { written.push({ file: String(file), data: String(data) }); return real(file, data, ...rest); }; }
 
 const { CALENDAR, LIMITS, SP, codeReference, loadSettings } = await import('../pi.mjs');
-const { Down, FIELDS, createCalendar, createClient, placeDay, quiet } = await import('../calendar.mjs');
+const { Down, FIELDS, createCalendar, createClient, dayFrom, minutesBetween, placeDay, quiet } = await import('../calendar.mjs');
 const { settingsNotice, settingsReference } = await import('../reference.mjs');
 
 // ---- the stand-in for Super Productivity
@@ -670,6 +670,69 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   clock = clock0;
   assert.ok(logK.some((l) => l.kind === 'calendar_kept' && l.data.what === 'place') && logK.some((l) => l.data.what === 'move') && !JSON.stringify(logK).includes('Kept:'), 'logged by what it was, without the titles');
   for (const c of [ka, km, flowTest]) c.status = 'done';
+  await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
+}
+
+// ---- a day and two times, as they were said: the date of a weekday and the length are worked out here, by code
+{
+  const ymd = (d) => d && `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const wed = new Date(2026, 10, 18, 22, 16).getTime(); // when "book a slot on Friday from 10 to 11" was said
+  assert.equal(ymd(dayFrom('friday', wed)), '2026-11-20'); assert.equal(minutesBetween('10:00', '11:00'), 60);
+  for (const [said, date] of [['Friday', '2026-11-20'], ['on friday', '2026-11-20'], ['this Friday', '2026-11-20'], ['fri', '2026-11-20'], ['today', '2026-11-18'], ['tomorrow', '2026-11-19'], ['wednesday', '2026-11-18'], ['thursday', '2026-11-19'], ['tuesday', '2026-11-24'], ['sunday', '2026-11-22'], ['2026-12-01', '2026-12-01']]) assert.equal(ymd(dayFrom(said, wed)), date, said);
+  assert.equal(ymd(dayFrom('wednesday', wed, () => true)), '2026-11-25', 'today\'s own name, when the time has passed today: a week on');
+  assert.equal(ymd(dayFrom('friday', new Date(2026, 11, 30, 9).getTime())), '2027-01-01', 'over the end of a year');
+  for (const bad of ['next friday', 'someday', '20/11/2026', '2026-02-30', '', 'fr']) assert.equal(dayFrom(bad, wed), null, bad);
+  for (const [a, b, m] of [['09:00', '10:00', 60], ['10:00', '13:00', 180], ['14:00', '16:30', 150], ['17:00', '17:30', 30], ['9:05', '9:10', 5], ['08:00', '20:00', 720]]) assert.equal(minutesBetween(a, b), m);
+  assert.throws(() => minutesBetween('10:00', '10:00'), /The end \(10:00\) isn't after the start \(10:00\)/); assert.throws(() => minutesBetween('10:00', '1:00'), /24-hour clock: one in the afternoon is 13:00/);
+  assert.throws(() => minutesBetween('10:00', 'eleven'), /The end has to be a time, HH:MM\./); assert.throws(() => minutesBetween('ten', '11:00'), /The start has to be a time/);
+  assert.throws(() => minutesBetween('00:00', '23:00'), /between 5 minutes and 12 hours/); assert.throws(() => minutesBetween('10:00', '10:03'), /between 5 minutes and 12 hours/);
+
+  // through the tools (the clock here is Saturday 14 November 2026, 08:00)
+  mark = app.log.length; answer = null; asked.length = 0;
+  out = await T('schedule_block').execute({ title: 'Named: experiment', date: 'friday', start: '10:00', end: '11:00' });
+  const named = list.at(-1);
+  assert.match(out, new RegExp(`^"Named: experiment" is on the calendar Friday 20 November, 10:00 to 11:00, and on the to-do list as ${named.id}\\.$`));
+  assert.deepEqual(writes(mark).map((w) => [w.method, w.body]), [['POST', { title: 'Named: experiment', isIgnoreShortSyntax: true }], ['PATCH', { dueWithTime: at(20, 10), timeEstimate: 60 * M }]]);
+  await assert.rejects(T('schedule_block').execute({ todo: named.id, date: 'friday', start: '10:00', end: '11:00', minutes: 60 }), /Give end or minutes, not both/);
+  await assert.rejects(T('schedule_block').execute({ todo: named.id, date: 'friday', start: '11:00', end: '10:00' }), /isn't after the start/);
+  await assert.rejects(T('schedule_block').execute({ todo: named.id, date: 'next friday', start: '10:00', end: '11:00' }), /^Error: The date has to be a weekday \("friday"\), "today", "tomorrow", or YYYY-MM-DD\.$/);
+  assert.equal(linkOf(named).local.start, at(20, 10));
+  // today's own name: today while the block isn't over, the same day next week once it is
+  out = await T('schedule_block').execute({ todo: named.id, date: 'saturday', start: '07:00', end: '07:30' });
+  assert.match(out, /Saturday 21 November, 07:00 to 07:30 \(moved from where it was\)/);
+  out = await T('schedule_block').execute({ todo: named.id, date: 'Saturday', start: '07:45', end: '08:15' });
+  assert.match(out, /Saturday 14 November, 07:45 to 08:15/, 'still running: today');
+  // a move: an end alone changes the length, a day word the day
+  out = await T('move_block').execute({ todo: named.id, date: 'tomorrow', end: '09:00' });
+  assert.equal(out, '"Named: experiment" is now Sunday 15 November, 07:45 to 09:00.'); assert.deepEqual([linkOf(named).local.start, linkOf(named).local.minutes], [at(15, 7, 45), 75]);
+  await assert.rejects(T('move_block').execute({ todo: named.id, end: '09:30', minutes: 30 }), /Give end or minutes, not both/);
+  await assert.rejects(T('move_block').execute({ todo: named.id }), /Say what changes: date, start, end or minutes\./);
+  assert.match(await T('show_day').execute({ date: 'sunday' }), /^Sunday 15 November:\n07:45 to 09:00 \(75 min\): Named: experiment/);
+  asked.length = 0;
+  await assert.rejects(T('plan_day').execute({ date: 'monday', items: [{ todo: named.id, minutes: 30 }] }), /didn't say yes to the plan/);
+  assert.match(asked[0], /^Plan for Monday 16 November:\n09:00 to 09:30 {2}Named: experiment$/);
+  // the model is told to pass the day and the two times as they were said, and to say what the result says
+  for (const n of ['schedule_block', 'move_block']) { assert.match(T(n).description, /Never work out the date of a weekday yourself\./); assert.match(T(n).description, /give start and end \(HH:MM, 24-hour\) and no minutes: the app works out the length/); assert.match(T(n).description, /say what the result says, never that it is (booked|moved)/); }
+  assert.match(cal.live(), /"on the calendar", "booked" or "scheduled" only when the result says it is on the calendar; when it says the slot is kept until Super Productivity is open, say the task is saved and the slot will be booked when Super Productivity is open\./);
+
+  // what was asked on 18 November with the app closed, said the way it was: saved and kept, then caught up
+  const closed = createCalendar({ home, todos, port: 1, tokenFile, now: () => clock, ask: async () => null });
+  mark = app.log.length;
+  out = await closed.tools.find((t) => t.name === 'schedule_block').execute({ title: 'Named: experiment part I', date: 'friday', start: '10:00', end: '11:00' });
+  const partOne = list.at(-1);
+  assert.match(out, new RegExp(`^NOT on the calendar yet: .* "Named: experiment part I" is saved on the to-do list as ${partOne.id}, and its slot, Friday 20 November, 10:00 to 11:00, is kept\\. .*the task is saved, and the slot will be booked when Super Productivity is open\\.`));
+  assert.doesNotMatch(out, /is on the calendar Friday|\badded\b(?! to the calendar, booked)|\bscheduled\b(?! or moved)/);
+  // a to-do made the ordinary way while the app is closed, too
+  const offTools = closed.wrap([{ name: 'remember_commitment', execute: async ({ text }) => { const c = add(text); return `Saved as ${c.id}.`; } }]);
+  assert.match(await offTools[0].execute({ text: 'Named: made while closed' }), /^Saved as c\d+\.$/);
+  const whileClosed = list.at(-1);
+  assert.deepEqual(writes(mark), []); assert.equal(linkOf(partOne), undefined); assert.equal(linkOf(whileClosed), undefined);
+  // the first sync after the app is open: both to-dos become tasks, and the block is on the calendar
+  await cal.sync('timer');
+  assert.deepEqual(writes(mark).map((w) => [w.method, w.body]), [['POST', { title: 'Named: experiment part I', isIgnoreShortSyntax: true }], ['POST', { title: 'Named: made while closed', isIgnoreShortSyntax: true }], ['PATCH', { dueWithTime: at(20, 10), timeEstimate: 60 * M }]]);
+  assert.deepEqual([taskOf(partOne).title, taskOf(partOne).dueWithTime, taskOf(partOne).timeEstimate], ['Named: experiment part I', at(20, 10), 60 * M]); assert.equal(taskOf(whileClosed).title, 'Named: made while closed');
+  assert.deepEqual(cal.takeHeld().lines, ['"Named: experiment part I" is on the calendar now, Friday 20 November, 10:00 to 11:00: the slot I kept while Super Productivity was closed.']);
+  for (const c of [named, partOne, whileClosed]) c.status = 'done';
   await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
 }
 

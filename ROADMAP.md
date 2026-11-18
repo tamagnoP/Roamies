@@ -304,6 +304,18 @@ the screen blocks clicks.
   wins; a new to-do is made at once; a request for a time already past is refused, not kept; "passed" means the
   block's end has passed; a to-do done or gone meanwhile drops its kept block without a word; a move starts from
   the block as known here, or from the slot already kept. The test that pinned the refusal was changed with it.
+- **2026-11-18.** Blocks, from the same trial: a request that names a day and a start and end time is a block; the
+  length comes from the two times and a weekday's date from the clock, both in code (`minutesBetween`, `dayFrom` in
+  `calendar.mjs`), not from the model. What Roamies says matches what was done. Decided while building: a weekday is
+  the next day of that name counting today, and today only until the block's time is over; "next Friday" is refused
+  rather than guessed; an end and a length together are refused; a new to-do whose block couldn't be placed because
+  the app dropped out half-way is kept like the others (it used to say "try again later").
+  What the log of 18 November shows for that request (22:16:13, "book a slot on Friday from 10 to 11 to run
+  experiment one"): `schedule_block` was called with the title "SERS experiment, part one", 2026-11-20, 10:00, 60
+  minutes, and refused in 1 ms because nothing listened on port 3876. Nothing was created in Roamies: the tool
+  refused before making a to-do, so there was nothing to mirror when the app was back (no sync failed after
+  22:17:56). The reply, as kept in the session file, was "I couldn't book it ... I'll book Friday ten to eleven",
+  not "added". The to-do of that name already on the list (`c37ddd8`) is the one made at 22:06 for Thursday 17:00.
 
 ## 6. Still to test
 
@@ -321,6 +333,11 @@ the screen blocks clicks.
   bubble with it; the question coming back at the end of the next exchange, after "thanks" and after 20 quiet
   seconds; a stale question dropped with one line; Auto Listen after a reply ending in a question, and
   `autoListenQuestions: false`; a second display with the pointer on it when the window opens; Bluetooth output.
+- [ ] The three fixes of 2026-11-18 on the Mac, after an install: "sort my tasks" left unanswered twice, then
+  answered, with nothing said afterwards about a dropped question (the two copies still in `state.json` from
+  `4916c04` should go without a word); with Super Productivity closed, "book Friday from 10 to 11 for ...": said as
+  saved and to be booked later, then on the calendar within a minute of opening the app, with one line; the same
+  with a slot that overlaps something (the question); "what's pending?" while one is kept.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.

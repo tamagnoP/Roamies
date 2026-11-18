@@ -50,6 +50,33 @@ const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(
 const span = (b) => `${hm(b.start)} to ${hm(b.start + b.minutes * 60_000)}`;
 const dayOf = (text) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text ?? '').trim()); const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; return d && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3] ? d : null; };
 const clockOf = (text) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim()); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
+/** A day as it was said, turned into a date by code, not by the model: "today", "tomorrow", a weekday, or
+ *  YYYY-MM-DD. A weekday is the next day of that name counting today; today itself only while `passed(day)` is false
+ *  (a block whose time today is over means the same day next week). → a Date at 00:00, or null. */
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+export function dayFrom(text, nowMs, passed = () => false) {
+  const exact = dayOf(text);
+  if (exact) return exact;
+  const word = String(text ?? '').trim().toLowerCase().replace(/^(on|this)\s+/, '').replace(/[.,]$/, '');
+  const n = new Date(nowMs), today = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  const plus = (d) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + d);
+  if (word === 'today') return today;
+  if (word === 'tomorrow') return plus(1);
+  const w = WEEKDAYS.findIndex((name) => name === word || (word.length === 3 && name.startsWith(word)));
+  if (w < 0) return null;
+  const ahead = (w - today.getDay() + 7) % 7;
+  return ahead === 0 && passed(today) ? plus(7) : plus(ahead);
+}
+/** The length of a block, in minutes, from its two times: worked out here, not by the model. */
+export function minutesBetween(start, end) {
+  const a = clockOf(start), b = clockOf(end);
+  if (a === null) throw new Error('The start has to be a time, HH:MM.');
+  if (b === null) throw new Error('The end has to be a time, HH:MM.');
+  if (b <= a) throw new Error(`The end (${String(end).trim()}) isn't after the start (${String(start).trim()}). Times are on the 24-hour clock: one in the afternoon is 13:00.`);
+  if (b - a < 5 || b - a > 720) throw new Error('A block is between 5 minutes and 12 hours long.');
+  return b - a;
+}
+const DATE_HOW = 'The date has to be a weekday ("friday"), "today", "tomorrow", or YYYY-MM-DD.';
 const dayName = (d) => d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 /** Two stretches of time overlap. One with no length is a moment, and clashes when it falls inside the other. */
 const overlap = (a, b) => a.start < b.start + Math.max(b.minutes, 1) * 60_000 && b.start < a.start + Math.max(a.minutes, 1) * 60_000;
@@ -456,9 +483,10 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return { t, link };
   }
   const settle = async (pre, said) => { const r = await sync('tool'); return [said, r.ok ? '' : 'Super Productivity stopped answering before this reached it: it is saved here and goes over at the next sync.', pre, r.text].filter(Boolean).join('\n'); };
-  const when = (date, start) => {
-    const day = dayOf(date), at = clockOf(start);
-    if (!day) throw new Error('The date has to be YYYY-MM-DD.');
+  const when = (date, start, mins = 0) => {
+    const at = clockOf(start);
+    const day = dayFrom(date, now(), (today) => at !== null && today.getTime() + (at + (mins ?? 0)) * 60_000 <= now());
+    if (!day) throw new Error(DATE_HOW);
     if (at === null) throw new Error('The start has to be a time, HH:MM.');
     return { day, start: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, at).getTime() };
   };
@@ -562,14 +590,22 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     pending: keep(kept, 'plan', `Put the plan for ${dayName(day)} on the calendar (${placed.length} block${placed.length === 1 ? '' : 's'})?`, { date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`, shown, placed: placed.map((p) => ({ todo: p.todo, title: p.title, start: p.start, minutes: p.minutes })), left: left.map((l) => ({ title: l.title })) }),
   }, signal);
   const minutesArg = z.number().int().min(5).max(720);
+  /** A block's length: from start and end when an end was given (never both an end and minutes), else minutes. */
+  const lengthOf = (start, end, mins) => {
+    if (end === undefined || end === null || end === '') return mins;
+    if (mins) throw new Error('Give end or minutes, not both: with an end, the app works out the length.');
+    return minutesBetween(start, end);
+  };
+  const DATE_ARG = 'date is the day as they said it: "today", "tomorrow", a weekday ("friday": the app works out which date that is, the next one counting today), or YYYY-MM-DD when they named a date. Never work out the date of a weekday yourself. When they give a start and an end ("from 10 to 11"), give start and end (HH:MM, 24-hour) and no minutes: the app works out the length. The result names the day and times that were used: say those.';
   const blockTools = [
     {
       name: 'schedule_block',
-      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title for something new, which also becomes a to-do. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked.',
-      parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), minutes: minutesArg.optional() }),
-      execute: async ({ todo, title: name, date, start, minutes: mins }, ctx) => {
+      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title for something new, which also becomes a to-do. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked. ' + DATE_ARG,
+      parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), end: z.string().optional(), minutes: minutesArg.optional() }),
+      execute: async ({ todo, title: name, date, start, end, minutes: given }, ctx) => {
         if (!todo === !name?.trim()) throw new Error('Give either todo (an id) or title (something new), not both.');
-        const at = when(date, start);
+        const mins = lengthOf(start, end, given);
+        const at = when(date, start, mins);
         let pre;
         try { pre = await fresh('place a block'); } catch (e) {
           if (!(e instanceof Away)) throw e;
@@ -592,7 +628,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
           if (!mins) throw new Error('How long does it take? Ask, then give minutes.');
           id = (await todos.add(title(name))).id; // every block has a to-do behind it
           const made = await sync('tool');
-          if (!made.ok || !get().links[id]) throw new Error(`${quote(title(name))} is on the to-do list, but Super Productivity stopped answering before its block could be placed. Try the block again later.`);
+          if (!made.ok || !get().links[id]) return keepBlock({ todo: id, name: title(name), start: at.start, mins, made: true }); // the app went away in between: the slot is kept
         }
         const { t, link } = await todoFor(id);
         const length = mins ?? link.local.minutes;
@@ -605,10 +641,10 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'move_block',
-      description: 'Move a to-do\'s block on the calendar to another day or time, or change its length. Give what changes; the rest stays.',
-      parameters: z.object({ todo: z.string(), date: z.string().optional(), start: z.string().optional(), minutes: minutesArg.optional() }),
-      execute: async ({ todo, date, start, minutes: mins }, ctx) => {
-        if (!date && !start && !mins) throw new Error('Say what changes: date, start or minutes.');
+      description: 'Move a to-do\'s block on the calendar to another day or time, or change its length. Give what changes; the rest stays. If Super Productivity is closed the app keeps the move and makes it itself when it is open again: say what the result says, never that it is moved. ' + DATE_ARG,
+      parameters: z.object({ todo: z.string(), date: z.string().optional(), start: z.string().optional(), end: z.string().optional(), minutes: minutesArg.optional() }),
+      execute: async ({ todo, date, start, end, minutes: given }, ctx) => {
+        if (!date && !start && !end && !given) throw new Error('Say what changes: date, start, end or minutes.');
         let pre;
         try { pre = await fresh('move a block'); } catch (e) {
           if (!(e instanceof Away)) throw e;
@@ -620,16 +656,16 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
           const from = waiting ?? (local && local.start !== null ? local : null);
           if (!from) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
           const was = new Date(from.start);
-          const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(from.start));
-          const length = mins ?? from.minutes;
+          const length = lengthOf(start ?? hm(from.start), end, given) ?? from.minutes;
+          const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(from.start), length);
           if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
           return keepBlock({ todo, name: t.text, start: at.start, mins: length, moved: true });
         }
         const { t, link } = await todoFor(todo);
         if (link.local.start === null) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
         const was = new Date(link.local.start);
-        const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(link.local.start));
-        const length = mins ?? link.local.minutes;
+        const length = lengthOf(start ?? hm(link.local.start), end, given) ?? link.local.minutes;
+        const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(link.local.start), length);
         if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
         await place(todo, t.text, at.start, length, ctx?.signal);
         log('calendar_block', { what: 'moved' });
@@ -655,11 +691,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'show_day',
-      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by other tasks they scheduled in Super Productivity themselves (given as taken time only).',
+      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by other tasks they scheduled in Super Productivity themselves (given as taken time only). date: "today", "tomorrow", a weekday (the app works out its date) or YYYY-MM-DD.',
       parameters: z.object({ date: z.string() }),
       execute: async ({ date }) => {
-        const day = dayOf(date);
-        if (!day) throw new Error('The date has to be YYYY-MM-DD.');
+        const day = dayFrom(date, now());
+        if (!day) throw new Error(DATE_HOW);
         const pre = await fresh('read the calendar');
         const { mine, theirs } = dayBlocks(day, get(), await todos.all());
         const lines = [...mine.map((b) => ({ at: b.start, text: `${span(b)} (${b.minutes} min): ${b.title}${b.done ? ' (done)' : ''} [${b.todo}]` })), ...theirs.map((b) => ({ at: b.start, text: `${span(b)}: taken by a task of their own in Super Productivity` }))].sort((a, b) => a.at - b.at).map((l) => l.text);
@@ -668,11 +704,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'plan_day',
-      description: 'Plan a day: give the to-dos to place, in the order to do them, each with how long it takes (ask when they haven\'t said and the to-do has no length). The app works out the times itself, inside the working day, keeping lunch and everything already scheduled free, then shows them the whole plan and creates it only after their yes. from and until (HH:MM) stretch or shorten the day for this one plan, only when they say so ("plan until 20:00 today").',
+      description: 'Plan a day: give the to-dos to place, in the order to do them, each with how long it takes (ask when they haven\'t said and the to-do has no length). The app works out the times itself, inside the working day, keeping lunch and everything already scheduled free, then shows them the whole plan and creates it only after their yes. from and until (HH:MM) stretch or shorten the day for this one plan, only when they say so ("plan until 20:00 today"). date: "today", "tomorrow", a weekday (the app works out its date) or YYYY-MM-DD.',
       parameters: z.object({ date: z.string(), items: z.array(z.object({ todo: z.string(), minutes: minutesArg.optional() })).min(1).max(30), from: z.string().optional(), until: z.string().optional() }),
       execute: async ({ date, items, from, until }, ctx) => {
-        const day = dayOf(date);
-        if (!day) throw new Error('The date has to be YYYY-MM-DD.');
+        const day = dayFrom(date, now());
+        if (!day) throw new Error(DATE_HOW);
         const c = settings().calendar, a = from ? clockOf(from) : c.dayStart, b = until ? clockOf(until) : c.dayEnd;
         if (a === null || b === null || a >= b) throw new Error('from and until have to be times, HH:MM, from before until.');
         const pre = await fresh('plan the day');
@@ -893,7 +929,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     let cal;
     try { cal = get(); } catch { return '- Super Productivity: the settings file can\'t be read, so the to-do list isn\'t synced.'; }
     const n = Object.keys(cal.links).length, later = kept();
-    const how = ' When a calendar tool needs a yes (the first time, an overlap, a day plan, a sorting proposal), the app opens a bubble itself and they answer it by saying yes or no, or by clicking: don\'t ask them yourself as well, and never tell them they have to click.';
+    const how = ' When a calendar tool needs a yes (the first time, an overlap, a day plan, a sorting proposal), the app opens a bubble itself and they answer it by saying yes or no, or by clicking: don\'t ask them yourself as well, and never tell them they have to click. What you say about the calendar is what the tool\'s result says was done, with the day and times it names: "on the calendar", "booked" or "scheduled" only when the result says it is on the calendar; when it says the slot is kept until Super Productivity is open, say the task is saved and the slot will be booked when Super Productivity is open.';
     const waits = later.length ? `\n- Not on the calendar yet, kept until Super Productivity is open (the app places them itself then; don't say they are booked): ${later.map((a) => a.brief.replace(/^Put /, '').replace(' on the calendar ', ', ')).join('; ')}.` : '';
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }

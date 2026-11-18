@@ -544,6 +544,12 @@ block has a to-do behind it, and a to-do has one block at most.
 
 - "Put the paper on Monday at ten for ninety minutes": the block goes straight in. If you name something that isn't
   a to-do yet, it becomes one first. If you don't say how long and the to-do has no length yet, Roamies asks.
+- "Book Friday from 10 to 11 for the experiment": a day and two times make a block. The length is worked out from
+  the two times by the code, and the date of a weekday by the code, not by the model: a weekday is the next day of
+  that name counting today (today itself until the block's time is over, then a week on). "Today", "tomorrow" and a
+  date (YYYY-MM-DD) work too; "next Friday" is not guessed at. Roamies says back the day and times that were used.
+- What Roamies says matches what was done: "on the calendar", "booked" or "scheduled" only when the block is on the
+  calendar. The tool's result says which it was, in words the model is told to pass on.
 - Scheduling a to-do that already has a block moves the block. "Move it to Wednesday" and "take it off the calendar"
   do what they say; off the calendar, the to-do and its task stay and keep their length.
 - A block you dictate is placed at the time you said, also outside the working day. If it would overlap something
