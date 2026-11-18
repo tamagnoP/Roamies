@@ -25,7 +25,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { byButton } from './answers.mjs';
+import { FIRST, SECOND, byButton, whichButton } from './answers.mjs';
 import { SP, limitsFor, loadSettings, readState, writeState } from './pi.mjs';
 
 const ROUTES = [['GET', /^\/health$/], ['GET', /^\/tasks(\?[\w=&]*)?$/], ['GET', /^\/tasks\/[^/?#]+$/], ['POST', /^\/tasks$/], ['PATCH', /^\/tasks\/[^/?#]+$/]];
@@ -67,6 +67,43 @@ export function dayFrom(text, nowMs, passed = () => false) {
   const ahead = (w - today.getDay() + 7) % 7;
   return ahead === 0 && passed(today) ? plus(7) : plus(ahead);
 }
+/** "Next friday": which Friday that is, is not guessed and not left to the model. → the two it can be, the coming
+ *  one (as dayFrom gives it) and the one a week later, { name, first, second }; null when the text isn't that. */
+export function nextDays(text, nowMs, passed = () => false) {
+  const m = /^(?:on\s+)?next\s+([a-z]+)[.,]?$/.exec(String(text ?? '').trim().toLowerCase());
+  const first = m && WEEKDAYS.some((name) => name === m[1] || (m[1].length === 3 && name.startsWith(m[1]))) ? dayFrom(m[1], nowMs, passed) : null;
+  if (!first) return null;
+  const name = WEEKDAYS[first.getDay()];
+  return { name: name[0].toUpperCase() + name.slice(1), first, second: new Date(first.getFullYear(), first.getMonth(), first.getDate() + 7) };
+}
+const nth = (n) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
+const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth', 'twenty first', 'twenty second', 'twenty third', 'twenty fourth', 'twenty fifth', 'twenty sixth', 'twenty seventh', 'twenty eighth', 'twenty ninth', 'thirtieth', 'thirty first'];
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+/** The question between the two days of nextDays(), and the phrases that answer it by voice: the day of the month
+ *  in the ways it is said and written down ("the 20th", "twentieth", "Friday the 20th", "20 November"), and which of
+ *  the two it is ("the first one", "the later one"). A phrase that would fit both (the 1st of a month is also "the
+ *  first") is taken for neither (answers.mjs). */
+export function dayChoice({ name, first, second }) {
+  const label = (d) => `${name} the ${nth(d.getDate())}`;
+  const said = (d) => {
+    const n = d.getDate(), wd = name.toLowerCase(), mo = MONTHS[d.getMonth()], out = [];
+    for (const day of [String(n), nth(n), ORDINALS[n - 1]]) {
+      for (const core of [day, `the ${day}`]) for (const lead of ['', `${wd} `]) for (const tail of ['', ` ${mo}`, ` of ${mo}`]) out.push(`${lead}${core}${tail}`);
+      out.push(`${mo} ${day}`, `${mo} the ${day}`, `${wd} ${mo} ${day}`);
+    }
+    return out;
+  };
+  const wd = name.toLowerCase();
+  return {
+    question: `${label(first)} or ${label(second)}?`, choices: [label(first), label(second)],
+    which: {
+      first: [...said(first), 'first', 'the first', 'first one', 'the first one', 'the coming one', `the coming ${wd}`, `this ${wd}`, `this coming ${wd}`, 'the earlier one', 'the sooner one'],
+      second: [...said(second), 'second', 'the second', 'second one', 'the second one', 'the later one', 'the one after', `the ${wd} after`, `the one after that`, 'a week later', 'the week after'],
+      hint: `the ${nth(first.getDate())} or the ${nth(second.getDate())}`,
+    },
+  };
+}
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 /** The length of a block, in minutes, from its two times: worked out here, not by the model. */
 export function minutesBetween(start, end) {
   const a = clockOf(start), b = clockOf(end);
@@ -76,7 +113,7 @@ export function minutesBetween(start, end) {
   if (b - a < 5 || b - a > 720) throw new Error('A block is between 5 minutes and 12 hours long.');
   return b - a;
 }
-const DATE_HOW = 'The date has to be a weekday ("friday"), "today", "tomorrow", or YYYY-MM-DD.';
+const DATE_HOW = 'The date has to be a weekday ("friday"), "next" and a weekday ("next friday"), "today", "tomorrow", or YYYY-MM-DD.';
 const dayName = (d) => d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 /** Two stretches of time overlap. One with no length is a moment, and clashes when it falls inside the other. */
 const overlap = (a, b) => a.start < b.start + Math.max(b.minutes, 1) * 60_000 && b.start < a.start + Math.max(a.minutes, 1) * 60_000;
@@ -590,21 +627,52 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     pending: keep(kept, 'plan', `Put the plan for ${dayName(day)} on the calendar (${placed.length} block${placed.length === 1 ? '' : 's'})?`, { date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`, shown, placed: placed.map((p) => ({ todo: p.todo, title: p.title, start: p.start, minutes: p.minutes })), left: left.map((l) => ({ title: l.title })) }),
   }, signal);
   const minutesArg = z.number().int().min(5).max(720);
-  /** A block's length: from start and end when an end was given (never both an end and minutes), else minutes. */
+  /** A block's length: from start and end when an end was given, else minutes. An end and a length given together
+   *  are taken when they agree, and refused only when they don't. */
   const lengthOf = (start, end, mins) => {
     if (end === undefined || end === null || end === '') return mins;
-    if (mins) throw new Error('Give end or minutes, not both: with an end, the app works out the length.');
-    return minutesBetween(start, end);
+    const between = minutesBetween(start, end);
+    if (mins && mins !== between) throw new Error(`The end and the length don't agree: ${String(start).trim()} to ${String(end).trim()} is ${between} minutes, and minutes says ${mins}. Nothing was changed. Ask which they meant, then give one of them.`);
+    return between;
   };
-  const DATE_ARG = 'date is the day as they said it: "today", "tomorrow", a weekday ("friday": the app works out which date that is, the next one counting today), or YYYY-MM-DD when they named a date. Never work out the date of a weekday yourself. When they give a start and an end ("from 10 to 11"), give start and end (HH:MM, 24-hour) and no minutes: the app works out the length. The result names the day and times that were used: say those.';
-  const blockTools = [
-    {
-      name: 'schedule_block',
-      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title for something new, which also becomes a to-do. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked. ' + DATE_ARG,
-      parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), end: z.string().optional(), minutes: minutesArg.optional() }),
-      execute: async ({ todo, title: name, date, start, end, minutes: given }, ctx) => {
-        if (!todo === !name?.trim()) throw new Error('Give either todo (an id) or title (something new), not both.');
+  /** The open to-dos a block can be for whose title is this one, ignoring case and the spaces around it. */
+  const sameTitle = async (name) => { const want = title(name).toLowerCase(); return (await todos.all()).filter((t) => t.status === 'open' && t.kind === 'commitment' && title(t.text).toLowerCase() === want); };
+  const dueTold = (t) => { const b = get().actions.find((a) => a.todo === t.id) ?? null, at = get().links[t.id]?.local.start ?? null; return `${t.due ? `due ${dayName(new Date(t.due))}, ${hm(t.due)}` : 'no due time'}${at !== null ? `; on the calendar ${slot({ start: at, minutes: get().links[t.id].local.minutes })}` : b ? `; slot kept for ${slot(b)}` : ''}`; };
+  /** "Next friday" (nextDays): the owner is asked which of the two it is, in a bubble that takes a click or a spoken
+   *  answer and has its answer window; the model is never asked for the date. Anything else is returned as it came.
+   *  pending: { tool, args }, what is kept when nobody answers (flow.mjs asks it again); none for a tool whose
+   *  request isn't worth asking again later. → the date, YYYY-MM-DD. */
+  async function dayAsked(date, { start = null, mins = 0, what, pending = null, signal, kept = null }) {
+    const at = start == null ? null : clockOf(start);
+    const two = nextDays(date, now(), (today) => at !== null && today.getTime() + (at + (mins ?? 0)) * 60_000 <= now());
+    if (!two) return date;
+    const c = dayChoice(two);
+    let a;
+    try {
+      a = whichButton(await ask({ placeholder: `${what}: ${c.question}`, spoken: c.question, choices: c.choices, which: c.which, pending: pending ? keep(kept, 'day', `${what}: ${c.question}`, { ...pending, name: two.name, first: ymd(two.first), second: ymd(two.second) }) : null }, signal), c.choices);
+    } catch (e) {
+      if (e?.name === 'Unanswered' && !pending) throw new Error(`They didn't say which ${two.name}, so nothing was done. Don't ask again unless they bring it up.`);
+      throw e;
+    }
+    log('calendar_day', { asked: true, answered: a === FIRST || a === SECOND });
+    if (a !== FIRST && a !== SECOND) throw Object.assign(new Error(`They were asked which ${two.name} (${c.question}) and chose neither. Nothing was changed. Don't pick one for them.`), { declined: true });
+    return ymd(a === FIRST ? two.first : two.second);
+  }
+  const keptSay = (name, start, mins) => `${quote(name)} is saved, and its slot, ${slot({ start, minutes: mins })}, will be booked when Super Productivity is open.`;
+  const DATE_ARG = 'date is the day as they said it: "today", "tomorrow", a weekday ("friday": the app works out which date that is, the next one counting today), "next friday" when they said "next" (the app asks them itself which Friday they mean, and the result names it), or YYYY-MM-DD when they named a date. Never work out the date of a weekday yourself, and never turn "next friday" into a date or ask them which one. When they give a start and an end ("from 10 to 11"), give start and end (HH:MM, 24-hour) and no minutes: the app works out the length (an end and minutes together are refused when they disagree). The result names the day and times that were used: say those.';
+  /** schedule_block. → { text: the tool's result, for the model; say: the same in a line for the owner }.
+   *  kept: the pending "which day" question this answers (flow.mjs). */
+  async function doSchedule({ todo, title: name, date, start, end, minutes: given }, signal, kept = null) {
+        if (!todo === !name?.trim()) throw new Error('Give either todo (an id) or title, not both.');
+        // A title that an open to-do has is that to-do: no second one of the same name is made.
+        let found = false;
+        if (!todo) {
+          const same = await sameTitle(name);
+          if (same.length > 1) throw new Error(`${same.length} open to-dos are called ${quote(title(name))}: ${same.map((t) => `${t.id} (${dueTold(t)})`).join('; ')}. Nothing was changed and no new to-do was made. Ask which one they mean, telling them apart by those times, then call this again with its todo id.`);
+          if (same.length === 1) { todo = same[0].id; found = true; }
+        }
         const mins = lengthOf(start, end, given);
+        date = await dayAsked(date, { start, mins, what: `"${String(date).trim()}" for ${quote(todo ? (await openTodo(todo)).text : title(name))}`, pending: { tool: 'schedule_block', args: { ...(todo ? { todo } : { title: title(name) }), date, start, ...(end ? { end } : {}), ...(given ? { minutes: given } : {}) }, was: todo ? get().links[todo]?.local.start ?? null : null }, signal, kept });
         const at = when(date, start, mins);
         let pre;
         try { pre = await fresh('place a block'); } catch (e) {
@@ -616,35 +684,37 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
             const t = await openTodo(todo);
             const length = mins ?? get().links[todo]?.local.minutes;
             if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
-            return keepBlock({ todo, name: t.text, start: at.start, mins: length });
+            return { text: await keepBlock({ todo, name: t.text, start: at.start, mins: length }), say: keptSay(t.text, at.start, length) };
           }
           if (!mins) throw new Error('How long does it take? Ask, then give minutes.');
-          if (!(at.start + mins * 60_000 > now())) return keepBlock({ todo: '', name: title(name), start: at.start, mins }); // throws: nothing is made for a time that has passed
+          if (!(at.start + mins * 60_000 > now())) await keepBlock({ todo: '', name: title(name), start: at.start, mins }); // throws: nothing is made for a time that has passed
           const made = await todos.add(title(name)); // every block has a to-do behind it: mirrored at the next sync
-          return keepBlock({ todo: made.id, name: title(name), start: at.start, mins, made: true });
+          return { text: await keepBlock({ todo: made.id, name: title(name), start: at.start, mins, made: true }), say: keptSay(title(name), at.start, mins) };
         }
         let id = todo;
         if (!id) {
           if (!mins) throw new Error('How long does it take? Ask, then give minutes.');
           id = (await todos.add(title(name))).id; // every block has a to-do behind it
           const made = await sync('tool');
-          if (!made.ok || !get().links[id]) return keepBlock({ todo: id, name: title(name), start: at.start, mins, made: true }); // the app went away in between: the slot is kept
+          if (!made.ok || !get().links[id]) return { text: await keepBlock({ todo: id, name: title(name), start: at.start, mins, made: true }), say: keptSay(title(name), at.start, mins) }; // the app went away in between: the slot is kept
         }
         const { t, link } = await todoFor(id);
         const length = mins ?? link.local.minutes;
         if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
         const moved = link.local.start !== null;
-        await place(id, t.text, at.start, length, ctx?.signal);
+        await place(id, t.text, at.start, length, signal);
         log('calendar_block', { what: moved ? 'moved' : 'placed' });
-        return settle(pre, `${quote(t.text)} is on the calendar ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}${moved ? ' (moved from where it was)' : ''}${todo ? '' : `, and on the to-do list as ${id}`}.`);
-      },
-    },
-    {
-      name: 'move_block',
-      description: 'Move a to-do\'s block on the calendar to another day or time, or change its length. Give what changes; the rest stays. If Super Productivity is closed the app keeps the move and makes it itself when it is open again: say what the result says, never that it is moved. ' + DATE_ARG,
-      parameters: z.object({ todo: z.string(), date: z.string().optional(), start: z.string().optional(), end: z.string().optional(), minutes: minutesArg.optional() }),
-      execute: async ({ todo, date, start, end, minutes: given }, ctx) => {
+        const where = `${quote(t.text)} is on the calendar ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}`;
+        return { text: settle(pre, `${where}${moved ? ' (moved from where it was)' : ''}${found ? `: the to-do of that name already on the list (${id}), so no new one was made` : todo ? '' : `, and on the to-do list as ${id}`}.`), say: `${where}.` };
+  }
+  /** move_block. → { text, say }, as doSchedule. */
+  async function doMove({ todo, date, start, end, minutes: given }, signal, kept = null) {
         if (!date && !start && !end && !given) throw new Error('Say what changes: date, start, end or minutes.');
+        if (date) {
+          const t = await openTodo(todo), from = get().actions.find((a) => a.todo === todo) ?? get().links[todo]?.local;
+          if (!from || from.start == null) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
+          date = await dayAsked(date, { start: start ?? hm(from.start), mins: given ?? from.minutes, what: `"${String(date).trim()}" for ${quote(t.text)}`, pending: { tool: 'move_block', args: { todo, date, ...(start ? { start } : {}), ...(end ? { end } : {}), ...(given ? { minutes: given } : {}) }, was: get().links[todo]?.local.start ?? null }, signal, kept });
+        }
         let pre;
         try { pre = await fresh('move a block'); } catch (e) {
           if (!(e instanceof Away)) throw e;
@@ -659,7 +729,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
           const length = lengthOf(start ?? hm(from.start), end, given) ?? from.minutes;
           const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(from.start), length);
           if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
-          return keepBlock({ todo, name: t.text, start: at.start, mins: length, moved: true });
+          return { text: await keepBlock({ todo, name: t.text, start: at.start, mins: length, moved: true }), say: keptSay(t.text, at.start, length) };
         }
         const { t, link } = await todoFor(todo);
         if (link.local.start === null) throw new Error(`${quote(t.text)} has no block to move. schedule_block places one.`);
@@ -667,10 +737,23 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         const length = lengthOf(start ?? hm(link.local.start), end, given) ?? link.local.minutes;
         const at = when(date ?? `${was.getFullYear()}-${pad(was.getMonth() + 1)}-${pad(was.getDate())}`, start ?? hm(link.local.start), length);
         if (!length) throw new Error(`How long does ${quote(t.text)} take? Ask, then give minutes.`);
-        await place(todo, t.text, at.start, length, ctx?.signal);
+        await place(todo, t.text, at.start, length, signal);
         log('calendar_block', { what: 'moved' });
-        return settle(pre, `${quote(t.text)} is now ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}.`);
-      },
+        const where = `${quote(t.text)} is now ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}.`;
+        return { text: settle(pre, where), say: where };
+  }
+  const blockTools = [
+    {
+      name: 'schedule_block',
+      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title: what they called it. With a title, the app uses the open to-do of that title when there is exactly one, makes a new to-do when there is none, and when several have it the result lists them with their due times: ask which, then give its todo id. A to-do has one block: scheduling it again moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked. ' + DATE_ARG,
+      parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), end: z.string().optional(), minutes: minutesArg.optional() }),
+      execute: async (args, ctx) => (await doSchedule(args, ctx?.signal)).text,
+    },
+    {
+      name: 'move_block',
+      description: 'Move a to-do\'s block on the calendar to another day or time, or change its length. Give what changes; the rest stays. If Super Productivity is closed the app keeps the move and makes it itself when it is open again: say what the result says, never that it is moved. ' + DATE_ARG,
+      parameters: z.object({ todo: z.string(), date: z.string().optional(), start: z.string().optional(), end: z.string().optional(), minutes: minutesArg.optional() }),
+      execute: async (args, ctx) => (await doMove(args, ctx?.signal)).text,
     },
     {
       name: 'unschedule_block',
@@ -691,10 +774,10 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'show_day',
-      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by other tasks they scheduled in Super Productivity themselves (given as taken time only). date: "today", "tomorrow", a weekday (the app works out its date) or YYYY-MM-DD.',
+      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by other tasks they scheduled in Super Productivity themselves (given as taken time only). date: "today", "tomorrow", a weekday (the app works out its date), "next friday" as they said it (the app asks them which) or YYYY-MM-DD.',
       parameters: z.object({ date: z.string() }),
       execute: async ({ date }) => {
-        const day = dayFrom(date, now());
+        const day = dayFrom(await dayAsked(date, { what: `"${String(date).trim()}"` }), now());
         if (!day) throw new Error(DATE_HOW);
         const pre = await fresh('read the calendar');
         const { mine, theirs } = dayBlocks(day, get(), await todos.all());
@@ -707,7 +790,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       description: 'Plan a day: give the to-dos to place, in the order to do them, each with how long it takes (ask when they haven\'t said and the to-do has no length). The app works out the times itself, inside the working day, keeping lunch and everything already scheduled free, then shows them the whole plan and creates it only after their yes. from and until (HH:MM) stretch or shorten the day for this one plan, only when they say so ("plan until 20:00 today"). date: "today", "tomorrow", a weekday (the app works out its date) or YYYY-MM-DD.',
       parameters: z.object({ date: z.string(), items: z.array(z.object({ todo: z.string(), minutes: minutesArg.optional() })).min(1).max(30), from: z.string().optional(), until: z.string().optional() }),
       execute: async ({ date, items, from, until }, ctx) => {
-        const day = dayFrom(date, now());
+        const day = dayFrom(await dayAsked(date, { what: `The plan for "${String(date).trim()}"`, signal: ctx?.signal }), now());
         if (!day) throw new Error(DATE_HOW);
         const c = settings().calendar, a = from ? clockOf(from) : c.dayStart, b = until ? clockOf(until) : c.dayEnd;
         if (a === null || b === null || a >= b) throw new Error('from and until have to be times, HH:MM, from before until.');
@@ -886,6 +969,25 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         log('calendar_block', { what: 'placed' });
         sync('change').catch(() => {});
         return { say: `${quote(t.text)} is on the calendar ${dayName(new Date(start))}, ${span({ start, minutes: mins })}.` };
+      } };
+    },
+    // "Next friday" that got no answer: asked again, and then the block is placed (or kept) as it would have been.
+    async day(q) {
+      const { tool, args = {}, first, was = null, name = 'day' } = q.data ?? {};
+      const run = tool === 'schedule_block' ? doSchedule : tool === 'move_block' ? doMove : null, day = dayOf(first);
+      if (!run || !day) return DONE;
+      const all = await todos.all();
+      let what = quote(title(args.title));
+      if (args.todo) {
+        const t = all.find((x) => x.id === args.todo);
+        if (!t || t.status !== 'open') return DONE; // done or taken off the list: no block is wanted for it
+        const at = get().links[args.todo]?.local.start ?? null;
+        if (at !== was || get().actions.some((a) => a.todo === args.todo)) return DONE; // placed, moved or kept since: a later request settled it
+        what = quote(t.text);
+      }
+      if (day.getTime() + 24 * 3600_000 <= now()) return { dropped: `I had asked which ${name} you meant for ${what}. ${name} the ${nth(day.getDate())} has passed, so nothing was put on the calendar.` };
+      return { ask: async () => {
+        try { return { say: (await run(args, undefined, q)).say }; } catch (e) { if (e.declined) return {}; throw e; }
       } };
     },
     async plan(q) {

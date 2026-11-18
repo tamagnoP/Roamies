@@ -471,7 +471,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   for (const f of ['pi.mjs', 'calendar.mjs', 'notes.mjs', 'guard.mjs', 'reference.mjs', 'answers.mjs']) {
     const src = fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
     for (const line of src.split('\n').filter((l) => /choices:/.test(l) && !/^\s*(\/\/|\*)/.test(l) && /ask\(|yesTo\(/.test(l))) {
-      assert.ok(/firstButton\(|yesTo\(|\.then\(\(a\) => \{[^\n]*firstButton\(a, buttons\)|placeholder: `\$\{opts\.placeholder\}/.test(line), `${f}: a bubble's answer is not taken by button position: ${line.trim().slice(0, 90)}`);
+      assert.ok(/firstButton\(|whichButton\(|yesTo\(|\.then\(\(a\) => \{[^\n]*firstButton\(a, buttons\)|placeholder: `\$\{opts\.placeholder\}/.test(line), `${f}: a bubble's answer is not taken by button position: ${line.trim().slice(0, 90)}`);
       assert.ok(!/isSend\(|isYes\(|spokenAnswer\(/.test(line), `${f}: a click judged by words: ${line.trim().slice(0, 90)}`);
     }
     assert.ok(!/isSend\((a|yes|answer)\)/.test(src), `${f}: an answer from a bubble is passed to the spoken-word check`);

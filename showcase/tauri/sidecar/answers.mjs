@@ -14,11 +14,19 @@
 //     after a key press, filler words before or after an answer ("um, yes", "no then") don't spoil it. A phrase
 //     that wasn't taken is shown as the bubble's last line until the next one, on screen only. When the window runs
 //     out with no answer the bubble closes, the question is kept for later, and ask() rejects with Unanswered.
+//   - A question between two things ("Friday the 20th or Friday the 27th?", opts.which). Its two buttons are the
+//     two things; the caller gives the phrases that name each, and what is said counts only when it is made of one
+//     side's phrases and nothing else. Digits count there ("the 20th"). A no word answers neither. Otherwise it is a
+//     bubble like the others: said, with an answer window, kept when unanswered.
 
 // A click is never judged by words. The overlay answers a bubble with buttons by which button it was: FIRST for the
 // first one (also the Y key), nothing for any other. Should a page ever hand back the button's label instead, the
 // first label is still the first button, whatever it says.
 export const FIRST = 'yes';
+// The second button of a question between two things (opts.which). Of a yes/no bubble the second button is a no.
+export const SECOND = 'second';
+/** The answer to a question between two things, by which button it was: FIRST, SECOND, or null for neither. */
+export const whichButton = (answer, choices = []) => (firstButton(answer, choices) ? FIRST : answer === SECOND || (typeof answer === 'string' && choices.length > 1 && answer === choices[1]) ? SECOND : null);
 export const firstButton = (answer, choices = []) => answer === FIRST || (typeof answer === 'string' && choices.length > 0 && answer === choices[0]);
 /** A question bubble with buttons, answered by position: (opts, signal) → true when the first button was pressed. */
 export const byButton = (ask) => async (opts, signal) => firstButton(await ask(opts, signal), opts.choices);
@@ -29,7 +37,9 @@ export const SPOKEN_HINT = 'Say yes or no, or click.';
 
 export const plain = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/[^a-z]+/g, ' ').trim();
 // Longest first, so "yes please" is one phrase and not "yes" followed by something else.
-export const only = (words) => new RegExp(`^(?:(?:${words.map(plain).sort((a, b) => b.length - a.length).join('|')})(?: |$))+$`);
+export const only = (words, norm = plain) => new RegExp(`^(?:(?:${words.map(norm).sort((a, b) => b.length - a.length).join('|')})(?: |$))+$`);
+/** As plain(), with the digits kept: for the answers that name a date. */
+export const plainNum = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const YES = only(YES_WORDS), NO = only(NO_WORDS);
 /** What was said, as an answer to a yes/no bubble: 'yes', 'no', or null when it isn't clearly either. */
 export function spokenAnswer(text) {
@@ -42,8 +52,8 @@ export function spokenAnswer(text) {
 export const FILLER_WORDS = ['and', 'um', 'uh', 'now', 'so', 'well', 'just', 'please', 'then', 'sir', 'jarvis', 'roamies'];
 const FILLERS = new Set(FILLER_WORDS.map(plain));
 /** What was said, in plain words, without the filler words at its start and end. */
-export function unfilled(text) {
-  const w = plain(text).split(' ').filter(Boolean);
+export function unfilled(text, norm = plain) {
+  const w = norm(text).split(' ').filter(Boolean);
   let a = 0, b = w.length;
   while (a < b && FILLERS.has(w[a])) a++;
   while (b > a && FILLERS.has(w[b - 1])) b--;
@@ -54,6 +64,15 @@ export const CLOSING_PHRASES = ['thanks', 'thank you', 'thanks mate', "that's al
 const CLOSING = only(CLOSING_PHRASES);
 export const isClosing = (text) => CLOSING.test(unfilled(text));
 /** The bubble's last line after a phrase that wasn't taken: what was heard, and what can be said. Screen only. */
+/** What was said, as the answer to a question between two things: FIRST, SECOND, 'no' (neither), or null. A phrase
+ *  that names both sides is given to neither. */
+export function whichAnswer(text, which) {
+  const p = plainNum(text);
+  if (!p) return null;
+  const both = new Set(which.first.map(plainNum).filter((w) => which.second.map(plainNum).includes(w)));
+  const side = (words) => { const mine = words.filter((w) => plainNum(w) && !both.has(plainNum(w))); return mine.length > 0 && only(mine, plainNum).test(p); };
+  return side(which.first) ? FIRST : side(which.second) ? SECOND : NO.test(plain(text)) ? 'no' : null;
+}
 export const heardLine = (text, hint, max = 80) => { const t = String(text ?? '').replace(/\s+/g, ' ').trim(); return `Heard "${t.length > max ? `${t.slice(0, max - 1)}…` : t}". Say ${hint}.`; };
 /** ask() rejects with this when the answer window ran out with no answer: nothing was changed, and the question is
  *  kept (state.json) and asked again by the app when the exchange ends. Its message is what the model is told. */
@@ -73,6 +92,8 @@ export const heardShape = (text) => { const w = plain(text).split(' ').filter(Bo
  * ask: the overlay's question bubble, (opts, signal) → Promise<'yes' | null | text>; an aborted signal closes it.
  * → { ask, listening(), heard(text), unheard(), open(), state() }
  *   ask(opts, signal): the same bubble, with the hint under the question; resolves 'yes' or null, like a click.
+ *     opts.which: { first: [phrases], second: [phrases], hint }: a question between two things. choices are the two;
+ *     resolves FIRST, SECOND, or null for neither.
  *     opts.spoken: what is said aloud for it (else its first line). opts.pending: { kind, brief, data }, what is kept
  *     when the answer window runs out; ask() then rejects with Unanswered.
  *   listening(): the owner has started talking. True when a bubble is open, which is when the caller must not
@@ -92,14 +113,14 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
   function askSpoken(opts, signal) {
     const closing = new AbortController();
     const inner = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
-    const { spoken, pending, ...shown } = opts;
+    const { spoken, pending, which = null, ...shown } = opts;
     return new Promise((resolve, reject) => {
       const entry = {
         settle(answer, by) {
           const i = waiting.indexOf(entry);
           if (i < 0) return;
           waiting.splice(i, 1);
-          log('bubble_answer', { by, yes: answer === FIRST });
+          log('bubble_answer', { by, yes: answer === FIRST, ...(which ? { second: answer === SECOND } : {}) });
           resolve(answer);
           entry.window?.close(!signal?.aborted); // an answer clears every pending copy of the question (flow.mjs); a bubble taken down with its request is not one
           closing.abort(); // answered by voice: the bubble is taken down
@@ -114,11 +135,17 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
           closing.abort();
         },
         // What was heard and not taken, as the bubble's last line (in place of the hint) until the next phrase.
-        refused(text) { retext(`${opts.placeholder}\n${heardLine(text, 'yes or no', heardChars())}`); },
+        refused(text) { retext(`${opts.placeholder}\n${heardLine(text, which ? which.hint : 'yes or no', heardChars())}`); },
+        // What was said, as an answer to this bubble: → [answer] when it is one, else null.
+        judge(text, handsFree) {
+          const a = which ? whichAnswer(handsFree ? text : unfilled(text, plainNum), which) : spokenAnswer(handsFree ? text : unfilled(text));
+          return !a ? null : [a === 'no' ? null : a === 'yes' ? FIRST : a];
+        },
       };
       waiting.push(entry);
       entry.window = question?.({ brief: spoken ?? briefOf(opts.placeholder), pending: pending ?? null, onTimeout: () => entry.unanswered() }) ?? null;
-      Promise.resolve(ask({ ...shown, placeholder: `${opts.placeholder}\n${SPOKEN_HINT}` }, inner)).then((a) => entry.settle(firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
+      // which: the overlay answers the second button with SECOND instead of nothing (host.js).
+      Promise.resolve(ask({ ...shown, ...(which ? { second: SECOND } : {}), placeholder: `${opts.placeholder}\n${which ? `Say ${which.hint}, or click.` : SPOKEN_HINT}` }, inner)).then((a) => entry.settle(which ? whichButton(a, opts.choices) : firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
     });
   }
   return {
@@ -129,8 +156,8 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
     heard(text, { handsFree = false } = {}) {
       talking = false;
       if (!waiting.length) return false;
-      const a = spokenAnswer(handsFree ? text : unfilled(text));
-      if (a) waiting.at(-1).settle(a === 'yes' ? FIRST : null, 'voice');
+      const a = waiting.at(-1).judge(text, handsFree);
+      if (a) waiting.at(-1).settle(a[0], 'voice');
       else { log('bubble_heard', { taken: false, ...heardShape(text), ...(handsFree ? { handsFree: true } : {}) }); if (String(text ?? '').trim()) waiting.at(-1).refused(text); }
       return true;
     },

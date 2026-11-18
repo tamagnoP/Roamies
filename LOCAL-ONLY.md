@@ -447,7 +447,8 @@ Roamies asks the oldest pending question again, one at a time, spoken and with i
 - The same question is pending once. Asked again while it is pending (you made the request again and again didn't
   answer), the new one takes the old one's place. "The same" is: for a hand-off, the same prompt for the same folder
   in the same mode; for the folder question, the same project; for an overlap and for a deleted task, the same to-do;
-  for a day plan, the same day; the sorting proposal and the first-time question exist once each.
+  for a day plan, the same day; for "which Friday?", the same block (its to-do, or its title when it has none yet);
+  the sorting proposal and the first-time question exist once each.
 - When a question is answered, every pending copy of it is cleared without a word: by a spoken yes or no, by a
   click, or because a later request asked the same thing and you answered there.
 - A question whose thing was done meanwhile is dropped without a word: the to-dos are sorted, the block or the plan
@@ -543,11 +544,20 @@ reaches the other.
 block has a to-do behind it, and a to-do has one block at most.
 
 - "Put the paper on Monday at ten for ninety minutes": the block goes straight in. If you name something that isn't
-  a to-do yet, it becomes one first. If you don't say how long and the to-do has no length yet, Roamies asks.
+  a to-do yet, it becomes one first. A title that exactly one open to-do has (ignoring capitals and the spaces
+  around it) is that to-do: no second one is made. If several have it, Roamies asks which, telling them apart by
+  their due times, and nothing is made or changed until you say. The same holds while Super Productivity is closed. If you don't say how long and the to-do has no length yet, Roamies asks.
 - "Book Friday from 10 to 11 for the experiment": a day and two times make a block. The length is worked out from
   the two times by the code, and the date of a weekday by the code, not by the model: a weekday is the next day of
   that name counting today (today itself until the block's time is over, then a week on). "Today", "tomorrow" and a
-  date (YYYY-MM-DD) work too; "next Friday" is not guessed at. Roamies says back the day and times that were used.
+  date (YYYY-MM-DD) work too. Roamies says back the day and times that were used. An end time and a length said
+  together are taken when they agree; when they don't, nothing is changed and Roamies asks which you meant.
+- "Next Friday" is a question, not a guess: the code works out the two it can be, the coming one and the one a
+  week later, and a bubble asks "Friday the 20th or Friday the 27th?" with the two as its buttons. It is a question
+  like the others: said in an exchange, with an answer window, kept when unanswered and asked again later. Answer
+  by clicking, or by saying the day of the month ("the 27th", "Friday the twentieth"), "the first one" or "the
+  later one"; "no" is neither, and nothing changes. The model is never asked for the date. Reading or planning
+  "next Friday" asks the same way, but that question is not kept.
 - What Roamies says matches what was done: "on the calendar", "booked" or "scheduled" only when the block is on the
   calendar. The tool's result says which it was, in words the model is told to pass on.
 - Scheduling a to-do that already has a block moves the block. "Move it to Wednesday" and "take it off the calendar"

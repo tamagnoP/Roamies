@@ -119,9 +119,12 @@
     const question = m.prompt || m.placeholder || '';
     // A yes/no: Allow answers yes, any other button no. The field only takes keys then (Y, N, Tab, arrows, Enter).
     const choices = Array.isArray(m.choices) && m.choices.length ? m.choices.map(String) : null;
-    const h = a.prompt({ placeholder: question, mask: m.mask, onPress: focusField, choices, onChoose: (i) => finishAsk(i === 0 ? 'yes' : null) });
-    ask = { id: m.id, h, choices, sel: -1, label: null };
-    if (choices) { ask.label = field.getAttribute('aria-label'); field.setAttribute('aria-label', `${question} Press Y to allow or N to decline.`); }
+    // Local-only build: a question between two things (m.second): the second button answers with that, not with a no.
+    const second = choices && typeof m.second === 'string' && m.second ? m.second : null;
+    const pick = (i) => (i === 0 ? 'yes' : i === 1 && second ? second : null);
+    const h = a.prompt({ placeholder: question, mask: m.mask, onPress: focusField, choices, onChoose: (i) => finishAsk(pick(i)) });
+    ask = { id: m.id, h, choices, sel: -1, label: null, pick, second };
+    if (choices) { ask.label = field.getAttribute('aria-label'); field.setAttribute('aria-label', second ? `${question} Press Tab to choose and Enter to confirm, or N for neither.` : `${question} Press Y to allow or N to decline.`); }
     focusField();
   };
   // The bubble draws the caret where the field has it, so moving back to fix a word shows where typing goes.
@@ -135,13 +138,13 @@
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
       e.preventDefault();
       const n = ask.choices.length, key = e.key.toLowerCase();
-      if (key === 'y') finishAsk('yes');
+      if (key === 'y' && !ask.second) finishAsk('yes');
       else if (key === 'n' || key === 'escape') finishAsk(null);
       else if (key === 'tab' || key === 'arrowright' || key === 'arrowleft') {
         const back = key === 'arrowleft' || (key === 'tab' && e.shiftKey);
         ask.sel = ask.sel < 0 ? (back ? n - 1 : 0) : (ask.sel + (back ? n - 1 : 1)) % n;
         ask.h.select(ask.sel);
-      } else if ((key === 'enter' || key === ' ') && ask.sel >= 0) finishAsk(ask.sel === 0 ? 'yes' : null);
+      } else if ((key === 'enter' || key === ' ') && ask.sel >= 0) finishAsk(ask.pick(ask.sel));
       return;
     }
     setTimeout(syncField, 0); // arrows, Home and End move the caret without an input event

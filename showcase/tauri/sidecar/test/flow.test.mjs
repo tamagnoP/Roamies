@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, createAnswers, heardLine, isClosing, unfilled } from '../answers.mjs';
+import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, SECOND, createAnswers, heardLine, isClosing, unfilled, whichAnswer } from '../answers.mjs';
 import { createFlow, SAME, sameKey } from '../flow.mjs';
 import { HANDS_FREE_SEND, LIMITS, WINDOW, briefly, codeReference, createPi, isHandsFreeSend, loadSettings, readState, settingsDefaults } from '../pi.mjs';
 import { createSpeaker } from '../speaker.mjs';
@@ -648,6 +648,59 @@ const pendingNow = () => readState(dir).pending ?? [];
   await reset();
 }
 
+// ================= a question between two things ("next friday": Friday the 20th or Friday the 27th?): said, with
+// an answer window, answered by voice or click, kept when unanswered, like any other question
+{
+  const which = { first: ['the 20th', '20th', 'twentieth', 'the first', 'the first one'], second: ['the 27th', '27th', 'twenty seventh', 'the second', 'the later one'], hint: 'the 20th or the 27th' };
+  const Q = '"next friday" for "Experiment": Friday the 20th or Friday the 27th?';
+  const askDay = (pending = { kind: 'day', brief: Q, data: { tool: 'schedule_block', args: { title: 'Experiment' } } }) => settled(answers.ask({ placeholder: Q, spoken: 'Friday the 20th or Friday the 27th?', choices: ['Friday the 20th', 'Friday the 27th'], which, pending }));
+  // the words
+  for (const [said, a] of [['the 20th', 'yes'], ['The 27th.', SECOND], ['twenty-seventh', SECOND], ['the first one', 'yes'], ['the later one', SECOND], ['the 27th, the 27th', SECOND], ['no', 'no'], ['cancel', 'no'], ['yes', null], ['the 20th or the 27th', null], ['the 20th, the 27th', null], ['the 2th', null], ['the th', null], ['', null], ['put it on the 27th', null]]) assert.equal(whichAnswer(said, which), a, said);
+  assert.equal(whichAnswer('the first', { first: ['the first', 'first one'], second: ['the 1st', 'the first'] }), null, 'a phrase that fits both sides is taken for neither');
+  assert.equal(whichAnswer('first one', { first: ['the first', 'first one'], second: ['the 1st', 'the first'] }), 'yes');
+  // said, and the window opens when it has been said; the second button answers with SECOND
+  await exchange();
+  let p = askDay(); await tick();
+  assert.equal(overlay.said.at(-1), 'Friday the 20th or Friday the 27th?'); assert.equal(flow.window(), null);
+  assert.equal(bubble().opts.placeholder, `${Q}\nSay the 20th or the 27th, or click.`); assert.equal(bubble().opts.second, SECOND); assert.ok(!('which' in bubble().opts) && !('pending' in bubble().opts));
+  await played(); assert.notEqual(flow.window(), null);
+  // only an answer counts; a yes is not one here; hands-free, no filler words
+  assert.equal(await inWindow('Yes.'), 'heard'); assert.equal(bubble().open, true);
+  assert.equal(overlay.retexts.at(-1), `${Q}\nHeard "Yes.". Say the 20th or the 27th.`);
+  assert.equal(await inWindow('well, the 27th'), 'heard'); assert.equal(bubble().open, true);
+  assert.equal(await inWindow('Book the 27th and email everyone'), 'heard'); assert.equal(bubble().open, true);
+  assert.deepEqual(enqueued.slice(1), [], 'nothing said there reaches the model');
+  assert.equal(await inWindow('The 27th.'), 'heard');
+  assert.equal((await p).value, SECOND); assert.equal(flow.window(), null); assert.deepEqual(pendingNow(), []);
+  assert.deepEqual(logs.filter(([k]) => k === 'bubble_answer').at(-1)[1], { by: 'voice', yes: false, second: true });
+  assert.ok(!JSON.stringify(logs).includes('27th'), 'the words are in no log');
+  // a click on either button, and after a key press with filler words; a no word is neither
+  p = askDay(); await tick(); bubble().resolve(SECOND); assert.equal((await p).value, SECOND);
+  p = askDay(); await tick(); click(true); assert.equal((await p).value, 'yes');
+  p = askDay(); await tick(); click(false); assert.equal((await p).value, null);
+  p = askDay(); await tick(); await played(); assert.equal(await byKey('um, the 20th please'), 'heard'); assert.equal((await p).value, 'yes');
+  p = askDay(); await tick(); await played(); assert.equal(await inWindow('No.'), 'heard'); assert.equal((await p).value, null);
+  // a yes/no bubble is untouched: its second button is a no, whatever comes back
+  p = settled(answers.ask({ placeholder: 'Sure?', choices: ['Yes', 'No'] })); await tick(); assert.ok(!('second' in bubble().opts)); bubble().resolve(SECOND); assert.equal((await p).value, null);
+  // no answer: closed and kept, once; then asked again when the next exchange ends, and answered
+  await reset(); await exchange();
+  p = askDay(); await tick(); await played(); await advance(10_000);
+  assert.ok((await p).error instanceof Unanswered); assert.equal(bubble().takenDown, true);
+  assert.deepEqual(pendingNow().map((q) => [q.kind, q.brief]), [['day', Q]]);
+  assert.equal(sameKey({ kind: 'day', data: { tool: 'schedule_block', args: { title: ' experiment ' } } }), sameKey(pendingNow()[0]), 'the same block, by its title');
+  assert.notEqual(sameKey({ kind: 'day', data: { tool: 'move_block', args: { todo: 'c1' } } }), sameKey({ kind: 'day', data: { tool: 'move_block', args: { todo: 'c2' } } }));
+  assert.equal(sameKey({ kind: 'day', data: { tool: 'move_block', args: { todo: 'c1', date: 'next friday' } } }), sameKey({ kind: 'day', data: { tool: 'move_block', args: { todo: 'c1', date: 'next monday' } } }));
+  const got = [];
+  flow.resume('day', async (q) => ({ ask: async () => { const a = await answers.ask({ placeholder: Q, spoken: 'Friday the 20th or Friday the 27th?', choices: ['Friday the 20th', 'Friday the 27th'], which, pending: q }); got.push(a); return { say: a ? 'Booked.' : '' }; } }));
+  await quiet(); await exchange(); await quiet();
+  assert.equal(overlay.said.at(-1), 'Friday the 20th or Friday the 27th?'); await played();
+  assert.equal(await inWindow('Friday the 20th'), 'heard'); await tick(); await tick();
+  assert.deepEqual(got, []); // "friday the 20th" is not among this test's phrases: still open
+  assert.equal(await inWindow('the first one'), 'heard'); await tick(); await tick();
+  assert.deepEqual(got, ['yes']); assert.deepEqual(pendingNow(), []); assert.equal(overlay.shown.at(-1), 'Booked.');
+  await reset();
+}
+
 // ================= Q2: the model's own question (Auto Listen), bounded by the same window
 {
   await exchange('which file do you mean');
@@ -760,6 +813,9 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.match(host, /Roamie\.voiceOut\.onMark = \(mark\) => send\(\{ type: 'speech_mark', mark \}\)/);
   assert.match(host, /else if \(m\.kind === 'ask_text'\) \{ if \(ask && !ask\.bar && ask\.choices\) ask\.h\.placeholder\?\.\(m\.text\); \}/);
   assert.match(host, /if \(ask\?\.choices && m\.again\) return;/, 'a reopened window makes no second listening sound');
+  // a question between two things: the second button answers with what the sidecar gave (SECOND), and Y is not a yes there
+  assert.match(host, /const second = choices && typeof m\.second === 'string' && m\.second \? m\.second : null;\n\s*const pick = \(i\) => \(i === 0 \? 'yes' : i === 1 && second \? second : null\);/);
+  assert.match(host, /onChoose: \(i\) => finishAsk\(pick\(i\)\)/); assert.match(host, /if \(key === 'y' && !ask\.second\) finishAsk\('yes'\);/); assert.match(host, /finishAsk\(ask\.pick\(ask\.sel\)\);/);
 }
 
 fs.rmSync(home, { recursive: true, force: true });

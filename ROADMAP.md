@@ -316,6 +316,19 @@ the screen blocks clicks.
   refused before making a to-do, so there was nothing to mirror when the app was back (no sync failed after
   22:17:56). The reply, as kept in the session file, was "I couldn't book it ... I'll book Friday ten to eleven",
   not "added". The to-do of that name already on the list (`c37ddd8`) is the one made at 22:06 for Thursday 17:00.
+- **2026-11-18.** Follow-up, on the owner's decisions after the three fixes. (1) A title given to `schedule_block`
+  that exactly one open to-do has is that to-do; several: the tool lists them with their due times and the model
+  asks which; none: a new to-do. Also for a request kept while the app is closed. (2) "Next <weekday>" is a
+  question between the coming one and the one a week later, asked in a bubble by name and date, with a spoken
+  answer and an answer window; the model never produces the date. (3) An end and a length together are taken when
+  they agree. Decided while building: "exactly that title" is the whole text of the to-do, and reminders don't
+  count; which of several to-dos is asked by the model in its reply (they can be more than two; the bubble has two
+  buttons), which of two days by a bubble; the bubble's second button answers "second" (`host.js`; a yes/no
+  bubble is unchanged), and the Y key is not an answer there; a no word or the N key is neither; a phrase that
+  fits both days (the 1st is also "the first") is taken for neither; the question is kept for `schedule_block` and
+  `move_block` (kind `day`) and not for `show_day` and `plan_day`; kept, it is dropped with a line once the coming
+  day is over. The two stale sorting questions of 18 November were removed from `state.json` by running the new
+  rule (`tidy`) over it: one as a second copy, one as done, nothing said.
 
 ## 6. Still to test
 
@@ -338,6 +351,10 @@ the screen blocks clicks.
   `4916c04` should go without a word); with Super Productivity closed, "book Friday from 10 to 11 for ...": said as
   saved and to be booked later, then on the calendar within a minute of opening the app, with one line; the same
   with a slot that overlaps something (the question); "what's pending?" while one is kept.
+- [ ] The follow-up of 2026-11-18 on the Mac: "book next Friday from 10 to 11 for ...": the bubble with the two
+  Fridays as buttons, said aloud; answered by saying "the 27th", and by a click on each button (the second button
+  is new in the overlay and has only been checked in source); left unanswered, it comes back. A block asked for by
+  the title of a to-do already on the list goes to that to-do.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.
