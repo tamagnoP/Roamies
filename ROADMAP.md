@@ -339,6 +339,28 @@ the screen blocks clicks.
   said outside an exchange but gets no answer window there (the microphone still opens by itself only in an
   exchange or when a pending question is asked again); the other sync lines (the block offer, a to-do taken off
   the list, a failed sync) stay silent outside an exchange.
+- **2026-11-19.** A second "Flow test" was made on the installed `9fcb136`. What the log and the session file of
+  19 November show: at 20:48 "Flow test" was made (`ccb9913`) with a kept slot, Friday 10:00 to 11:00, placed at
+  20:49; at 20:50 "next Monday from 2 to 3" reached `schedule_block` as the title "Flow test", matched `ccb9913`
+  and moved its block to Monday 23 November, 14:00 to 15:00 (the reply said so); at 20:51:47 the recogniser wrote
+  "Um, Darby's, a schedule flow test tomorrow at 9.30 minutes." and `schedule_block` received
+  `{"title":"Flow test, second run","date":"tomorrow","start":"09:30","minutes":30}`. One open to-do was called
+  "Flow test" (`ccb9913`, by then on Monday at 14:00, not Friday at 10); none was called "Flow test, second run",
+  so the match had nothing to apply to and `c226ccc` was made. The model chose that title itself ("gave it a new
+  name so Monday's flow test stays put"), after having offered "a second one" in its reply before. The match worked
+  as written; the title it was given was not what was said. Fixed: the tool's description now says a title is what
+  they called it and is never added to or reworded to tell it apart, and the decision is taken away from the
+  model by the owner's new rule: when the title matches an open to-do that already has a block (or a kept slot),
+  the app asks "<title> is already booked for <day> at <time>. Move it, or make a second one?" (buttons Move it,
+  New one; said, with an answer window; "move it", "the same one", "a new one", "a second one"; a no changes
+  nothing; kind `same` when unanswered). A match with no block is used without asking and the reply says so.
+  Matching ignores case, surrounding spaces and a leading "the". Decided while building: a kept slot counts as a
+  block and is said as "already has a slot kept for"; a to-do named by its id still moves without asking; "a
+  second one" can't be said by the model (it is not among the tool's arguments); a relative day ("tomorrow") is
+  kept with the question as its date; with "next Friday" the two questions follow each other and the first answer
+  is kept with the second; a second one chosen without a length is refused with "how long", and the question is
+  asked again on the next call. Not fixed, because it is the recogniser's: "at 9 for 30 minutes" heard as "at
+  9.30 minutes". What stays an instruction to the model, not a rule in code: that it passes the title as said.
 
 ## 6. Still to test
 
@@ -368,6 +390,12 @@ the screen blocks clicks.
 - [ ] Spoken notices (2026-11-19) on the Mac, after an install: with Super Productivity closed, a block asked for;
   after opening the app and with no exchange open, the bubble that says it is on the calendar is also said, in
   one sentence; not said while you are talking or a bubble is open; `"speakNotices": false` leaves it silent.
+- [ ] The same title (2026-11-19) on the Mac, after an install: with "flow test" booked, "schedule flow test
+  tomorrow at 9 for 30 minutes": the bubble "Flow test is already booked for ... Move it, or make a second one?",
+  said, with the buttons Move it and New one; answered by "move it", by "a second one", by each button, by "no";
+  left unanswered, it comes back; a to-do of that title with no block is used without a question and the reply
+  says it is the one already on the list; "the flow test" matches "Flow test". The two to-dos left by the check of
+  19 November ("Flow test" `ccb9913`, "Flow test, second run" `c226ccc`) are still on the list.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.

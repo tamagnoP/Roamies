@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, SECOND, createAnswers, heardLine, isClosing, unfilled, whichAnswer } from '../answers.mjs';
+import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, SECOND, SECOND_WORDS, createAnswers, heardLine, isClosing, unfilled, whichAnswer } from '../answers.mjs';
 import { createFlow, SAME, sameKey } from '../flow.mjs';
 import { HANDS_FREE_SEND, LIMITS, WINDOW, briefly, codeReference, createPi, isHandsFreeSend, loadSettings, readState, settingsDefaults } from '../pi.mjs';
 import { createSpeaker } from '../speaker.mjs';
@@ -698,6 +698,36 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.deepEqual(got, []); // "friday the 20th" is not among this test's phrases: still open
   assert.equal(await inWindow('the first one'), 'heard'); await tick(); await tick();
   assert.deepEqual(got, ['yes']); assert.deepEqual(pendingNow(), []); assert.equal(overlay.shown.at(-1), 'Booked.');
+  await reset();
+}
+
+// ================= "Move it, or make a second one?" (2026-11-19; calendar.mjs asks it when a block is asked for by
+// the title of a to-do that is already booked): said, with its answer window, answered by voice or by either button,
+// a no changes nothing, kept when unanswered
+{
+  const which = { first: [...MOVE_WORDS], second: [...SECOND_WORDS], hint: '"move it" or "a new one"' };
+  const Q = 'Flow test is already booked for Friday 20 November at 10:00. Move it, or make a second one?';
+  const askSame = (pending = { kind: 'same', brief: Q, data: { todo: 'c1', was: 1, args: { title: 'Flow test' } } }) => settled(answers.ask({ placeholder: Q, spoken: Q, choices: ['Move it', 'New one'], which, pending }));
+  for (const [said, a] of [['move it', 'yes'], ['Move it.', 'yes'], ['the same one', 'yes'], ['a new one', SECOND], ['A second one.', SECOND], ['no', 'no'], ['cancel', 'no'], ['yes', null], ['move it or a new one', null], ['the flow test', null]]) assert.equal(whichAnswer(said, which), a, said);
+  await reset(); await exchange();
+  let p = askSame(); await tick();
+  assert.equal(overlay.said.at(-1), Q, 'it is said'); assert.equal(flow.window(), null);
+  assert.equal(bubble().opts.placeholder, `${Q}\nSay "move it" or "a new one", or click.`); assert.deepEqual(bubble().opts.choices, ['Move it', 'New one']); assert.equal(bubble().opts.second, SECOND);
+  await played(); assert.notEqual(flow.window(), null, 'and gets its answer window once it has been said');
+  assert.equal(await inWindow('Yes.'), 'heard'); assert.equal(bubble().open, true, 'a yes is not an answer to it');
+  assert.equal(await inWindow('A second one.'), 'heard'); assert.equal((await p).value, SECOND); assert.equal(flow.window(), null);
+  for (const [said, a] of [['move it', 'yes'], ['the same one', 'yes'], ['a new one', SECOND], ['No.', null]]) { p = askSame(); await tick(); await played(); assert.equal(await inWindow(said), 'heard'); assert.equal((await p).value, a, said); }
+  p = askSame(); await tick(); click(true); assert.equal((await p).value, 'yes', 'the first button: Move it');
+  p = askSame(); await tick(); bubble().resolve(SECOND); assert.equal((await p).value, SECOND, 'the second button: New one');
+  p = askSame(); await tick(); await played(); assert.equal(await byKey('um, the same one please'), 'heard'); assert.equal((await p).value, 'yes');
+  assert.deepEqual(pendingNow(), [], 'an answer keeps nothing');
+  // no answer: closed and kept, once for a to-do
+  await reset(); await exchange();
+  p = askSame(); await tick(); await played(); await advance(10_000);
+  assert.ok((await p).error instanceof Unanswered); assert.equal(bubble().takenDown, true);
+  assert.deepEqual(pendingNow().map((q) => [q.kind, q.brief]), [['same', Q]]);
+  assert.equal(sameKey({ kind: 'same', data: { todo: 'c1', was: 2, args: { title: 'Flow test', date: 'monday' } } }), sameKey(pendingNow()[0]), 'the same to-do');
+  assert.notEqual(sameKey({ kind: 'same', data: { todo: 'c2' } }), sameKey(pendingNow()[0]));
   await reset();
 }
 

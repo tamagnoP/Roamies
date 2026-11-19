@@ -454,6 +454,7 @@ Roamies asks the oldest pending question again, one at a time, spoken and with i
   answer), the new one takes the old one's place. "The same" is: for a hand-off, the same prompt for the same folder
   in the same mode; for the folder question, the same project; for an overlap and for a deleted task, the same to-do;
   for a day plan, the same day; for "which Friday?", the same block (its to-do, or its title when it has none yet);
+  for "move it, or make a second one?", the same to-do;
   the sorting proposal and the first-time question exist once each.
 - When a question is answered, every pending copy of it is cleared without a word: by a spoken yes or no, by a
   click, or because a later request asked the same thing and you answered there.
@@ -550,9 +551,19 @@ reaches the other.
 block has a to-do behind it, and a to-do has one block at most.
 
 - "Put the paper on Monday at ten for ninety minutes": the block goes straight in. If you name something that isn't
-  a to-do yet, it becomes one first. A title that exactly one open to-do has (ignoring capitals and the spaces
-  around it) is that to-do: no second one is made. If several have it, Roamies asks which, telling them apart by
-  their due times, and nothing is made or changed until you say. The same holds while Super Productivity is closed. If you don't say how long and the to-do has no length yet, Roamies asks.
+  a to-do yet, it becomes one first. A title that exactly one open to-do has (ignoring capitals, the spaces around
+  it and a leading "the") is that to-do: no second one is made, and Roamies says it used the one already on your
+  list. If several have it, Roamies asks which, telling them apart by their due times, and nothing is made or
+  changed until you say. The same holds while Super Productivity is closed. If you don't say how long and the
+  to-do has no length yet, Roamies asks.
+- When that to-do already has a block (or a slot kept for it), Roamies asks before doing anything: "Flow test is
+  already booked for Friday 20 November at 10:00. Move it, or make a second one?", with the buttons Move it and
+  New one. It is a question like the others: said, with an answer window, kept when unanswered and asked again
+  later. Answer by clicking, or by saying "move it" or "the same one", "a new one" or "a second one" (the phrases
+  are under `reference.spokenAnswers.moveOrSecond`). "No" changes nothing: no block moves and no to-do is made.
+  The question is the app's own; the model can't answer it and is told never to rename what you called something
+  to get round it. Naming a to-do by its id (as the model does after you have picked one) moves its block without
+  asking, as before.
 - "Book Friday from 10 to 11 for the experiment": a day and two times make a block. The length is worked out from
   the two times by the code, and the date of a weekday by the code, not by the model: a weekday is the next day of
   that name counting today (today itself until the block's time is over, then a week on). "Today", "tomorrow" and a

@@ -34,6 +34,10 @@ export const byButton = (ask) => async (opts, signal) => firstButton(await ask(o
 export const YES_WORDS = ['yes', 'yes please', 'go ahead', 'do it'];
 export const NO_WORDS = ['no', "don't", 'cancel'];
 export const SPOKEN_HINT = 'Say yes or no, or click.';
+// "Move it, or make a second one?" (calendar.mjs: a block asked for by the title of a to-do that is already booked):
+// the phrases that answer it, alone or several of one side together. A no word answers neither.
+export const MOVE_WORDS = ['move it', 'move', 'move that one', 'move the same one', 'the same one', 'same one', 'the same', 'same'];
+export const SECOND_WORDS = ['a new one', 'new one', 'a new', 'new', 'make a new one', 'a second one', 'second one', 'a second', 'make a second one', 'another one', 'another'];
 
 export const plain = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/[^a-z]+/g, ' ').trim();
 // Longest first, so "yes please" is one phrase and not "yes" followed by something else.

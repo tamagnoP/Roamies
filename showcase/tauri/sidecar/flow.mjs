@@ -44,6 +44,7 @@ export const SAME = {
   overlap: (d) => [d.todo], // the same to-do: it has one block, so a newer time takes the older one's place
   plan: (d) => [d.date], // the same day
   sort: () => [], // there is one: the newest proposal takes the older one's place
+  same: (d) => [d.todo], // "move it, or make a second one?": the same to-do that is already booked
   day: (d) => [d.tool, d.args?.todo ?? String(d.args?.title ?? '').trim().toLowerCase()], // "next friday": the same block, by its to-do, or by its title when it has none yet
 };
 export const sameKey = (q) => `${q?.kind}:${JSON.stringify((SAME[q?.kind] ?? ((d) => [d]))(q?.data ?? {}))}`;
