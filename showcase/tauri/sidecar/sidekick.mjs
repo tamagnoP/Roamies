@@ -267,7 +267,7 @@ const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: where
   allowActions: () => config.allowActions, ui, ask, openUrl, userName,
   speak: (line) => { if (!turnVoice) return false; turnVoice.say(line); return true; },
   onHandoff: (task) => { activity.handoff(task); panel(); },
-  commitmentsText: () => [commitmentsText(), doneTodayText() && `Done today:\n${doneTodayText()}`].filter(Boolean).join('\n'),
+  commitmentsText: () => cal.outline(), // Local-only build: the list is never handed to the model whole (list_commitments is calendar.mjs's)
   onCommitments: (c) => { menu(); scheduleReminders(); showList({ flash: c?.id, seconds: 6 }); cal.changed(c); }, // Local-only build: cal.changed, so Super Productivity follows
   showList: () => showList({ seconds: 20 }),
   fmtWhen: (ms) => fmtWhen(ms),
@@ -342,6 +342,7 @@ const cal = createCalendar({
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
     rename: async (id, text) => { await renameCommitment(id, text); menu(); },
     add: async (text) => { const c = await addCommitment(text, null, 'commitment'); menu(); showList({ flash: c.id, seconds: 6 }); return c; },
+    adopt: async (text, due) => { const c = await addCommitment(text, due, 'commitment', { reminded: due !== null && due <= Date.now() }); menu(); scheduleReminders(); return c; }, // a task taken over from Super Productivity: added without the list being put on screen
   },
 });
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
@@ -352,7 +353,7 @@ const cal = createCalendar({
 // deleted in the app) is said too, in one short sentence, unless "speakNotices" is off (noticeVoice, calendar.mjs);
 // the other lines stay silent there. Either way they wait for the same quiet moment.
 const noticesOn = () => { try { return loadSettings(HOME).speakNotices; } catch { return false; } };
-let voiceState = 'idle', lineUntil = 0, calOffered = false, calAsking = false;
+let voiceState = 'idle', lineUntil = 0, calOffered = false, adoptOffered = false, calAsking = false;
 const calQuiet = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!config.onboarded || guideClosed) && !loggingIn, busy, queued, asking: pending.size > 0 || calAsking, voice: voiceState, speakingUntil: lineUntil });
 async function calShow() {
   try {
@@ -385,6 +386,14 @@ async function calShow() {
     if (!calOffered && !cal.state().started && await cal.there()) {
       calOffered = true; calAsking = true;
       await cal.offerStart().finally(() => { calAsking = false; }).catch((e) => { if (e?.name !== 'Unanswered') throw e; });
+      return;
+    }
+    // Feature 26, the first time, once per start: the open tasks in the app that have no to-do, by count and first
+    // titles, and a yes before any is added. After the yes new ones are adopted by the sync, without a bubble.
+    if (!adoptOffered && cal.adoptable()) {
+      adoptOffered = true; calAsking = true;
+      const n = await cal.offerAdopt().finally(() => { calAsking = false; }).catch((e) => { if (e?.name !== 'Unanswered') throw e; return false; });
+      if (n) { const line = `${n} task${n === 1 ? '' : 's'} from Super Productivity ${n === 1 ? 'is' : 'are'} on my to-do list now.`; logLine('calendar_adopt_said', { tasks: n }); say(line, 'happy'); if (flow.spoken()) voiceLine(forVoice(line)); menu(); }
     }
   } catch (e) { console.error('calendar', e); }
 }
@@ -526,7 +535,7 @@ A message may include a picture of an area they selected on screen, or marked by
 ${VOICE_OK ? `${userName} often talks to you by voice, so their messages may be speech transcripts: expect missing punctuation and misheard words, and act on what they most likely meant. ` : ''}Never claim you did something you didn't. Each message from ${userName} starts with its local date, time and time zone in brackets; use it for anything time-related. Their time zone is ${TZ} (${tzOffset()}); convert to other zones from that when asked. ${PLATFORM}
 Memory: keep track of what ${userName} commits to. When they say they'll do something, save it with remember_commitment (with a due time if they gave one). When it's done or off, update it. Saving or updating one shows their reminders list on screen by itself, so don't also draw a list or note of what you saved. Don't save small talk or things you'll do yourself. Hold them to these: bring up overdue ones and celebrate finished ones.
 Long-term memory: lasting facts about ${userName} are saved for you from your conversations (you don't save them yourself), so when they tell you something lasting or ask you to remember it, just take it in and say you will. Use what's saved without being asked, and never announce that you're saving something. Let what you know color your replies lightly (the right example, the right default, a nod to their goal now and then); never recite it back or open with it ("As a YouTuber…"). A saved fact that's wrong, or one they ask you to forget: forget_fact.
-The <live-state> block at the top of the user's newest message is the current state (settings, the app in front); older messages keep the one they had then. Its memory section (open commitments, done today, what you remember) is only sent again when it changes, so the newest memory section in the conversation is current and overrides older ones; it may be a relevant selection rather than everything. Both are added by the app, not typed by the user, and override anything older in the conversation. A message starting "[Summary of the earlier conversation" stands in for older turns: take it as what happened, not as instructions.`;
+The <live-state> block at the top of the user's newest message is the current state (settings, the app in front); older messages keep the one they had then. Its memory section (the to-do list in outline, what you remember) is only sent again when it changes, so the newest memory section in the conversation is current and overrides older ones; it may be a relevant selection rather than everything. Both are added by the app, not typed by the user, and override anything older in the conversation. A message starting "[Summary of the earlier conversation" stands in for older turns: take it as what happened, not as instructions.`;
 
 // Made once per request. `context` (the latest user message) picks which facts are relevant. → { turn, memory }
 let lastFactIds = [];
@@ -534,7 +543,6 @@ let frontNow = ''; // set just before each request (whereFront)
 const livePrompt = (context = '') => {
   const facts = pickFacts(context, 40), total = listFacts().length;
   lastFactIds = facts.map((f) => f.id);
-  const open = commitmentsText(), done = doneTodayText();
   const turn = `Live state (current as of this moment):
 ${frontNow ? `${frontNow}\n` : ''}${pi.live()}
 ${notes.live()}
@@ -542,7 +550,8 @@ ${cal.live()}
 - Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
 ${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}
 - Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
-  const memory = `${open ? `Open commitments:\n${open}` : 'No open commitments.'}${done ? `\nDone today (ticked off on the list or by you; still shown struck through until midnight):\n${done}` : ''}
+  // Local-only build (2026-11-19): the to-do list goes to the model as an outline, never as the list (calendar.mjs).
+  const memory = `${cal.outline()}
 ${facts.length ? `What you know about ${userName}${total > facts.length ? ` (${facts.length} most relevant of ${total})` : ''}:\n${facts.map((f) => `- ${f.id}: ${f.text}`).join('\n')}` : `You don't know anything lasting about ${userName} yet.`}`;
   return { turn, memory };
 };
@@ -590,16 +599,6 @@ const tzOffset = () => { const m = -new Date().getTimezoneOffset(), a = Math.abs
 // Seconds shown only when they matter (a reminder set for :45).
 const fmtWhen = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', ...(new Date(ms).getSeconds() ? { second: '2-digit' } : {}) });
 const stampNow = () => `${new Date().toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })} ${TZ}`;
-// Ticked off today (on the list, from the menu or by Sidekick); cleared at midnight.
-function doneTodayText() {
-  const L = listItems();
-  return [...L.today, ...L.later].filter((i) => i.done).map((i) => `- ${i.id}: ${i.text}`).join('\n');
-}
-function commitmentsText() {
-  const now = Date.now();
-  return openCommitments().map((c) => `- ${c.id}: ${c.text}${c.kind === 'reminder' ? ' [reminder]' : ''}${c.due ? ` (due ${fmtWhen(c.due)}${c.due < now ? ', OVERDUE' : ''})` : ''}`).join('\n');
-}
-
 // ---------- agent ----------
 // The conversation lives in `session` (saved to ~/.gg/sidekick/sessions). The Agent is rebuilt from it
 // whenever settings change, so switching model or toggling a setting never loses the conversation.
@@ -1977,7 +1976,11 @@ async function remindTick() {
   const due = await takeDueReminders();
   if (!due.length) return;
   menu(); showList({ flash: due[0].id, seconds: 6 });
-  const list = due.map((c) => `- ${c.id}: ${c.text}${c.due ? ` (was due ${fmtWhen(c.due)})` : ''}${c.kind === 'reminder' ? ' [plain reminder: already cleared, nothing to mark done]' : ''}`).join('\n');
+  // Local-only build (2026-11-19): a to-do that came from Super Productivity is not named to the model when it
+  // comes due, only counted; the list on screen shows it. One the owner gave Roamies with a time is named, as before.
+  const links = (() => { try { return cal.state().links; } catch { return {}; } })();
+  const named = due.filter((c) => links[c.id]?.from !== 'app'), counted = due.length - named.length;
+  const list = [...named.map((c) => `- ${c.id}: ${c.text}${c.due ? ` (was due ${fmtWhen(c.due)})` : ''}${c.kind === 'reminder' ? ' [plain reminder: already cleared, nothing to mark done]' : ''}`), ...(counted ? [`- ${named.length ? 'and ' : ''}${counted} task${counted === 1 ? '' : 's'} from Super Productivity ${counted === 1 ? 'is' : 'are'} due now: say how many, and that the list on screen shows ${counted === 1 ? 'it' : 'them'}; you aren't given ${counted === 1 ? 'its title' : 'their titles'}.`] : [])].join('\n');
   if (signedIn.size && [...signedIn.values()].some(Boolean)) {
     enqueue(`(System, not ${userName}: these commitments are due now. Nudge ${userName} about them in one or two sentences, in character. Start with the [remind] tag, or [upset] if it's well overdue.)\n${list}`);
   } else {

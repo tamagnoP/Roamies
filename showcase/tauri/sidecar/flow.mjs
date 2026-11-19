@@ -40,6 +40,7 @@ export const SAME = {
   handoff: (d) => [d.project, d.mode, String(d.prompt ?? '').trim()], // the same prompt, for the same folder, in the same mode
   project: (d) => [String(d.name ?? '').toLowerCase()], // the same project
   start: () => [], // there is one: putting the to-do list in Super Productivity
+  adopt: () => [], // there is one: adding the app's open tasks to the to-do list
   deleted: (d) => [d.todo], // the same to-do
   overlap: (d) => [d.todo], // the same to-do: it has one block, so a newer time takes the older one's place
   plan: (d) => [d.date], // the same day
@@ -47,6 +48,15 @@ export const SAME = {
   same: (d) => [d.todo], // "move it, or make a second one?": the same to-do that is already booked
   near: (d) => [d.todo, String(d.args?.title ?? '').trim().toLowerCase()], // "is this <title>, or a new task?": the same title asked about the same to-do
   day: (d) => [d.tool, d.args?.todo ?? String(d.args?.title ?? '').trim().toLowerCase()], // "next friday": the same block, by its to-do, or by its title when it has none yet
+};
+/** The questions whose wording names a to-do, as the morning briefing's note has them: what they are about. */
+const UNNAMED = {
+  overlap: 'whether to place a block that overlaps something',
+  deleted: 'whether a to-do goes too, now that its task was deleted in Super Productivity',
+  day: 'which of two days a block is for',
+  same: 'whether a to-do that is already booked moves, or a second one is made',
+  near: 'whether a block is for a to-do already on the list, or for a new task',
+  plan: 'whether to put a day plan on the calendar',
 };
 export const sameKey = (q) => `${q?.kind}:${JSON.stringify((SAME[q?.kind] ?? ((d) => [d]))(q?.data ?? {}))}`;
 
@@ -355,10 +365,12 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     resume(kind, run) { resumers.set(kind, run); },
     pending, tidy, clear,
     /** For the morning briefing: the questions still waiting, as a note for the model. '' when there are none. */
+    // 2026-11-19: a question that names a to-do is said here by what it is about, without the title, and kept
+    // blocks are counted: a to-do's title goes to the model only when the owner asks (show_pending names them).
     note() {
       const all = pending(), later = kept();
-      return (all.length ? `\nQuestions the app asked that are still waiting for their answer (it asks them again by itself; mention in one sentence how many and what about, and don't ask them yourself):\n${all.map((q) => `- ${q.brief || q.kind}`).join('\n')}` : '')
-        + (later.length ? `\nKept until Super Productivity is open, and not on the calendar yet (the app places them itself then; mention them in one sentence, and don't say they are booked):\n${later.map((a) => `- ${a.brief}`).join('\n')}` : '');
+      return (all.length ? `\nQuestions the app asked that are still waiting for their answer (it asks them again by itself; mention in one sentence how many and what about, and don't ask them yourself; show_pending has their wording when they ask):\n${all.map((q) => `- ${UNNAMED[q.kind] ?? (q.brief || q.kind)}`).join('\n')}` : '')
+        + (later.length ? `\n${later.length} block${later.length === 1 ? ' is' : 's are'} kept until Super Productivity is open, and not on the calendar yet (the app places them itself then; mention it in one sentence, and don't say they are booked; show_pending names them when they ask).` : '');
     },
   };
 }

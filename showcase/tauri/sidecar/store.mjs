@@ -301,8 +301,8 @@ export async function clearFinished(now = Date.now()) {
 
 /** kind 'reminder': a plain "remind me", done once it has fired. 'commitment' (and older entries without a kind):
  *  something the user said they'd do, open until they finish or drop it. */
-export async function addCommitment(text, dueMs, kind = 'commitment') {
-  const c = { id: newId('c'), text: String(text).trim().slice(0, 200), due: dueMs ?? null, createdAt: Date.now(), status: 'open', remindedAt: null, kind: kind === 'reminder' ? 'reminder' : 'commitment' };
+export async function addCommitment(text, dueMs, kind = 'commitment', { reminded = false } = {}) { // Local-only build: reminded, for a to-do taken over with a due time already past (no nudge for it)
+  const c = { id: newId('c'), text: String(text).trim().slice(0, 200), due: dueMs ?? null, createdAt: Date.now(), status: 'open', remindedAt: reminded ? Date.now() : null, kind: kind === 'reminder' ? 'reminder' : 'commitment' };
   loadMemory().commitments.push(c);
   // Cap the file: the oldest finished entries go first; open ones are never dropped.
   const done = memory.commitments.filter((x) => x.status !== 'open');

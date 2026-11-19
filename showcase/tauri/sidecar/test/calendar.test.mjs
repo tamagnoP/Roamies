@@ -300,11 +300,11 @@ mark = app.log.length; await cal.sync('timer');
 assert.equal(taskOf(offline).title, 'Made while the app was hung'); assert.equal(taskOf(mail).title, 'Answer Ana today', 'what changed meanwhile arrives on the next run');
 // a to-do tool syncs first, so what the app changed is in before the list is read; other tools are left alone
 taskOf(third).title = 'Book the big room';
-assert.match(await tool('list_commitments').execute({}), /Book the big room/);
+assert.match(await tool('list_commitments').execute({ words: 'big room' }), /Book the big room/); // the app's change is in before the list is read
 mark = app.log.length; assert.equal(await tool('draw').execute({}), 'drawn'); assert.equal(app.log.length, mark);
 // from a tool, what a sync has to say goes to the model with the result, and is not held for a bubble
 third.text = 'Book room A'; taskOf(third).title = 'Book room B';
-const told = await tool('list_commitments').execute({});
+const told = await tool('list_commitments').execute({ words: 'room' });
 assert.match(told, /Book room B[^]*\n\n"Book room B": the title changed both here and in Super Productivity\. I kept what the app has\.$/); assert.deepEqual(state().held, []);
 // a slow answer to a real request ends the run without half-made changes being lost or repeated
 app.hang = (m) => m === 'POST';
@@ -524,9 +524,10 @@ await assert.rejects(T('plan_day').execute({ date: '2026-11-27', items: [{ todo:
 
 // ---- the morning briefing's note: today's blocks, and how much time other tasks take
 hand('Lab meeting', { dueWithTime: at(14, 11), timeEstimate: 30 * M }); await cal.sync('timer');
-assert.equal(cal.dayNote(new Date(at(14, 8))), '\nOn the calendar in Super Productivity today: 15:05 to 16:05 "Plan: b"; and 1 other stretch of time taken by tasks of their own there (11:00 to 11:30). Say it in a sentence or two.');
-assert.equal(cal.dayNote(new Date(at(30, 8))), '\nNothing is on the calendar in Super Productivity today.');
-assert.equal(unstarted.dayNote(new Date(at(14, 8))), '', 'nothing is said about a calendar that isn\'t known');
+// (2026-11-19: it is the outline the model gets with each request: numbers, and today's blocks in full)
+assert.match(cal.dayNote(), /^\nTheir to-do list now:\nTo-do list, in outline: \d+ open: \d+ due today, \d+ due this week, \d+ overdue, \d+ without a date\.( \d+ done today\.)?\nPlanned for today: 15:05 to 16:05 "Plan: b" \[c\d+\]\.\n1 other stretch of today is taken in Super Productivity by tasks that aren't on the to-do list\.\nThis outline is all you are given of the list: [^\n]*\nSay it in a sentence or two\.$/);
+clock = at(30, 8); assert.match(cal.dayNote(), /\nNothing is planned for today\.\nThis outline/); clock = at(14, 8);
+assert.match(unstarted.dayNote(), /\nNothing is planned for today\.\nThis outline/);
 assert.match(side, /b\.kind === 'morning' \? `\$\{b\.note\}\$\{cal\.dayNote\(\)\}` : b\.note/);
 // they work while pi is busy, like the to-do list
 for (const n of ['schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'sync_todos']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);
@@ -557,14 +558,21 @@ assert.deepEqual([linkOf(m2).local.urgent, linkOf(m2).local.important], [false, 
 // ---- the matrix read back: four quadrants, and what isn't sorted yet
 await T('set_priority').execute({ todo: m5.id, urgent: true });
 out = await T('show_matrix').execute({});
+// (2026-11-19: show_matrix gives numbers and names no to-do; a quadrant's to-dos come from list_commitments)
 const rows = out.split('\n');
-assert.equal(rows.length, 5);
-assert.equal(rows[0], `Urgent and important: Answer Ana today [${mail.id}] (on the calendar)`, '(made so in the app, earlier)');
-assert.equal(rows[1], `Important, not urgent: Matrix: grant report [${m1.id}] (on the calendar)`);
-assert.equal(rows[2], `Urgent, not important: Matrix: call bank [${m5.id}]`);
-assert.match(rows[3], new RegExp(`^Neither urgent nor important: .*Matrix: tidy desk \\[${m2.id}\\]`), 'cleared in the app: it has had its place, so it is "neither", not unsorted');
-assert.match(rows[4], /^Not sorted yet: /); assert.ok(rows[4].includes(`Matrix: reply to editor [${m3.id}]`) && rows[4].includes(`Matrix: order tips [${m4.id}]`) && !rows[4].includes('Matrix: tidy desk') && !rows[4].includes('Matrix: call bank'));
-assert.ok(!out.includes('Stretch') && !out.includes('Seminar'), 'reminders and tasks that aren\'t Roamies\' have no place in it');
+assert.equal(rows.length, 6);
+assert.match(out, /^Urgent and important: 1\nImportant, not urgent: 1\nUrgent, not important: 1\nNeither urgent nor important: \d+\nNot sorted yet: \d+\nTitles: list_commitments with quadrant, when they ask\.$/);
+assert.ok(!/Matrix:|Answer Ana|\[c\d+\]/.test(out), 'no title and no id');
+const Q4 = async (quadrant) => (await tool('list_commitments').execute({ quadrant })).split('\n');
+assert.deepEqual(await Q4('urgent_important'), ['1 open to-do urgent and important:', (await Q4('urgent_important'))[1]]); assert.match((await Q4('urgent_important'))[1], new RegExp(`^- ${mail.id}: Answer Ana today .*\\(on the calendar `), '(made so in the app, earlier)');
+assert.match((await Q4('important'))[1], new RegExp(`^- ${m1.id}: Matrix: grant report.* \\(on the calendar `));
+assert.deepEqual((await Q4('urgent')).slice(1), [`- ${m5.id}: Matrix: call bank`]);
+assert.ok((await Q4('neither')).some((l) => l.startsWith(`- ${m2.id}: Matrix: tidy desk`)), 'cleared in the app: it has had its place, so it is "neither", not unsorted');
+let loose = (await tool('list_commitments').execute({ quadrant: 'unsorted', words: 'matrix' }));
+assert.match(loose, /^2 open to-dos with "matrix" in the title, and not sorted into the matrix yet:/);
+const every = await Q4('unsorted'); assert.ok(every.length <= 12); if (every.length === 12) assert.match(every[11], /^and \d+ more$/); assert.ok(loose.includes(`- ${m3.id}: Matrix: reply to editor`) && loose.includes(`- ${m4.id}: Matrix: order tips`) && !loose.includes('Matrix: tidy desk') && !loose.includes('Matrix: call bank'));
+for (const q of ['urgent_important', 'important', 'urgent', 'neither', 'unsorted']) { const o = (await Q4(q)).join('\n'); assert.ok(!o.includes('Stretch') && !o.includes('Seminar'), 'reminders and tasks that aren\'t Roamies\' have no place in it'); }
+assert.match(T('sort_tasks').description, /Call list_commitments with quadrant "unsorted" first/);
 
 // ---- sort_tasks: a proposal for the unsorted ones, shown whole, applied only after a yes
 const proposals = [{ todo: m3.id, urgent: true, important: true }, { todo: m4.id, urgent: false, important: false }];
@@ -583,7 +591,7 @@ assert.deepEqual([linkOf(m3).local.urgent, linkOf(m3).local.important, linkOf(m4
 // ---- urgent and important, with no block: one is offered, once
 assert.equal(out, 'Sorted 2 to-dos.\n"Matrix: reply to editor" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?');
 out = await T('show_matrix').execute({});
-assert.ok(!/Shall I put a block/.test(out), 'not offered a second time'); assert.match(out.split('\n')[0], /^Urgent and important: .*Matrix: reply to editor \[c\d+\]$/); assert.ok(!out.split('\n')[4].includes('Matrix:'), 'none of them is unsorted now');
+assert.ok(!/Shall I put a block/.test(out), 'not offered a second time'); assert.equal(out.split('\n')[0], 'Urgent and important: 2'); assert.ok((await Q4('urgent_important')).some((l) => l.includes('Matrix: reply to editor'))); assert.match(await tool('list_commitments').execute({ quadrant: 'unsorted', words: 'matrix' }), /^No open to-do is /, 'none of them is unsorted now');
 await cal.sync('timer'); await T('set_priority').execute({ todo: m3.id, urgent: false }); out = await T('set_priority').execute({ todo: m3.id, urgent: true });
 assert.equal(out, '"Matrix: reply to editor": urgent and important.', 'nor when it becomes urgent and important again');
 out = await T('set_priority').execute({ todo: m1.id, urgent: true });
@@ -639,8 +647,8 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   assert.equal(state().actions.length, 3);
   // they are listed for show_pending and the morning briefing, and the model's live state says they are not booked
   assert.deepEqual(closed.kept().map((k) => k.brief), ['Put "Kept: flow test" on the calendar Thursday 3 December, 10:00 to 10:30', 'Put "Kept: a" on the calendar Thursday 3 December, 10:15 to 10:45', 'Put "Kept: mover" on the calendar Friday 4 December, 17:30 to 17:50']);
-  assert.match(closed.live(), /\n- Not on the calendar yet, kept until Super Productivity is open \(the app places them itself then; don't say they are booked\): "Kept: flow test", Thursday 3 December, 10:00 to 10:30; /);
-  assert.doesNotMatch(cal.live().split('\n')[0], /Not on the calendar yet/);
+  assert.match(closed.live(), /\n- 3 blocks are not on the calendar yet, kept until Super Productivity is open \(the app places them itself then; don't say they are booked; show_pending names them when they ask\)\.$/); assert.ok(!closed.live().includes('Kept:'), 'counted, not named, in what goes with each request');
+  assert.doesNotMatch(cal.live().split('\n')[0], /not on the calendar yet/);
   // a sync that doesn't reach the app changes nothing
   r = await closed.sync('timer'); assert.equal(r.ok, false); assert.equal(state().actions.length, 3); assert.deepEqual(writes(mark), []);
 

@@ -463,8 +463,9 @@ Roamies asks the oldest pending question again, one at a time, spoken and with i
   is on the calendar, the to-do is done or gone, pi already works in that folder.
 - You are told, in one line, only when something you still wanted is lost: the time of a block or a plan has passed,
   a to-do in a plan is no longer open, pi now works in another folder, the project is off the list.
-- A question older than `limits.pendingKeepHours` is dropped. The morning briefing mentions the ones that remain,
-  and "what's pending?" has them read out (`show_pending`).
+- A question older than `limits.pendingKeepHours` is dropped. The morning briefing mentions the ones that remain, a
+  question about a to-do by what it is about and without the title, and "what's pending?" has them read out
+  (`show_pending`).
 - If it goes unanswered again it stays pending, as old as it was. If Super Productivity isn't answering, a calendar
   question stays pending until it is.
 - Pending questions are never written to the notes vault. A hook for the daily note (feature 18: a Log line when a
@@ -487,6 +488,27 @@ snapshots; `git update-ref -d <ref>` removes one.
 
 **Warnings in the Send bubble.** If `settings.json` has changed since the last hand-off (Roamies never changes it, so
 that was you or something else), or pi is started with a command other than `pi`, the bubble says so.
+
+**What the AI provider is given of your to-do list.** Your to-do list holds every open task you have in Super
+Productivity (below), so their titles, times and deadlines can become part of the conversation with your AI
+provider. They do when you ask about them, not with every request:
+
+- With every request goes an outline: how many to-dos are open, how many are due today, due this week, overdue and
+  without a date, how many were done today, and today's planned blocks in full (time, title). Nothing else of the
+  list is in it. The morning briefing uses the same outline.
+- A title outside today's plan is sent only when you ask: "what's due this week?", "what's overdue?", "which have
+  no date?", "what's in urgent and important?", or naming a to-do ("move the flow test"). The app then hands over
+  the to-dos that fit, ten at most, and says how many more there are; you can ask for the next ten.
+- Asked "what's open?", Roamies gives the numbers and today's plan first, and offers the details.
+- "Show the matrix" gives the number in each quadrant; the to-dos of a quadrant come when you ask for them.
+- What the app shows you itself never goes through the provider: the list on screen, and every bubble (the first-time
+  question with its titles, an overlap, a deleted task).
+- A to-do that comes due is named in its nudge if you gave it to Roamies with a time. One that came from Super
+  Productivity is only counted there ("one task from Super Productivity is due"), and the list on screen shows it.
+- What you asked about stays in the conversation afterwards, like anything else said in it, until the conversation
+  is folded or you start a new one.
+
+This is fixed in code (`calendar.mjs`), not left to an instruction.
 
 **The never-look list.** Apps in `neverLook` are never captured, read or worked in. A screenshot or read of such an
 app, or of the front window while it is in front, is refused. A whole-screen screenshot is refused while one has a
@@ -519,6 +541,38 @@ becomes part of the conversation with your AI provider.
 Roamies' to-do list is mirrored in Super Productivity, through that app's local REST API (Settings > Misc > Enable
 local REST API). Requests go only to `127.0.0.1:3876`, on this Mac.
 
+**Every open task in the app is a to-do** (feature 26, 2026-11-19). Roamies sees every open task in Super
+Productivity, in any project, with or without a time, whoever made it, and keeps it on its to-do list, synced both
+ways like a to-do of its own.
+
+- The first time, a bubble shows how many open tasks aren't on the list yet, with the first ten titles and "and N
+  more", and waits for your yes. Before it nothing is added. "Not now" leaves everything as it was, and it is
+  offered again at the next start.
+- After the yes, a task you add in the app is on Roamies' list at the next sync, without a bubble and without a
+  line. The log records how many, never a title.
+- Read from a task: its title, start, length, whether it is done, its deadline, and the two matrix tags. Never its
+  notes, attachments, other tags, project or sub-tasks. A sub-task is not adopted; its parent is. A sub-task with a
+  time still counts as taken time.
+- Done and archived tasks are not adopted. A task opened again in the app comes back: to its old to-do if that is
+  still on the list, else as a new one.
+- A repeating task: each occurrence that is open in the app is adopted like any task, and the link notes that it
+  repeats. The repeat rule is never read or changed. A daily task therefore adds a to-do a day.
+- Roamies writes to a task only what you changed in Roamies: its title, done, the block (start and length), the due
+  time, urgent, important. It creates no task for an adopted to-do, and never deletes one.
+- A to-do that came from the app, taken off Roamies' list: its task stays in the app exactly as it is, time
+  included. Roamies only forgets it, and says so in one line. It is not brought back while it stays open in the
+  app, and it still counts as taken time. (It was yours before Roamies knew of it; taking it off Roamies' list
+  means "stop tracking this", not "undo it".)
+- The same title twice: a to-do that has no task yet and an open task that has no to-do, of the same title (capitals,
+  spaces and a leading "the" aside), one of each, are linked instead of a second task being made; where they
+  differ, the app's title and deadline are taken. Two tasks of the same title in the app are two to-dos: nothing is
+  merged, because merging would mean deleting one. Asked for by that title, Roamies asks which.
+- A deadline in the app is the to-do's due time. An adopted task whose deadline had already passed gets no nudge;
+  one that comes due later is counted in the nudge, not named (see Safeguards).
+- How a link came about is kept with it in `state.json`: `from: "app"` for an adopted task, nothing for one Roamies
+  made; `repeats: true` for a repeating one. `calendar.adopt` is the yes; `calendar.released` lists the tasks taken
+  off Roamies' list.
+
 **The mirror.** Every to-do that is something you said you'd do has a task in the app, with or without a time. Plain
 reminders ("remind me at five") have none. The first time, Roamies shows how many to-dos would be added, with their
 titles, and waits for your yes; before it, nothing is created. A new task appears in the app's Today list, as any
@@ -538,8 +592,9 @@ reaches the other.
   nothing to do. A run with nothing to do costs two requests: "are you there", and the task list.
 - A task deleted in the app: Roamies forgets the pair and asks, in a bubble, whether the to-do goes too. Until you
   answer, the to-do gets no new task; if you keep it, it gets one.
-- A to-do taken off Roamies' list: its task loses its time and stays in the app, and Roamies tells you to delete it
-  there if you don't want it. Roamies never deletes a task.
+- A to-do Roamies made, taken off its list: its task loses its time and stays in the app, and Roamies tells you to
+  delete it there if you don't want it. (One that came from the app is left as it is: above.) Either way it is not
+  brought back onto the list. Roamies never deletes a task.
 - Done on both sides: the pair is retired and no longer synced. A task the app has archived counts as done. A to-do
   you open again in Roamies takes its old task up again if it is still in the app's list.
 - The app closed, or its API off: to-dos work as always, and the two are brought in step at the next sync. The
@@ -614,10 +669,10 @@ block has a to-do behind it, and a to-do has one block at most.
   - A slot whose time has passed before the app was open, or that is older than `limits.pendingKeepHours`, is
     dropped and you are told once. One whose to-do is done or gone is dropped without a word. A request for a time
     that has already passed is not kept at all.
-  - Kept slots are read out with "what's pending?" and named in the morning briefing, as not yet on the calendar.
+  - Kept slots are read out with "what's pending?" and counted in the morning briefing, as not yet on the calendar.
   - A day plan is not kept: it needs the whole day in view, so `plan_day` still refuses while the app is closed, as
     does reading a day.
-- The morning briefing also says what is on the calendar today.
+- The morning briefing says how the list stands and what is planned today, from the outline (see Safeguards).
 - These tools work while pi is busy, like the to-do list.
 
 **Urgent and important** (the Eisenhower matrix). Each to-do has two flags, urgent and important. In the app they
@@ -685,10 +740,11 @@ something that needs it. The log records only that a run failed, because the rea
 - The access token is read from the app's own file (`~/Library/Application Support/superProductivity/local-rest-api-token`)
   for each request and kept nowhere: not in a setting, `state.json`, a log, a record or a bubble, and the model never
   sees it. pi can't read that folder.
-- Only tasks Roamies made are written to. The app's task list arrives whole (the API can't send less); from tasks
-  that aren't Roamies' own, four things are kept, in memory only, to see clashes: title, start, length, done. Their
-  notes, tags, attachments and sub-tasks are dropped as the answer is read, and nothing from them is written
-  anywhere.
+- Only linked tasks are written to (the ones Roamies made and the ones adopted), only the seven synced fields, and
+  only what was changed in Roamies. The app's task list arrives whole (the API can't send less); notes,
+  attachments, other tags, the project, sub-tasks and the repeat rule are dropped as the answer is read, and nothing
+  from them is written anywhere. From a task that has no to-do (a sub-task, one taken off the list, any task before
+  your yes), four things are kept, in memory only, to see clashes: title, start, length, done.
 - A title is sent marked "as written", so the app doesn't read `@`, `#` or `+` in it as its short syntax.
 - Only the two matrix tags (`EM_URGENT`, `EM_IMPORTANT`) are ever added to or taken from a task. Its other tags are
   read just before and sent back as they were.
@@ -715,8 +771,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 ## What still uses the network
 
 - Requests to Super Productivity on this Mac (`127.0.0.1:3876`). They don't leave the Mac.
-- Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, and
-  screenshots or window text when you ask about your screen.
+- Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, an outline
+  of your to-do list (numbers, and today's planned blocks), the to-dos you ask about, and screenshots or window
+  text when you ask about your screen.
 - pi's own conversation with its provider, using pi's sign-in. Which files pi and the commands it runs can
   touch is limited by the sandbox; what they send over the network is not.
 - Signing in to Anthropic the first time: a browser sign-in, and a one-time download of the Claude Code program.
@@ -758,7 +815,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/flow.test.mjs` (new),
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs` (new),
   `package.json`: tests.
 
 ## Build (macOS)

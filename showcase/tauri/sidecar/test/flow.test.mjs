@@ -634,12 +634,12 @@ const pendingNow = () => readState(dir).pending ?? [];
   const show = () => flow.tools[0].execute({});
   keptBlocks.push({ at: new Date(2026, 10, 18, 22, 16).toISOString(), brief: 'Put "Flow test" on the calendar Thursday 19 November, 10:00 to 10:30' });
   assert.equal(await show(), '1 request is kept until Super Productivity is open. Not done yet: the app does it by itself then.\n- Put "Flow test" on the calendar Thursday 19 November, 10:00 to 10:30 (asked 22:16)');
-  assert.match(flow.note(), /^\nKept until Super Productivity is open, and not on the calendar yet \(the app places them itself then; mention them in one sentence, and don't say they are booked\):\n- Put "Flow test" on the calendar Thursday 19 November, 10:00 to 10:30$/);
+  assert.match(flow.note(), /^\n1 block is kept until Super Productivity is open, and not on the calendar yet \(the app places them itself then; mention it in one sentence, and don't say they are booked; show_pending names them when they ask\)\.$/); assert.ok(!flow.note().includes('Flow test'), 'counted, not named: a title goes to the model only when asked for');
   await exchange();
   const p = settled(answers.ask({ placeholder: 'Question 8?', choices: ['Yes', 'No'], pending: { kind: 'other', brief: 'Question 8?', data: { n: 8 } } }));
   await tick(); await played(); await advance(10_000); await p;
   assert.match(await show(), /^1 question is waiting for an answer, oldest first:\n- Question 8\? \(asked \d\d:\d\d\)\n1 request is kept until Super Productivity is open\./);
-  assert.match(flow.note(), /still waiting for their answer.*\n- Question 8\?\nKept until Super Productivity is open/s);
+  assert.match(flow.note(), /still waiting for their answer.*\n- Question 8\?\n1 block is kept until Super Productivity is open/s);
   // the exchanges end: nothing is raised for a kept block, and the list is untouched
   overlay.shown.length = 0; await quiet(); await exchange(); await advance(20_000); await tick(); await played();
   assert.equal(keptBlocks.length, 1); assert.equal(answers.open(), false);

@@ -13,6 +13,15 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    One exception, which stays on the Mac: requests to Super Productivity's local REST API on the loopback address
    (`127.0.0.1:3876`), made only by `calendar.mjs`, only the requests listed in `SP.requests` (never `DELETE`), with
    the app's access token read from its own file for each request and kept nowhere.
+   What the conversation holds of the to-do list (2026-11-19, feature 26): the list has every open task of Super
+   Productivity on it, so the titles, times and deadlines of any of them can reach the AI provider, but not with
+   every request. With every request goes an outline only (`outline` in `calendar.mjs`): how many to-dos are open,
+   due today, due this week, overdue and without a date, and today's planned blocks in full. A title outside
+   today's plan reaches the provider when the owner asks about it or names it (`list_commitments` with a filter,
+   `SP.titlesShown` at most at a time, then "and N more"), never because a request was made. Do not put the list,
+   or any title from it, into the live state, a briefing note or a nudge. From a task in the app only title, done,
+   start, length, deadline and the two matrix tags are read (and whether it repeats); only linked tasks are
+   written to, only those fields; none is ever deleted.
 2. **Roamies does not touch files or run commands itself.** File work is handed to pi (`pi.mjs`). The only files it
    writes are notes inside the Obsidian vault (`notes.mjs`), where it can create and append but never change or delete,
    and its own files in `~/Documents/roamies-pi` (`state.json`, the records in `log`, `pending.txt`, and
@@ -41,10 +50,10 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/pi.mjs` | Ours. Hand-off to pi, Send approval, background job, records, settings loader, `gateTools`. |
 | `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
-| `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list mirrored in Super Productivity: the requests, the sync, its tools. |
+| `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
-| `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). One marked function of ours: `renameCommitment`. |
+| `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, and `reminded` in `addCommitment`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |
 | `showcase/tauri/sidecar/test/` | One test file per module, plain `node:assert`, no framework. |

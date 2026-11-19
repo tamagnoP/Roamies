@@ -38,6 +38,7 @@ const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', '
 export const SP = {
   host: '127.0.0.1', port: 3876, tokenFile: 'Library/Application Support/superProductivity/local-rest-api-token',
   urgentTag: 'EM_URGENT', importantTag: 'EM_IMPORTANT', healthSeconds: 1,
+  titlesShown: 10, // how many titles the first-time question about the app's tasks shows, and a list for the model holds, before "and N more"
   requests: ['GET /health', 'GET /tasks', 'GET /tasks/:id', 'POST /tasks', 'PATCH /tasks/:id'],
 };
 
@@ -844,10 +845,10 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const due = (kind, until) => s.briefings[kind] !== null && mins >= s.briefings[kind] && mins < until && given[kind] !== today;
     if (due('morning', s.briefings.morning + s.limits.morningBriefingWindowHours * 60)) {
       const y = new Date(d); y.setDate(y.getDate() - 1);
-      return { kind: 'morning', note: `(System, not ${userName}: it's time for the morning briefing they set up. In a few short spoken sentences, in character: greet them, say what's on their to-do list and what's due today (call list_commitments first; no other tool), and what pi worked on yesterday, from this list. Don't read the list out line by line.)\nWhat pi was asked yesterday:\n${list(tasksOn(y))}` };
+      return { kind: 'morning', note: `(System, not ${userName}: it's time for the morning briefing they set up. In a few short spoken sentences, in character: greet them, say how their to-do list stands and what is planned today, from the outline at the end of this note (its numbers and today's plan; call no tool, and name no to-do that isn't in it), and what pi worked on yesterday, from this list. Don't read the list out line by line.)\nWhat pi was asked yesterday:\n${list(tasksOn(y))}` };
     }
     if (due('evening', 24 * 60)) {
-      return { kind: 'evening', note: `(System, not ${userName}: it's time for the end-of-day summary they set up. Save a note titled "Daily log ${today}" with write_note (append true): a short Markdown summary of what pi was asked today, from this list, and of their to-do list (call list_commitments first). Then tell them in one or two spoken sentences that the day's log is saved and what stood out. No other tools.)\nWhat pi was asked today:\n${list(tasksOn(d))}` };
+      return { kind: 'evening', note: `(System, not ${userName}: it's time for the end-of-day summary they set up. Save a note titled "Daily log ${today}" with write_note (append true): a short Markdown summary of what pi was asked today, from this list, and of how their to-do list stands (call list_commitments with no filter first: it gives the outline, the numbers and today's plan, and that is all that goes in the note). Then tell them in one or two spoken sentences that the day's log is saved and what stood out. No other tools.)\nWhat pi was asked today:\n${list(tasksOn(d))}` };
     }
     return null;
   }
@@ -889,7 +890,13 @@ export function codeReference() {
       requestsSent: [...SP.requests], neverSent: 'DELETE',
       urgentTag: SP.urgentTag, importantTag: SP.importantTag, isItThereCheckSeconds: SP.healthSeconds,
       synced: ['title', 'done', 'start time', 'length', 'urgent', 'important', 'due time (the app\'s deadline)'],
-      fromTasksRoamiesDidNotMake: ['title', 'start time', 'length', 'done'],
+      adopted: 'after the owner\'s yes, every open task in the app that is not a sub-task has a to-do, in any project, with or without a time; a task added in the app later is adopted by the next sync',
+      readFromAnAdoptedTask: ['title', 'done', 'start time', 'length', 'urgent', 'important', 'due time (the app\'s deadline)', 'whether it repeats (not the rule)'],
+      neverRead: ['notes', 'attachments', 'other tags', 'the project', 'sub-tasks', 'the repeat rule'],
+      written: 'only linked tasks, only the seven synced fields, only what was changed in Roamies; a task is never deleted, and none is created for an adopted to-do',
+      takenOffRoamiesList: 'a task that came from the app stays there exactly as it is, time included, and is not adopted again while it stays open; a task Roamies made loses its time and stays',
+      fromTasksWithoutAToDo: ['title', 'start time', 'length', 'done'],
+      titlesShown: SP.titlesShown,
     },
     sandbox: {
       builtInToolFolders: [...TOOL_FOLDERS],
@@ -912,7 +919,7 @@ export function codeReference() {
     fillerRule: 'after a key press, these words before or after an answer are ignored; never hands-free for a hand-off that can edit',
     closingPhrases: [...CLOSING_PHRASES],
     answerWindow: { judgedAfterTheEndSeconds: WINDOW.graceSeconds, reopenedWhenAtLeastSecondsLeft: WINDOW.reopenMinSeconds, endOfSpeech: 'reported by the overlay when the last sample has played', microphoneClosedBy: ['the voice helper, at the window\'s end', 'the sidecar\'s own timer', 'a phrase from a window that is over is discarded'] },
-    pendingQuestions: { keptIn: PATHS.state, kinds: ['handoff', 'project', 'start', 'overlap', 'plan', 'sort', 'deleted', 'day', 'same', 'near'], onceEach: 'The same question is pending once: asked again, the new one takes the old one\'s place. An answer clears every copy.', sameQuestion: { handoff: 'the same prompt, for the same folder, in the same mode', project: 'the same project', start: 'there is only one', overlap: 'the same to-do', plan: 'the same day', sort: 'there is only one', deleted: 'the same to-do', day: 'the same block: the same to-do, or the same title when it has no to-do yet', same: 'the same to-do that is already booked', near: 'the same title, asked about the same to-do' } },
+    pendingQuestions: { keptIn: PATHS.state, kinds: ['handoff', 'project', 'start', 'overlap', 'plan', 'sort', 'deleted', 'day', 'same', 'near', 'adopt'], onceEach: 'The same question is pending once: asked again, the new one takes the old one\'s place. An answer clears every copy.', sameQuestion: { handoff: 'the same prompt, for the same folder, in the same mode', project: 'the same project', start: 'there is only one', overlap: 'the same to-do', plan: 'the same day', sort: 'there is only one', deleted: 'the same to-do', day: 'the same block: the same to-do, or the same title when it has no to-do yet', same: 'the same to-do that is already booked', near: 'the same title, asked about the same to-do', adopt: 'there is only one' } },
     dontSendWords: [...DONT_WORDS],
     spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open', betweenTwoDays: 'a question between two days ("next friday") is answered by the day of the month ("the 20th", "Friday the twentieth"), by "the first one" or "the later one", or by a no word for neither', moveOrSecond: { move: [...MOVE_WORDS], second: [...SECOND_WORDS], rule: 'a block asked for by the title of an open to-do that already has a block: these phrases, alone, say whether it moves or a second to-do is made; a no word changes nothing' }, thatOrNew: { that: [...THAT_WORDS], new: [...NEW_WORDS], rule: 'a block asked for by a title that holds the title of an open to-do, or is held by it, as whole words: these phrases, alone, say whether it is that to-do or a new task; a no word changes nothing' }, titleMatch: 'a title is matched with an open to-do ignoring capitals, the spaces around it and a leading "the". A title that is not the same but holds an open to-do\'s title as whole words, or is held by it, is asked about; titles of fewer than two words never match that way' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },

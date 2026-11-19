@@ -4,12 +4,19 @@
 // kept the same on both sides: title, done, start time, length, urgent, important, and the due time (the app's
 // deadline). The link is the task's id, kept in ~/Documents/roamies-pi/state.json; a title never identifies anything.
 //
+// Feature 26 (2026-11-19): after the owner's yes, every open task in the app that is not a sub-task has a to-do
+// too, whoever made it ("adopted": the link says from: 'app', and repeats: true when the task has a repeat rule).
+// From such a task the same seven things are read and nothing else.
+//
 // What is fixed here, in code:
 //   - Requests go to 127.0.0.1 on the app's port and nowhere else, and only the ones in ROUTES: there is no DELETE.
 //   - The access token is read from the app's own file for each request and kept nowhere. It is never in an error,
 //     a log, a record, a bubble or what the model is given.
-//   - Only tasks Roamies made are ever written to. From the others, four things are kept, in memory, to see clashes:
-//     title, start, length, done. The rest of the app's answer is dropped as it is parsed.
+//   - Only linked tasks are ever written to (the ones Roamies made, and the ones adopted), and only those seven
+//     fields, when they were changed in Roamies. From a task that has no link (a sub-task, one taken off Roamies'
+//     list, any task before the yes), four things are kept, in memory, to see clashes: title, start, length, done.
+//     The rest of the app's answer (notes, attachments, other tags, the project, sub-tasks, the repeat rule) is
+//     dropped as it is parsed. No task is ever created for an adopted to-do, and none is ever deleted.
 //   - Only the two matrix tags are ever added to or taken from a task; its other tags are sent back as they were.
 //   - Every block has a to-do behind it, and a to-do has one block at most. A block is never placed without the task
 //     list having just been read, so a clash is always seen; a day plan is created only after a yes.
@@ -235,7 +242,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   // done on both sides. intents: creates that were begun. held: lines and questions waiting to be shown. waiting:
   // to-dos whose task was deleted in the app, until the owner has said whether the to-do goes too. actions: blocks
   // asked for while the app couldn't be reached, [{ id, at, todo, title, start, minutes }], one for a to-do at most.
-  const blank = () => ({ started: false, links: {}, retired: {}, waiting: {}, intents: [], held: [], actions: [] });
+  // adopt: the owner said yes to having every open task of the app on the list. released: { task id: true }, tasks
+  // whose to-do was taken off Roamies' list, which are not adopted again while they stay open in the app.
+  const blank = () => ({ started: false, adopt: false, links: {}, retired: {}, released: {}, waiting: {}, intents: [], held: [], actions: [] });
   function get() {
     const c = readState(settings().dir).calendar;
     return c && typeof c === 'object' && !Array.isArray(c) ? { ...blank(), ...c } : blank();
@@ -248,7 +257,8 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const inTurn = (fn) => { const p = chain.then(fn); chain = p.catch(() => {}); return p; };
 
   // ---- the app's answer, cut down as it is parsed
-  let others = []; // tasks Roamies didn't make: title, start, minutes, done. In memory only.
+  let others = []; // tasks no to-do is linked to: title, start, minutes, done. In memory only.
+  let loose = []; // before the yes to adopting: the open tasks that would be adopted, [{ title }]. In memory only.
   const dueOf = (t, dayEnd) => {
     if (stamp(t.deadlineWithTime)) return t.deadlineWithTime;
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof t.deadlineDay === 'string' ? t.deadlineDay : '');
@@ -272,10 +282,20 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     const r = await call('GET', `/tasks?includeDone=true${source ? `&source=${source}` : ''}`, undefined, source ? 'give me its archived tasks' : 'give me its task list');
     if (!Array.isArray(r.body.data)) throw new Down(`Super Productivity's answer to "${source ? 'archived tasks' : 'task list'}" wasn't a list (HTTP ${r.status}).`);
     const list = Array.isArray(r.body.data) ? r.body.data : [];
-    const linked = new Map(), rest = [];
-    for (const t of list) { if (t && mine.has(String(t.id))) linked.set(String(t.id), own(t, dayEnd)); else if (t) rest.push(other(t)); }
-    return { linked, rest };
+    // open: the tasks that can be adopted, cut down to the seven fields: open, and not a sub-task (parentId).
+    // Whether a task repeats (repeatCfgId) is noted; the rule itself is never read.
+    const linked = new Map(), rest = [], open = [];
+    for (const t of list) {
+      if (!t) continue;
+      const id = String(t.id);
+      if (mine.has(id)) { linked.set(id, own(t, dayEnd)); continue; }
+      rest.push({ id, fact: other(t) });
+      if (!t.isDone && !t.parentId && title(t.title)) open.push({ ...own(t, dayEnd), repeats: !!t.repeatCfgId });
+    }
+    return { linked, rest, open };
   }
+  /** A to-do for an adopted task, added without the list being put on screen. */
+  const adoptTodo = async (text, due) => { if (todos.adopt) return todos.adopt(text, due); const c = await todos.add(text); if (due !== null) await todos.update(c.id, { dueMs: due }); return c; };
 
   // ---- lines for the owner
   const hold = (items) => { if (items.length) edit((cal) => { cal.held.push(...items); }); };
@@ -331,13 +351,17 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     let archived = null;
     try {
       const mine = new Set([...Object.values(cal.links).map((l) => l.task), ...Object.values(cal.retired)]);
-      const { linked, rest } = await readTasks(mine, dayEnd);
-      others = rest;
+      const { linked, rest, open } = await readTasks(mine, dayEnd);
+      const unlinked = () => { const tasks = new Set(Object.values(cal.links).map((l) => l.task)); others = rest.filter((r) => !tasks.has(r.id)).map((r) => r.fact); };
+      unlinked();
+      const openIds = new Set(open.map((o) => o.id)); // the app's open tasks that had no link when the list was read (and those released in this run)
 
       // A to-do finished on both sides, then opened again in Roamies: its task is taken up again if it's still there.
       for (const [id, task] of Object.entries(cal.retired)) {
         const t = byId.get(id);
         if (!t) { delete cal.retired[id]; continue; }
+        // ...or opened again in the app, once every open task there is on the list: the to-do is open again too.
+        if (t.status !== 'open' && cal.adopt && linked.get(task)?.done === false) { await todos.update(id, { status: 'open' }); t.status = 'open'; }
         if (t.status !== 'open') continue;
         delete cal.retired[id];
         const r = linked.get(task);
@@ -359,12 +383,15 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
             continue;
           }
         }
-        // Taken off Roamies' list (dropped): the task keeps its place in the app, without a time.
+        // Taken off Roamies' list (dropped). A task Roamies made keeps its place in the app, without a time. A task
+        // that came from the app is left exactly as it is, time included: it was the owner's before Roamies knew of
+        // it, and Roamies only forgets it. Either way it is not adopted again (released), and nothing is deleted.
         if (!t && link.was !== 'done') {
-          if (!gone && remote.start !== null) await writeTask(link, { start: null }, link.local);
-          delete cal.links[id]; save();
-          log('calendar_unlinked', { why: 'removed here' });
-          lines.push(`${quote(link.title)} is off my list. Its task is still in Super Productivity, without a time: delete it there if you don't want it.`);
+          const theirs = link.from === 'app';
+          if (!theirs && !gone && remote.start !== null) await writeTask(link, { start: null }, link.local);
+          delete cal.links[id]; if (cal.adopt && !gone) { cal.released[link.task] = true; openIds.add(link.task); } save();
+          log('calendar_unlinked', { why: 'removed here', from: theirs ? 'app' : 'roamies' });
+          lines.push(theirs ? `${quote(link.title)} is off my list. Its task stays in Super Productivity as it is (I never delete there), and I won't bring it back.` : `${quote(link.title)} is off my list. Its task is still in Super Productivity, without a time: delete it there if you don't want it.${cal.adopt ? ' I won\'t bring it back.' : ''}`);
           continue;
         }
         const local = { title: t ? title(t.text) : link.agreed.title, done: t ? t.status === 'done' : true, start: link.local.start, minutes: link.local.minutes, urgent: link.local.urgent, important: link.local.important, due: t ? (t.due ?? null) : link.agreed.due };
@@ -404,6 +431,33 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       }
 
       for (const id of Object.keys(cal.waiting)) if (byId.get(id)?.status !== 'open') delete cal.waiting[id];
+      // Feature 26: every open task in the app that is not a sub-task has a to-do. A task is one to-do: it is
+      // skipped when it is linked or was released (its to-do was taken off the list; forgotten once the task is
+      // no longer open in the app). A to-do is one task: an open to-do without a task and an open task without a
+      // to-do that have the same title, one of each, are linked, and no second task is created for the to-do.
+      const taken = new Set(Object.values(cal.links).map((l) => l.task));
+      for (const id of Object.keys(cal.released)) if (!openIds.has(id)) { delete cal.released[id]; save(); }
+      const fresh = open.filter((o) => !cal.released[o.id] && !taken.has(o.id));
+      const free = list.filter((t) => t.status === 'open' && t.kind === 'commitment' && !cal.links[t.id] && !cal.retired[t.id] && !cal.waiting[t.id]);
+      const twinOf = (o) => { const want = sameName(o.title), a = free.filter((t) => sameName(t.text) === want && !cal.links[t.id]); return a.length === 1 && fresh.filter((x) => sameName(x.title) === want).length === 1 ? a[0] : null; };
+      loose = cal.adopt ? [] : fresh.map((o) => ({ title: o.title }));
+      if (cal.adopt && fresh.length) {
+        let twins = 0;
+        for (const o of fresh) {
+          const twin = twinOf(o);
+          let id;
+          if (twin) {
+            // Where the two differ, the app's value is taken, as in any sync; a due time only the to-do has goes over.
+            id = twin.id; twins++;
+            if (twin.text !== o.title) await todos.rename(id, o.title);
+            if (o.due !== null && twin.due !== o.due) await todos.update(id, { dueMs: o.due });
+          } else id = (await adoptTodo(o.title, o.due)).id;
+          cal.links[id] = { task: o.id, title: o.title, was: 'open', from: 'app', ...(o.repeats ? { repeats: true } : {}), offered: true, local: { start: o.start, minutes: o.minutes, urgent: o.urgent, important: o.important }, agreed: seven(o) };
+          save();
+        }
+        unlinked();
+        log('calendar_adopted', { tasks: fresh.length, byTitle: twins, repeating: fresh.filter((o) => o.repeats).length }); // how many, never a title
+      }
       // Every open to-do of kind "commitment" has a task. The intent is written down before the create and cleared
       // when the link is saved, so a create that was cut short is known about at the next start.
       for (const t of list) {
@@ -450,7 +504,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       hold(r.asks.map((a) => ({ ask: a })));
       // A line that reports something done or lost on their behalf carries its short sentence: it is also said.
       if (from !== 'tool') { hold(r.lines.map((text) => ({ text, ...(r.says[text] ? { say: r.says[text] } : {}) }))); return { ...r, text: '' }; }
-      const text = [...r.lines, ...r.asks.map((a) => `The task for ${quote(a.title)} was deleted in Super Productivity. The app asks them in a bubble whether the to-do goes too: leave that to the bubble.`)].join('\n');
+      const text = [...r.lines, ...r.asks.map(() => 'The task of a to-do was deleted in Super Productivity. The app asks them in a bubble, by its title, whether the to-do goes too: leave that to the bubble.')].join('\n');
       return { ...r, text };
     });
   }
@@ -512,6 +566,27 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     log('calendar_started', { todos: titles.length });
     await sync('start');
     return true;
+  }
+
+  /** Feature 26, the first time. How many open tasks in the app have no to-do yet, as the last sync saw them: 0
+   *  when that is settled, not known, or there are none. */
+  const adoptable = () => { try { const c = get(); return c.started && !c.adopt && lastOk ? loose.length : 0; } catch { return 0; } };
+  /** Shows the count and the first titles, and waits for a yes. Nothing is added before it. After it, a task added
+   *  in the app is adopted by the next sync without a bubble. → how many were added, or false. */
+  async function offerAdopt(signal, kept = null) {
+    if (get().adopt) return 0;
+    if (!get().started || !(await there())) return false;
+    if (!loose.length) await sync('adopt');
+    const all = loose.slice(), n = all.length;
+    if (get().adopt || !n) return false;
+    const shown = all.slice(0, SP.titlesShown);
+    const question = `Super Productivity has ${n} open task${n === 1 ? '' : 's'} that ${n === 1 ? 'isn\'t' : 'aren\'t'} on my to-do list. Add ${n === 1 ? 'it' : 'them'}, and keep new ones on my list from now on?`;
+    const a = await yesTo({ placeholder: [question, ...shown.map((x) => `- ${x.title}`), ...(n > shown.length ? [`and ${n - shown.length} more`] : [])].join('\n'), choices: [n === 1 ? 'Add it' : 'Add them', 'Not now'], spoken: question, pending: keep(kept, 'adopt', 'Add the open tasks in Super Productivity to the to-do list?', {}) }, signal);
+    if (!a) return false;
+    await inTurn(() => edit((cal) => { cal.adopt = true; }));
+    log('calendar_adopt', { tasks: n });
+    await sync('adopt');
+    return n;
   }
 
   // ---- blocks: a to-do's start time and length, on the calendar in the app
@@ -858,7 +933,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'show_day',
-      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by other tasks they scheduled in Super Productivity themselves (given as taken time only). date: "today", "tomorrow", a weekday (the app works out its date), "next friday" as they said it (the app asks them which) or YYYY-MM-DD.',
+      description: 'What is on the calendar on a day: the blocks of their to-dos, with times and lengths, and the time taken by tasks in Super Productivity that are not on the to-do list (given as taken time only). date: "today", "tomorrow", a weekday (the app works out its date), "next friday" as they said it (the app asks them which) or YYYY-MM-DD.',
       parameters: z.object({ date: z.string() }),
       execute: async ({ date }) => {
         const day = dayFrom(await dayAsked(date, { what: `"${String(date).trim()}"` }), now());
@@ -941,7 +1016,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'sort_tasks',
-      description: 'Propose where each unsorted to-do goes in the Eisenhower matrix. Call show_matrix first to see which are unsorted, then give a proposal for every one of them: urgent or not, important or not, judged from what the to-do says and when it is due. The app shows them the whole proposal and applies it only after their yes. For one to-do they have placed themselves, use set_priority instead.',
+      description: 'Propose where each unsorted to-do goes in the Eisenhower matrix. Call list_commitments with quadrant "unsorted" first to see which are unsorted (it lists ten at a time), then give a proposal for each of the ones it listed: urgent or not, important or not, judged from what the to-do says and when it is due. The app shows them the whole proposal and applies it only after their yes. For one to-do they have placed themselves, use set_priority instead.',
       parameters: z.object({ proposals: z.array(z.object({ todo: z.string(), urgent: z.boolean(), important: z.boolean() })).min(1).max(60) }),
       execute: async ({ proposals }, ctx) => {
         const pre = await mirrored();
@@ -961,35 +1036,100 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     },
     {
       name: 'show_matrix',
-      description: 'The Eisenhower matrix of their open to-dos: the four quadrants, and the to-dos not sorted yet. Say it briefly: a quadrant at a time, a few words each, not every line.',
+      description: 'The Eisenhower matrix of their open to-dos, in numbers: how many are in each of the four quadrants, and how many are not sorted yet. It names no to-do. Say the numbers briefly and offer the details; the to-dos of one quadrant come from list_commitments with quadrant, when they ask for them.',
       parameters: z.object({}),
       execute: async () => {
         const pre = await mirrored();
         const all = await sortable();
         if (!all.length) return ['There are no open to-dos to sort.', pre].filter(Boolean).join('\n');
-        const line = (x) => `${x.title} [${x.id}]${x.block === null ? '' : ' (on the calendar)'}`;
-        const parts = QUADRANTS.map(([name, u, i]) => { const here = all.filter((x) => x.sorted && x.urgent === u && x.important === i); return `${name}: ${here.length ? here.map(line).join('; ') : 'nothing'}`; });
-        const loose = all.filter((x) => !x.sorted);
-        return [...parts, loose.length ? `Not sorted yet: ${loose.map(line).join('; ')}` : 'Every to-do is sorted.', pre].filter(Boolean).join('\n');
+        const parts = QUADRANTS.map(([name, u, i]) => `${name}: ${all.filter((x) => x.sorted && x.urgent === u && x.important === i).length}`);
+        const unsorted = all.filter((x) => !x.sorted).length;
+        return [...parts, unsorted ? `Not sorted yet: ${unsorted}` : 'Every to-do is sorted.', 'Titles: list_commitments with quadrant, when they ask.', pre].filter(Boolean).join('\n');
       },
     },
   ];
 
-  /** For the morning briefing: what is on the calendar today, as a note for the model. '' when that isn't known. */
-  function dayNote(d = new Date(now())) {
-    let cal;
-    try { cal = get(); } catch { return ''; }
-    if (!cal.started || !lastOk) return '';
-    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const { mine, theirs } = dayBlocks(day, cal);
-    const open = mine.filter((b) => !b.done);
-    if (!open.length && !theirs.length) return '\nNothing is on the calendar in Super Productivity today.';
-    return `\nOn the calendar in Super Productivity today: ${open.map((b) => `${span(b)} ${quote(b.title)}`).join('; ') || 'none of their to-dos'}${theirs.length ? `; and ${theirs.length} other stretch${theirs.length === 1 ? '' : 'es'} of time taken by tasks of their own there (${theirs.map(span).join(', ')})` : ''}. Say it in a sentence or two.`;
+  // ---- what the model is given of the to-do list (2026-11-19): an outline with each request, never the list.
+  // Numbers (open, due today, due this week, overdue, without a date, done today) and today's planned blocks in
+  // full. A title outside today's plan reaches the model only through list_commitments with a filter, which the
+  // owner has to have asked for, ten at most at a time.
+  const dayStart = (ms, plus = 0) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + plus).getTime(); };
+  /** The filters by due time, each over [{ due }] at a moment. A week is Monday to Sunday. */
+  const DUE = {
+    today: (t, n) => t.due !== null && t.due >= dayStart(n) && t.due < dayStart(n, 1),
+    week: (t, n) => { const back = (new Date(n).getDay() + 6) % 7; return t.due !== null && t.due >= dayStart(n, -back) && t.due < dayStart(n, 7 - back); },
+    overdue: (t, n) => t.due !== null && t.due < n,
+    none: (t) => t.due === null,
+  };
+  const listNow = () => { const all = todos.all(); return Array.isArray(all) ? all.map((t) => ({ ...t, due: t.due ?? null })) : []; };
+  /** Today's planned blocks: the open to-dos on the calendar today, and the slots kept for today. */
+  function todayPlan(cal, all) {
+    const from = dayStart(now()), until = dayStart(now(), 1);
+    const open = new Map(all.filter((t) => t.status === 'open').map((t) => [t.id, t]));
+    const booked = Object.entries(cal.links).filter(([id, l]) => open.has(id) && l.local.start !== null && l.local.start >= from && l.local.start < until).map(([id, l]) => ({ todo: id, title: open.get(id).text, start: l.local.start, minutes: l.local.minutes, kept: false }));
+    const waiting = cal.actions.filter((a) => open.has(a.todo) && a.start >= from && a.start < until).map((a) => ({ todo: a.todo, title: open.get(a.todo).text, start: a.start, minutes: a.minutes, kept: true }));
+    return [...booked, ...waiting].sort((a, b) => a.start - b.start);
   }
+  /** The outline, as text for the model: with each request, and for the morning briefing. */
+  function outline() {
+    let cal;
+    try { cal = get(); } catch { cal = blank(); }
+    const n = now(), all = listNow(), open = all.filter((t) => t.status === 'open'), done = all.length - open.length;
+    const count = (f) => open.filter((t) => DUE[f](t, n)).length;
+    const plan = todayPlan(cal, all);
+    const taken = lastOk ? dayBlocks(new Date(dayStart(n)), cal).theirs.length : 0;
+    return [
+      `To-do list, in outline: ${open.length} open: ${count('today')} due today, ${count('week')} due this week, ${count('overdue')} overdue, ${count('none')} without a date.${done ? ` ${done} done today.` : ''}`,
+      plan.length ? `Planned for today: ${plan.map((b) => `${span(b)} ${quote(b.title)} [${b.todo}]${b.kept ? ' (slot kept, not booked yet)' : ''}`).join('; ')}.` : 'Nothing is planned for today.',
+      ...(taken ? [`${taken} other stretch${taken === 1 ? '' : 'es'} of today ${taken === 1 ? 'is' : 'are'} taken in Super Productivity by tasks that aren't on the to-do list.`] : []),
+      'This outline is all you are given of the list: no other title is sent to you. When they ask what is open or how the list stands, say these numbers and today\'s plan first, and offer the details. A to-do\'s title or id comes from list_commitments with a filter (due, words, quadrant), and only when they ask about those to-dos or name one.',
+    ].join('\n');
+  }
+  /** For the morning briefing: the same outline, as a note for the model. */
+  const dayNote = () => `\nTheir to-do list now:\n${outline()}\nSay it in a sentence or two.`;
 
-  /** Upstream's to-do tools, with a sync before each: what the app changed is in before the list is read or changed. */
+  const QUADRANT_ARGS = { urgent_important: [true, true], important: [false, true], urgent: [true, false], neither: [false, false] };
+  /** list_commitments, as the model has it here: the outline without a filter, and with one the open to-dos it
+   *  picks, SP.titlesShown at most, then "and N more". */
+  const listTool = {
+    name: 'list_commitments',
+    description: `The to-do list. Without a filter: the outline (how many are open, due today, due this week, overdue, without a date, and today's planned blocks), which is what to say first when they ask what is open; then offer the details. With a filter, when they ask about those to-dos or name one: the open to-dos it picks, with their ids, ${SP.titlesShown} at most, then "and N more" (say how many more there are; skip: ${SP.titlesShown} gives the next ones when they ask for them). due: "today", "tomorrow", a weekday, YYYY-MM-DD, "this week", "overdue", or "none" for the ones without a date. words: words from the title (to find the id of a to-do they named). quadrant: a quadrant of the Eisenhower matrix, or "unsorted". Filters given together all have to fit. Never go through the list filter by filter to read it all.`,
+    parameters: z.object({ due: z.string().optional(), words: z.string().max(200).optional(), quadrant: z.enum([...Object.keys(QUADRANT_ARGS), 'unsorted']).optional(), skip: z.number().int().min(0).max(10_000).optional() }),
+    execute: async ({ due, words, quadrant: q, skip = 0 } = {}) => {
+      const said = [];
+      let picked = listNow().filter((t) => t.status === 'open');
+      if (due !== undefined && String(due).trim()) {
+        const w = String(due).trim().toLowerCase().replace(/^due\s+/, '');
+        const key = w === 'today' ? 'today' : ['this week', 'week'].includes(w) ? 'week' : w === 'overdue' ? 'overdue' : ['none', 'no date', 'without a date', 'undated'].includes(w) ? 'none' : null;
+        if (key) { picked = picked.filter((t) => DUE[key](t, now())); said.push(key === 'none' ? 'without a date' : key === 'overdue' ? 'overdue' : key === 'week' ? 'due this week' : 'due today'); } else {
+          const day = dayFrom(w, now());
+          if (!day) throw new Error('due is "today", "tomorrow", a weekday, YYYY-MM-DD, "this week", "overdue" or "none".');
+          picked = picked.filter((t) => t.due !== null && t.due >= day.getTime() && t.due < dayStart(day.getTime(), 1)); said.push(`due ${dayName(day)}`);
+        }
+      }
+      if (words !== undefined && String(words).trim()) {
+        const want = nameWords(words);
+        picked = picked.filter((t) => { const has = nameWords(t.text); return want.every((x) => has.some((h) => h === x || h.startsWith(x))); }); said.push(`with ${quote(title(words))} in the title`);
+      }
+      if (q) {
+        const sorted = new Map((await sortable()).map((x) => [x.id, x]));
+        picked = picked.filter((t) => { const x = sorted.get(t.id); return x && (q === 'unsorted' ? !x.sorted : x.sorted && x.urgent === QUADRANT_ARGS[q][0] && x.important === QUADRANT_ARGS[q][1]); });
+        said.push(q === 'unsorted' ? 'not sorted into the matrix yet' : quadrant(...QUADRANT_ARGS[q]).toLowerCase());
+      }
+      if (!said.length) return outline();
+      picked.sort((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity));
+      const cal = get(), n = now(), shown = picked.slice(skip, skip + SP.titlesShown), more = picked.length - skip - shown.length;
+      log('calendar_listed', { filters: said.length, found: picked.length, shown: shown.length });
+      if (!picked.length) return `No open to-do is ${said.join(', and ')}.`;
+      const line = (t) => { const l = cal.links[t.id]?.local, a = cal.actions.find((x) => x.todo === t.id); return `- ${t.id}: ${t.text}${t.kind === 'reminder' ? ' [reminder]' : ''}${t.due !== null ? ` (due ${dayName(new Date(t.due))}, ${hm(t.due)}${t.due < n ? ', OVERDUE' : ''})` : ''}${l && l.start !== null ? ` (on the calendar ${slot(l)})` : a ? ` (slot kept for ${slot(a)})` : ''}`; };
+      return [`${picked.length} open to-do${picked.length === 1 ? '' : 's'} ${said.join(', and ')}${skip ? `, from the ${nth(skip + 1)} on` : ''}:`, ...shown.map(line), ...(more > 0 ? [`and ${more} more`] : [])].join('\n');
+    },
+  };
+
+  /** Upstream's to-do tools, with a sync before each: what the app changed is in before the list is read or changed.
+   *  list_commitments is replaced by the one above: the list itself is never handed over whole. */
   const TODO_TOOLS = new Set(['remember_commitment', 'update_commitment', 'list_commitments', 'show_list']);
-  const wrap = (tools) => tools.map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { const pre = await sync('tool'); const out = await t.execute(...a); return pre.text ? `${out}\n\n${pre.text}` : out; } } : t));
+  const wrap = (tools) => tools.map((t) => (t.name === 'list_commitments' ? listTool : t)).map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { const pre = await sync('tool'); const out = await t.execute(...a); return pre.text ? `${out}\n\n${pre.text}` : out; } } : t));
 
   const tools = [
     ...blockTools,
@@ -1025,6 +1165,13 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       if (!(await there())) return { later: true };
       if (!(await firstRun())) return DONE; // no open to-dos: nothing to put there, and it counts as settled
       return { ask: async () => ({ say: (await offerStart(undefined, q)) ? 'The to-do list is in Super Productivity now.' : '' }) };
+    },
+    async adopt(q) {
+      if (get().adopt) return DONE;
+      if (!(await up())) return { later: true };
+      await sync('adopt');
+      if (!adoptable()) return lastOk ? DONE : { later: true }; // nothing left in the app to add
+      return { ask: async () => { const n = await offerAdopt(undefined, q); return { say: n ? `${n} task${n === 1 ? '' : 's'} from Super Productivity ${n === 1 ? 'is' : 'are'} on my to-do list now.` : '' }; } };
     },
     async deleted(q) {
       const { todo } = q.data ?? {};
@@ -1148,9 +1295,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     try { cal = get(); } catch { return '- Super Productivity: the settings file can\'t be read, so the to-do list isn\'t synced.'; }
     const n = Object.keys(cal.links).length, later = kept();
     const how = ' When a calendar tool needs a yes (the first time, an overlap, a day plan, a sorting proposal, which of two days, whether a to-do that is already booked moves or gets a second one), the app opens a bubble itself and they answer it by saying yes or no, or by clicking: don\'t ask them yourself as well, and never tell them they have to click. What you say about the calendar is what the tool\'s result says was done, with the day and times it names: "on the calendar", "booked" or "scheduled" only when the result says it is on the calendar; when it says the slot is kept until Super Productivity is open, say the task is saved and the slot will be booked when Super Productivity is open.';
-    const waits = later.length ? `\n- Not on the calendar yet, kept until Super Productivity is open (the app places them itself then; don't say they are booked): ${later.map((a) => a.brief.replace(/^Put /, '').replace(' on the calendar ', ', ')).join('; ')}.` : '';
-    return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
+    const waits = later.length ? `\n- ${later.length} block${later.length === 1 ? ' is' : 's are'} not on the calendar yet, kept until Super Productivity is open (the app places them itself then; don't say they are booked; show_pending names them when they ask).` : '';
+    return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).${cal.adopt ? ' Every open task they have in the app is on the to-do list too, whoever made it; the app adds new ones itself.' : ''}` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, resume, dayNote, startup, takeHeld, hasHeld, offerStart, firstRun, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, resume, dayNote, outline, startup, takeHeld, hasHeld, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
 }
