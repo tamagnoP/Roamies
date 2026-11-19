@@ -42,7 +42,7 @@ import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the e
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
-import { createCalendar, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
+import { createCalendar, noticeVoice, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
@@ -347,15 +347,24 @@ const cal = createCalendar({
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
 // nothing else is going on: no reply being made or spoken, nobody talking, no bubble waiting for an answer. It is
 // shown in a bubble then, and never dropped (it is kept in state.json until shown). Feature 22: inside an exchange
-// started by voice it is also said, and a question gets its answer window; outside one it stays silent, as before.
+// started by voice it is also said, and a question gets its answer window. Outside one, a line that reports
+// something Roamies did or lost on the owner's behalf (a kept block placed or dropped, a conflict resolved, a task
+// deleted in the app) is said too, in one short sentence, unless "speakNotices" is off (noticeVoice, calendar.mjs);
+// the other lines stay silent there. Either way they wait for the same quiet moment.
+const noticesOn = () => { try { return loadSettings(HOME).speakNotices; } catch { return false; } };
 let voiceState = 'idle', lineUntil = 0, calOffered = false, calAsking = false;
 const calQuiet = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!config.onboarded || guideClosed) && !loggingIn, busy, queued, asking: pending.size > 0 || calAsking, voice: voiceState, speakingUntil: lineUntil });
 async function calShow() {
   try {
     if (!calQuiet()) return;
     if (cal.hasHeld()) {
-      const { lines, asks, blocks } = cal.takeHeld();
-      if (lines.length) { logLine('calendar_lines', { lines: lines.length }); say(lines.join('\n'), 'concerned'); if (flow.spoken()) await lineDone(forVoice(lines.join('\n'))); }
+      const { lines, notices, asks, blocks } = cal.takeHeld();
+      if (lines.length) {
+        const voiced = noticeVoice({ lines, notices }, { exchange: flow.spoken(), speakNotices: noticesOn() });
+        logLine('calendar_lines', { lines: lines.length, notices: notices.length, said: !!voiced });
+        say(lines.join('\n'), 'concerned');
+        if (voiced) await lineDone(forVoice(voiced));
+      }
       for (const a of asks) {
         calAsking = true;
         let yes;
@@ -368,7 +377,7 @@ async function calShow() {
       // question. Unanswered, flow.mjs keeps it as a pending question.
       for (const b of blocks) {
         calAsking = true;
-        try { const line = await cal.placeKept(b).finally(() => { calAsking = false; }); if (line) aloud(line, 'happy'); } catch (e) { if (e?.name !== 'Unanswered') throw e; }
+        try { const line = await cal.placeKept(b).finally(() => { calAsking = false; }); if (line) { say(line, 'happy'); if (flow.spoken() || noticesOn()) voiceLine(forVoice(line)); } } catch (e) { if (e?.name !== 'Unanswered') throw e; }
       }
       return;
     }

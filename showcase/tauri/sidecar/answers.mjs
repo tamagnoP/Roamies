@@ -94,7 +94,8 @@ export const heardShape = (text) => { const w = plain(text).split(' ').filter(Bo
  *   ask(opts, signal): the same bubble, with the hint under the question; resolves 'yes' or null, like a click.
  *     opts.which: { first: [phrases], second: [phrases], hint }: a question between two things. choices are the two;
  *     resolves FIRST, SECOND, or null for neither.
- *     opts.spoken: what is said aloud for it (else its first line). opts.pending: { kind, brief, data }, what is kept
+ *     opts.spoken: what is said aloud for it (else its first line). opts.always: said whenever replies are spoken,
+ *     not only in an exchange started by voice (outside one it gets no answer window). opts.pending: { kind, brief, data }, what is kept
  *     when the answer window runs out; ask() then rejects with Unanswered.
  *   listening(): the owner has started talking. True when a bubble is open, which is when the caller must not
  *     cancel the turn or close anything.
@@ -113,7 +114,7 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
   function askSpoken(opts, signal) {
     const closing = new AbortController();
     const inner = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
-    const { spoken, pending, which = null, ...shown } = opts;
+    const { spoken, pending, which = null, always = false, ...shown } = opts;
     return new Promise((resolve, reject) => {
       const entry = {
         settle(answer, by) {
@@ -143,7 +144,7 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
         },
       };
       waiting.push(entry);
-      entry.window = question?.({ brief: spoken ?? briefOf(opts.placeholder), pending: pending ?? null, onTimeout: () => entry.unanswered() }) ?? null;
+      entry.window = question?.({ brief: spoken ?? briefOf(opts.placeholder), pending: pending ?? null, always, onTimeout: () => entry.unanswered() }) ?? null;
       // which: the overlay answers the second button with SECOND instead of nothing (host.js).
       Promise.resolve(ask({ ...shown, ...(which ? { second: SECOND } : {}), placeholder: `${opts.placeholder}\n${which ? `Say ${which.hint}, or click.` : SPOKEN_HINT}` }, inner)).then((a) => entry.settle(which ? whichButton(a, opts.choices) : firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
     });

@@ -191,7 +191,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   assert.match(side, /if \(problem\) return aloud\(problem, 'concerned'\)/); assert.match(side, /if \(flow\.spoken\(\)\) voice\?\.say\(forVoice\(msg\)\)/, 'a failed request is said as well as shown');
   assert.match(side, /const aloud = \(text, mood\) => \{ say\(text, mood\); if \(flow\.spoken\(\)\) voiceLine\(forVoice\(text\)\); \};/);
-  assert.match(side, /say\(lines\.join\('\\n'\), 'concerned'\); if \(flow\.spoken\(\)\) await lineDone\(/, 'what a sync has to say is said too, inside an exchange');
+  assert.match(side, /const voiced = noticeVoice\(\{ lines, notices \}, \{ exchange: flow\.spoken\(\), speakNotices: noticesOn\(\) \}\);\n[^\n]*\n\s*say\(lines\.join\('\\n'\), 'concerned'\);\n\s*if \(voiced\) await lineDone\(/, 'what a sync has to say is said too, inside an exchange (and a notice outside one: calendar.test.mjs)');
 }
 
 // ================= rule 2: the answer window
@@ -698,6 +698,22 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.deepEqual(got, []); // "friday the 20th" is not among this test's phrases: still open
   assert.equal(await inWindow('the first one'), 'heard'); await tick(); await tick();
   assert.deepEqual(got, ['yes']); assert.deepEqual(pendingNow(), []); assert.equal(overlay.shown.at(-1), 'Booked.');
+  await reset();
+}
+
+// ================= a notice's question (a task deleted in the app; 2026-11-19): outside an exchange it is said when
+// it asks for that (always), and gets no answer window: the microphone doesn't open by itself there
+{
+  await reset();
+  const said0 = overlay.said.length;
+  let p = settled(answers.ask({ placeholder: 'The task for "X" was deleted in Super Productivity. Take it off my to-do list as well?', spoken: 'The task for "X" was deleted in Super Productivity: take it off my to-do list as well?', choices: ['Take it off', 'Keep it'], always: true })); await tick();
+  assert.equal(overlay.said.at(-1), 'The task for "X" was deleted in Super Productivity: take it off my to-do list as well?'); assert.ok(!('always' in bubble().opts));
+  await played(); await tick(); assert.equal(flow.window(), null, 'no answer window outside an exchange');
+  click(true); assert.equal((await p).value, 'yes');
+  // without it (the setting off), nothing is said outside an exchange, as before
+  const said1 = overlay.said.length;
+  p = settled(answers.ask({ placeholder: 'Sure?', choices: ['Yes', 'No'], always: false })); await tick();
+  assert.equal(overlay.said.length, said1); click(false); assert.equal((await p).value, null); assert.ok(said1 > said0);
   await reset();
 }
 

@@ -329,6 +329,16 @@ the screen blocks clicks.
   `move_block` (kind `day`) and not for `show_day` and `plan_day`; kept, it is dropped with a line once the coming
   day is over. The two stale sorting questions of 18 November were removed from `state.json` by running the new
   rule (`tidy`) over it: one as a second copy, one as done, nothing said.
+- **2026-11-19.** A notice about something done for the owner is spoken (found on the installed `9fcb136`: a kept
+  block was placed and its bubble said so silently). Replaces "a sync's lines are never spoken unless an exchange
+  started by voice is open". A line from a sync nobody asked for that reports something Roamies did or lost on the
+  owner's behalf (a kept block placed, a kept block dropped, a conflict resolved, a task deleted in the app) is
+  said as well as shown, in one short sentence, after the same wait as before (nobody talking, nothing being said,
+  no bubble open). New setting `speakNotices`, default `true`, turns the voice off for them. Decided while
+  building: inside an exchange everything shown is still said, whatever the setting; the deleted-task question is
+  said outside an exchange but gets no answer window there (the microphone still opens by itself only in an
+  exchange or when a pending question is asked again); the other sync lines (the block offer, a to-do taken off
+  the list, a failed sync) stay silent outside an exchange.
 
 ## 6. Still to test
 
@@ -355,6 +365,9 @@ the screen blocks clicks.
   Fridays as buttons, said aloud; answered by saying "the 27th", and by a click on each button (the second button
   is new in the overlay and has only been checked in source); left unanswered, it comes back. A block asked for by
   the title of a to-do already on the list goes to that to-do.
+- [ ] Spoken notices (2026-11-19) on the Mac, after an install: with Super Productivity closed, a block asked for;
+  after opening the app and with no exchange open, the bubble that says it is on the calendar is also said, in
+  one sentence; not said while you are talking or a bubble is open; `"speakNotices": false` leaves it silent.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.

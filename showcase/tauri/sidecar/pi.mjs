@@ -287,7 +287,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -337,6 +337,7 @@ const CLEAN = {
   home: when((v) => (isStr(v) && HOME_CORNERS.includes(v.trim().toLowerCase())) || (isObj(v) && typeof v.x === 'number' && typeof v.y === 'number' && Number.isFinite(v.x) && Number.isFinite(v.y))),
   autoListenQuestions: when((v) => typeof v === 'boolean'),
   closingReply: when(full),
+  speakNotices: when((v) => typeof v === 'boolean'),
   limits: when(isObj),
   calendar: when(isObj),
 };
@@ -433,7 +434,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim() };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */

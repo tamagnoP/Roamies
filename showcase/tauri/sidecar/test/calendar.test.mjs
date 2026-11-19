@@ -20,7 +20,7 @@ for (const name of ['writeFileSync', 'appendFileSync']) { const real = fs[name];
 for (const name of ['writeFile', 'appendFile']) { const real = fs.promises[name]; fs.promises[name] = (file, data, ...rest) => { written.push({ file: String(file), data: String(data) }); return real(file, data, ...rest); }; }
 
 const { CALENDAR, LIMITS, SP, codeReference, loadSettings } = await import('../pi.mjs');
-const { Down, FIELDS, createCalendar, createClient, dayChoice, dayFrom, minutesBetween, nextDays, placeDay, quiet } = await import('../calendar.mjs');
+const { Down, FIELDS, createCalendar, createClient, dayChoice, dayFrom, minutesBetween, nextDays, noticeVoice, placeDay, quiet } = await import('../calendar.mjs');
 const { SECOND, whichAnswer } = await import('../answers.mjs');
 const { settingsNotice, settingsReference } = await import('../reference.mjs');
 
@@ -258,11 +258,11 @@ assert.ok(app.log.slice(mark).some((q) => q.query === '?includeDone=true&source=
 assert.equal(arch.status, 'done'); assert.equal(state().retired[arch.id], archTask); assert.deepEqual(writes(mark), []);
 assert.equal(state().links[gone.id], undefined); assert.equal(gone.status, 'open', 'the to-do is left alone until the owner answers');
 assert.deepEqual(state().held, [{ ask: { todo: gone.id, title: 'Delete me' } }], 'a question, kept until it can be shown');
-assert.deepEqual(cal.takeHeld(), { lines: [], asks: [{ todo: gone.id, title: 'Delete me' }], blocks: [] }); assert.deepEqual(state().held, []);
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [{ todo: gone.id, title: 'Delete me' }], blocks: [] }); assert.deepEqual(state().held, []);
 mark = app.log.length; await cal.sync('timer'); await cal.sync('tool');
-assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [], blocks: [] }, 'asked once');
+assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] }, 'asked once');
 // the owner keeps it: it is a to-do without a task, so it gets a new one
-await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [], blocks: [] });
+await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] });
 
 // ---- 9. taken off Roamies' list: the time is cleared, the link dropped, the owner told; never a DELETE
 await cal.setLocal(gone.id, { start: at(19, 10), minutes: 30 }); await cal.sync('timer');
@@ -334,14 +334,44 @@ assert.equal([...app.tasks.values()].filter((t) => t.title === 'Only one of me')
 third.text = 'Book room C'; taskOf(third).title = 'Book room D';
 r = await cal.sync('timer');
 assert.equal(r.text, ''); assert.equal(state().held.length, 1); assert.ok(cal.hasHeld());
-assert.match(make().takeHeld().lines[0], /Book room D/, 'kept across a restart'); assert.equal(cal.hasHeld(), false);
+const heldNow = make().takeHeld();
+assert.match(heldNow.lines[0], /Book room D/, 'kept across a restart'); assert.equal(cal.hasHeld(), false);
+// ---- 14a. a notice is spoken (2026-11-19): a line that reports something done or lost on the owner's behalf
+// carries one short sentence, which is said as well as shown, in or out of an exchange, unless "speakNotices" is off
+assert.deepEqual(heldNow.notices, ['"Book room D" changed both here and in Super Productivity, and I kept what the app has.'], 'a conflict resolved');
+assert.equal(noticeVoice(heldNow, { exchange: false, speakNotices: true }), heldNow.notices[0]);
+assert.equal(noticeVoice(heldNow, { exchange: false, speakNotices: false }), '', 'the setting turns the voice off for them');
+assert.equal(noticeVoice(heldNow, { exchange: true, speakNotices: false }), heldNow.lines.join('\n'), 'in an exchange started by voice everything shown is said, as before');
+assert.equal(noticeVoice({ lines: ['"X" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?'], notices: [] }, { exchange: false, speakNotices: true }), '', 'a line that is not a notice stays silent outside an exchange');
+assert.equal(noticeVoice({ lines: ['a', 'b', 'c'], notices: ['One.', 'Two.'] }, { exchange: false, speakNotices: true }), 'One. Two.');
+for (const n of heldNow.notices) assert.ok(n.length < 120 && (n.match(/[.!?](\s|$)/g) ?? []).length === 1, `one short sentence: ${n}`);
+assert.equal(loadSettings(home).speakNotices, true); assert.equal(settingsReference(home).speakNotices, true, 'in settings.default.json, on');
+fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, speakNotices: false })); assert.equal(loadSettings(home).speakNotices, false);
+fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, speakNotices: 'no' })); assert.equal(loadSettings(home).speakNotices, true); assert.ok(loadSettings(home).invalid.some((i) => i.name === 'speakNotices'));
+{ const f = { ...file0 }; delete f.speakNotices; fs.writeFileSync(settingsFile, JSON.stringify(f)); assert.equal(loadSettings(home).speakNotices, true, 'a settings.json from before it: on'); }
+fs.writeFileSync(settingsFile, JSON.stringify(file0));
+// the question about a task deleted in the app is said too, in one sentence, whenever replies are spoken; with the
+// setting off, only in an exchange (always: false)
+{
+  const got = [];
+  const calN = createCalendar({ home, todos, port, tokenFile, now: () => clock, ask: async (o) => { got.push(o); return null; } });
+  await calN.askDeleted({ todo: 'c0', title: 'Gone' });
+  assert.deepEqual([got[0].spoken, got[0].always], ['The task for "Gone" was deleted in Super Productivity: take it off my to-do list as well?', true]);
+  fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, speakNotices: false }));
+  await calN.askDeleted({ todo: 'c0', title: 'Gone' }); assert.equal(got[1].always, false);
+  fs.writeFileSync(settingsFile, JSON.stringify(file0));
+}
 const calm = { ready: true, busy: false, queued: 0, asking: false, voice: 'idle', speakingUntil: 1000, now: 2000 };
 assert.equal(quiet(calm), true);
 for (const busyWith of [{ ready: false }, { busy: true }, { queued: 1 }, { asking: true }, { voice: 'listening' }, { voice: 'processing' }, { speakingUntil: 3000 }]) assert.equal(quiet({ ...calm, ...busyWith }), false, JSON.stringify(busyWith));
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /asking: pending\.size > 0 \|\| calAsking/, 'any bubble waiting for an answer (Send, a plan) counts');
 const show = side.slice(side.indexOf('async function calShow()'), side.indexOf('tools.splice(0, tools.length'));
-assert.ok(show.includes('if (!calQuiet()) return;') && show.includes('say(lines.join') && !show.includes('voiceLine') && !show.includes('enqueue'), 'shown in a bubble, never spoken');
+assert.ok(show.includes('if (!calQuiet()) return;') && show.includes('say(lines.join') && !show.includes('enqueue'), 'shown in a bubble, when nothing else is going on: nobody talking, nothing being said, no bubble open');
+assert.ok(show.indexOf('if (!calQuiet()) return;') < show.indexOf('cal.takeHeld()'), 'nothing is taken off the pile, shown or said before that');
+assert.match(show, /const voiced = noticeVoice\(\{ lines, notices \}, \{ exchange: flow\.spoken\(\), speakNotices: noticesOn\(\) \}\);/); assert.match(show, /if \(voiced\) await lineDone\(forVoice\(voiced\)\);/, 'what is said is what noticeVoice gives, and nothing else');
+assert.match(show, /const line = await cal\.placeKept\(b\)[^\n]*if \(line\) \{ say\(line, 'happy'\); if \(flow\.spoken\(\) \|\| noticesOn\(\)\) voiceLine\(forVoice\(line\)\); \}/, 'a kept block placed after its overlap question, or lost, is a notice too');
+assert.match(side, /const noticesOn = \(\) => \{ try \{ return loadSettings\(HOME\)\.speakNotices; \} catch \{ return false; \} \};/);
 assert.match(side, /if \(m\.type === 'voice_state'\) voiceState = /); assert.match(side, /lineUntil = Date\.now\(\) \+/);
 assert.match(side, /cal\.sync\('briefing'\)/, 'a sync before each briefing'); assert.match(side, /loadSettings\(HOME\)\.calendar\.syncSeconds/, 'the timer follows the setting');
 for (const hook of ["cal.changed(c); }, // Local-only build", 'cal.changed(after);', 'cal.changed(c); // Local-only build']) assert.ok(side.includes(hook), `a to-do changed in Roamies is told to the calendar: ${hook}`);
@@ -626,10 +656,11 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   assert.deepEqual(state().actions, [], 'placed or handed over: none is left to run again');
   let held = cal.takeHeld();
   assert.deepEqual(held.lines, ['"Kept: flow test" is on the calendar now, Thursday 3 December, 10:00 to 10:30: the slot I kept while Super Productivity was closed.', '"Kept: mover" is on the calendar now, Friday 4 December, 17:30 to 17:50: the slot I kept while Super Productivity was closed.']);
+  assert.deepEqual(held.notices, ['"Kept: flow test" is on the calendar now, Thursday 3 December, 10:00 to 10:30.', '"Kept: mover" is on the calendar now, Friday 4 December, 17:30 to 17:50.'], 'a kept block placed: said, each in one short sentence');
   assert.deepEqual(held.blocks.map((b) => [b.todo, b.title, b.start, b.minutes]), [[ka.id, 'Kept: a', D(3, 10, 15), 30]], 'a clash becomes the usual question');
   // never twice: the next runs write nothing and say nothing
   mark = app.log.length; await cal.sync('timer'); await cal.sync('tool'); await make().sync('start');
-  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], asks: [], blocks: [] });
+  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] });
   // the clash: asked as an overlap is; a no leaves it off, a yes places it
   answer = null; asked.length = 0;
   assert.equal(await cal.placeKept(held.blocks[0]), ''); assert.equal(linkOf(ka).local.start, null); assert.deepEqual(writes(mark), []);
@@ -659,7 +690,9 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   clock = at(14, 9, 29); await closed.sync('timer'); assert.equal(state().actions.length, 1, 'still running: kept');
   clock = at(14, 9, 30); await closed.sync('timer');
   assert.deepEqual(state().actions, []);
-  assert.deepEqual(closed.takeHeld().lines, ['I had kept a slot for "Kept: a", Saturday 14 November, 09:00 to 09:30, until Super Productivity was open. That time has passed, so it isn\'t on the calendar.']);
+  held = closed.takeHeld();
+  assert.deepEqual(held.lines, ['I had kept a slot for "Kept: a", Saturday 14 November, 09:00 to 09:30, until Super Productivity was open. That time has passed, so it isn\'t on the calendar.']);
+  assert.deepEqual(held.notices, ['The slot I kept for "Kept: a", Saturday 14 November, 09:00 to 09:30, has passed, so it isn\'t on the calendar.'], 'a kept block dropped: said');
   mark = app.log.length; await closed.sync('timer'); await cal.sync('timer');
   assert.deepEqual(cal.takeHeld().lines, [], 'once'); assert.deepEqual(writes(mark), []); assert.equal(linkOf(ka).local.start, null);
   // older than limits.pendingKeepHours (24): dropped, and said once

@@ -209,6 +209,7 @@ setup guide is open, the bubble waits until it closes.
   "vault": "~/Documents/roamies-vault",
   "autoListenQuestions": true,
   "closingReply": "Any time.",
+  "speakNotices": true,
   "limits": {
     "approvalBubbleChars": 600,
     "promptChars": 8000,
@@ -279,6 +280,10 @@ setup guide is open, the bubble waits until it closes.
   Roamies' own that ends in a question. `false` switches that off; the answer windows of bubbles are not affected.
 - `closingReply`: what Roamies says when you end an exchange with a closing phrase ("thanks"). The default is
   "Any time.".
+- `speakNotices`: `true` or `false`. Whether a notice from a sync (something Roamies did or lost for you: a kept
+  block placed or dropped, a conflict resolved, a task deleted in the app) is said as well as shown when you are
+  not in a spoken exchange. `false` leaves those bubbles silent there. Inside an exchange everything shown is said
+  either way.
 - `limits`: the sizes, times and counts. Each is a number in the range below; one that is missing or outside its
   range uses its default and is named in the start-up bubble. Leaving `limits` out altogether counts as one missing
   setting. An edit counts from the next request, except `answerWaitMinutes`, which is read when Roamies starts.
@@ -404,7 +409,8 @@ spoken, and is not sent to the model.
 Send bubble, the folder question, the Super Productivity questions), what a sync has to say, and failures (a request
 that failed, a microphone problem). A question is said briefly: a yes/no question by its first line, a hand-off by
 what it is and its first sentence. Outside an exchange (a typed request, a sync on the timer) those bubbles stay
-silent, as before, and wait for a click or a key press. Talking to an open bubble stops what is playing but no longer
+silent and wait for a click or a key press, with one exception: a notice about something done for you is said (see
+"What a sync has to say" under Super Productivity; `speakNotices`). Talking to an open bubble stops what is playing but no longer
 ends the reply's voice, so what Roamies says after your answer is spoken.
 
 **The answer window.** After a question has been said, the microphone opens by itself for
@@ -611,8 +617,22 @@ the to-do's flags.
 
 **What a sync has to say** (a clash, a deleted task, the first-time question) when nobody asked for one waits until
 nothing else is going on: no reply being made or read out, nobody talking, no bubble waiting for an answer. Then it
-is shown in a bubble, not spoken. It is kept in `state.json` until shown, so quitting doesn't lose it. During a
-request of yours, it is part of Roamies' reply instead.
+is shown in a bubble. It is kept in `state.json` until shown, so quitting doesn't lose it. During a request of
+yours, it is part of Roamies' reply instead.
+
+A line that reports something Roamies did or lost on your behalf is a **notice**, and is spoken as well as shown,
+in one short sentence (the bubble keeps the full wording), whether or not you are in a spoken exchange:
+
+- a kept block placed ("... is on the calendar now, Friday 20 November, 10:00 to 11:00."), also when it was placed
+  after its overlap question;
+- a kept block dropped because its time passed or it waited too long;
+- a conflict resolved (the same field changed on both sides, and the app's value was kept);
+- a task deleted in the app: its question is said, in one sentence. Outside an exchange it gets no answer window:
+  click, or hold the talk keys and answer.
+
+They wait for the same quiet moment as before. `"speakNotices": false` turns the voice off for them outside an
+exchange. Other lines (the offer of a block for an urgent and important to-do, a to-do taken off the list, a sync
+that failed) are said only inside an exchange, as before. Nothing is said when spoken replies are off.
 
 **Answering its bubbles.** Every bubble this feature opens (the first time, an overlap, a day plan, a sorting
 proposal, a task deleted in the app) has two buttons and can also be answered by voice: hold the talk keys and say

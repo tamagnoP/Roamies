@@ -143,6 +143,11 @@ export function placeDay(items, { from, until, busy = [], gap = 0 }) {
 /** Whether a line from a sync nobody asked for can be shown now: the overlay is up and the setup guide out of the
  *  way, no reply is being made or spoken, nobody is talking, and no bubble (Send, a plan, any question) is waiting. */
 export const quiet = ({ ready, busy, queued, asking, voice, speakingUntil = 0, now = Date.now() }) => !!ready && !busy && !queued && !asking && voice === 'idle' && now >= speakingUntil;
+/** What is said of the lines a sync nobody asked for has left (takeHeld). In an exchange started by voice everything
+ *  shown is said. Outside one, only the notices are: the lines that report something Roamies did or lost on the
+ *  owner's behalf (a kept block placed or dropped, a conflict resolved), each in its one short sentence, and only
+ *  while the "speakNotices" setting is on. → the text to say, '' for nothing. */
+export const noticeVoice = ({ lines = [], notices = [] } = {}, { exchange = false, speakNotices = true } = {}) => (exchange ? lines.join('\n') : speakNotices ? notices.join(' ') : '');
 
 /** The requests, and nothing else, to the app on this Mac. */
 export function createClient({ home = os.homedir(), port = SP.port, tokenFile = path.join(home, SP.tokenFile) } = {}) {
@@ -200,6 +205,8 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const keep = (kept, kind, brief, data) => ({ ...(kept ? { id: kept.id, at: kept.at } : {}), kind, brief, data });
   const settings = () => loadSettings(home);
   const wait = () => limitsFor(home).calendarTimeoutSeconds * 1000;
+  /** The "speakNotices" setting: what Roamies did or lost on the owner's behalf is said as well as shown. */
+  const noticesOn = () => { try { return settings().speakNotices !== false; } catch { return false; } };
 
   // ---- what is kept in state.json, under "calendar"
   // started: the owner said yes to putting the list in the app. links: { to-do id: { task, title, was, local, agreed } }
@@ -292,11 +299,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
 
   // ---- one run
   async function run() {
-    const lines = [], asks = [];
+    const lines = [], asks = [], says = {}; // says: a notice's line → its one short sentence, for the voice
     const up = await reach();
-    if (!up.ok) return { ok: false, reached: false, lines, asks, why: up.why };
+    if (!up.ok) return { ok: false, reached: false, lines, asks, says, why: up.why };
     let cal = get();
-    if (!cal.started) return { ok: true, started: false, lines, asks };
+    if (!cal.started) return { ok: true, started: false, lines, asks, says };
     const s = settings(), dayEnd = s.calendar.dayEnd;
     const list = await todos.all();
     const byId = new Map(list.map((t) => [t.id, t]));
@@ -362,7 +369,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
           save();
           log('calendar_from_app', { fields: Object.keys(toHere) });
         }
-        if (both.length) lines.push(`${quote(link.title)}: ${both.map((f) => WORDS[f]).join(' and ')} changed both here and in Super Productivity. I kept what the app has.`);
+        if (both.length) { lines.push(`${quote(link.title)}: ${both.map((f) => WORDS[f]).join(' and ')} changed both here and in Super Productivity. I kept what the app has.`); says[lines.at(-1)] = `${quote(link.title)} changed both here and in Super Productivity, and I kept what the app has.`; }
         // Then Roamies' changes go there. An archived task takes none.
         if (Object.keys(toApp).length && !gone) {
           if (await writeTask(link, toApp, local)) { for (const f of Object.keys(toApp)) link.agreed[f] = toApp[f]; save(); log('calendar_to_app', { fields: Object.keys(toApp) }); }
@@ -393,9 +400,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     } catch (e) {
       save();
       if (!(e instanceof Down)) throw e;
-      return { ok: false, reached: true, lines, asks, why: e.message };
+      return { ok: false, reached: true, lines, asks, says, why: e.message };
     }
-    return { ok: true, started: true, lines, asks };
+    return { ok: true, started: true, lines, asks, says };
   }
 
   /** Runs a sync. From a tool, what it has to say comes back as text for the model; otherwise it is held for a bubble. */
@@ -408,20 +415,21 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       try {
         r = await run(); lastOk = r.ok && r.started !== false;
         // The blocks kept while the app was away: placed now that its task list has just been read, then sent over.
-        if (lastOk && applyKept(r.lines)) { const over = await run(); r.lines.push(...over.lines); r.asks.push(...over.asks); }
+        if (lastOk && applyKept(r.lines, r.says)) { const over = await run(); r.lines.push(...over.lines); r.asks.push(...over.asks); Object.assign(r.says, over.says); }
       } catch (e) {
         lastOk = false;
         log('calendar_error', { message: scrub(e?.message ?? e) });
-        r = { ok: false, reached: true, lines: [], asks: [], why: `The sync stopped on an error in Roamies itself, not in Super Productivity: ${scrub(e?.message ?? e)}` };
+        r = { ok: false, reached: true, lines: [], asks: [], says: {}, why: `The sync stopped on an error in Roamies itself, not in Super Productivity: ${scrub(e?.message ?? e)}` };
       }
-      r.lines.unshift(...lost);
+      r.lines.unshift(...lost.map((l) => l.text)); for (const l of lost) r.says[l.text] = l.say;
       if (r.ok) toldWhy = null; else log('calendar_failed', { from, reached: !!r.reached }); // the reason names a to-do, so it isn't logged
       // A failure nobody asked about is said once, as what it is. The app simply being closed is not one: that is
       // said when something is asked of it. After the first yes it is said either way.
       if (!r.ok && from !== 'tool' && (r.reached || from === 'start') && r.why !== toldWhy) { toldWhy = r.why; r.lines.push(`I couldn't bring my to-do list and Super Productivity in step. ${r.why}`); }
       // A task deleted in the app: the question is the app's own bubble, whoever started the run.
       hold(r.asks.map((a) => ({ ask: a })));
-      if (from !== 'tool') { hold(r.lines.map((text) => ({ text }))); return { ...r, text: '' }; }
+      // A line that reports something done or lost on their behalf carries its short sentence: it is also said.
+      if (from !== 'tool') { hold(r.lines.map((text) => ({ text, ...(r.says[text] ? { say: r.says[text] } : {}) }))); return { ...r, text: '' }; }
       const text = [...r.lines, ...r.asks.map((a) => `The task for ${quote(a.title)} was deleted in Super Productivity. The app asks them in a bubble whether the to-do goes too: leave that to the bubble.`)].join('\n');
       return { ...r, text };
     });
@@ -449,7 +457,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const answered = (id) => inTurn(() => edit((cal) => { delete cal.waiting[id]; }));
 
   /** The question about a to-do whose task was deleted in the app. → true when the to-do is to go too. */
-  const askDeleted = (a, signal, kept = null) => yesTo({ placeholder: `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'], pending: keep(kept, 'deleted', `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off the to-do list as well?`, { todo: a.todo, title: a.title }) }, signal);
+  const askDeleted = (a, signal, kept = null) => yesTo({ placeholder: `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'], spoken: `The task for ${quote(a.title)} was deleted in Super Productivity: take it off my to-do list as well?`, always: noticesOn(), pending: keep(kept, 'deleted', `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off the to-do list as well?`, { todo: a.todo, title: a.title }) }, signal);
 
   /** At start-up: a create that was begun and never finished is said once. */
   function startup() {
@@ -459,9 +467,10 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     }));
   }
 
-  /** What is waiting to be shown, taken off the pile: { lines: [text], asks: [{ todo, title }] }. */
+  /** What is waiting to be shown, taken off the pile: { lines: [text], notices: [the short sentence of each line
+   *  that is a notice], asks: [{ todo, title }], blocks }. */
   function takeHeld() {
-    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), asks: h.filter((x) => x.ask).map((x) => x.ask), blocks: h.filter((x) => x.block).map((x) => x.block) }; });
+    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), notices: h.filter((x) => x.text && x.say).map((x) => x.say), asks: h.filter((x) => x.ask).map((x) => x.ask), blocks: h.filter((x) => x.block).map((x) => x.block) }; });
   }
   const hasHeld = () => get().held.length > 0;
 
@@ -557,7 +566,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return `NOT on the calendar yet: Super Productivity isn't answering (it is closed, or its local REST API is off). What was done: ${made ? `${quote(name)} is saved on the to-do list as ${todo}` : `${quote(name)} is on the to-do list`}, and its slot, ${slot({ start, minutes: mins })}, is kept. The app books that slot by itself as soon as Super Productivity is open, and asks them itself if it overlaps something. Tell them exactly that: the task is saved, and the slot will be booked when Super Productivity is open. Don't say it is added to the calendar, booked, scheduled or moved, and don't call this tool again for it.`;
   }
   /** Before every sync, whether the app answers or not: a kept block whose time has passed, or that is older than
-   *  "limits.pendingKeepHours", is dropped, and the owner told once. → the lines. */
+   *  "limits.pendingKeepHours", is dropped, and the owner told once. → the lines, [{ text, say }]. */
   function expireKept() {
     const lines = [];
     let hours;
@@ -568,7 +577,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         if (!passed && !old) continue;
         withoutKept(cal, a.id);
         log('calendar_kept_dropped', { why: passed ? 'passed' : 'old' });
-        lines.push(`I had kept a slot for ${quote(a.title)}, ${slot(a)}, until Super Productivity was open. ${passed ? 'That time has passed' : `That was more than ${hours} hour${hours === 1 ? '' : 's'} ago`}, so it isn't on the calendar.`);
+        lines.push({ text: `I had kept a slot for ${quote(a.title)}, ${slot(a)}, until Super Productivity was open. ${passed ? 'That time has passed' : `That was more than ${hours} hour${hours === 1 ? '' : 's'} ago`}, so it isn't on the calendar.`, say: `The slot I kept for ${quote(a.title)}, ${slot(a)}, ${passed ? 'has passed' : `waited more than ${hours} hour${hours === 1 ? '' : 's'}`}, so it isn't on the calendar.` });
       }
     });
     return lines;
@@ -576,7 +585,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   /** Right after a run that reached the app (so the task list has just been read): each kept block is placed, or,
    *  when it overlaps something, handed over as the usual question. One whose to-do is done or gone is dropped
    *  without a word. → whether any was placed (then a second run sends it to the app). */
-  function applyKept(lines) {
+  function applyKept(lines, says = {}) {
     let placed = false;
     for (const a of [...get().actions].sort((x, y) => Date.parse(x.at) - Date.parse(y.at))) {
       const cal = get(), link = cal.links[a.todo];
@@ -595,11 +604,13 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       edit((c) => { withoutKept(c, a.id); c.links[a.todo].local.start = a.start; c.links[a.todo].local.minutes = a.minutes; });
       log('calendar_block', { what: 'placed', kept: true });
       lines.push(`${quote(link.title)} is on the calendar now, ${slot(a)}: the slot I kept while Super Productivity was closed.`);
+      says[lines.at(-1)] = `${quote(link.title)} is on the calendar now, ${slot(a)}.`;
       placed = true;
     }
     return placed;
   }
-  /** A kept block that overlaps something: the usual question, then placed on a yes. → a line to say, or ''. */
+  /** A kept block that overlaps something: the usual question, then placed on a yes. → one sentence to show and
+   *  say (a notice: the block was placed, or lost), or ''. */
   async function placeKept(b, signal) {
     try { await fresh('place a block'); } catch (e) {
       if (!(e instanceof Away)) throw e;
@@ -609,7 +620,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     let t;
     try { ({ t } = await todoFor(b.todo)); } catch { return ''; } // done or gone meanwhile
     if (get().links[b.todo].local.start === b.start) return ''; // placed meanwhile
-    if (!(b.start + b.minutes * 60_000 > now())) return `I had kept a slot for ${quote(t.text)}, ${slot(b)}, until Super Productivity was open. That time has passed, so it isn't on the calendar.`;
+    if (!(b.start + b.minutes * 60_000 > now())) return `The slot I kept for ${quote(t.text)}, ${slot(b)}, has passed, so it isn't on the calendar.`;
     try { await place(b.todo, t.text, b.start, b.minutes, signal); } catch (e) { if (e.declined) return ''; throw e; }
     log('calendar_block', { what: 'placed', kept: true });
     sync('change').catch(() => {});
