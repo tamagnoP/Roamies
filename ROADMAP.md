@@ -36,6 +36,7 @@ Last updated: 2026-11-16.
 | 20 | Literature toolbox and roles | Held, not designed | |
 | 21 | One orb as the only look | Idea, not designed | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Built, not merged; to be reviewed and tried on screen | `voice-flow` |
+| 23 | Roamies sees every open task in Super Productivity | Planned 2026-11-19; not started, waits for the owner's "go" | |
 
 Build order: 22, 18, 14, 19, 16, 17, 15, then 20 and 21.
 
@@ -110,6 +111,84 @@ speaking.
   is shown.
 
 Not merged: the owner reviews it first. Not rebuilt, not installed, not seen or heard on the Mac.
+
+### 23. Roamies sees every open task in Super Productivity (plan; not started, waits for "go")
+
+Decided by the owner on 2026-11-19. Reverses "tasks Roamies did not create are never imported". Nothing below is
+built. `LOCAL-ONLY.md` and `CLAUDE.md` change in the commits that build it.
+
+**What changes, in one line.** Today a task Roamies didn't make is four facts in memory (title, start, length,
+done), used to see clashes. After this, every open task in the app is a Roamies to-do linked to it by its id, and
+the pair is synced like any other.
+
+1. **What is adopted.** Every task in the app's list that is open and is not a sub-task: any project, with or
+   without a time. A sub-task is never adopted; its parent is. From a task the same seven things are read as from
+   a task Roamies made, by the same function (`own`): title, start, length, done, deadline, the two matrix tags.
+   Notes, attachments, other tags, the project and the sub-task list are dropped as the answer is parsed, as now.
+   A sub-task with a time of its own still counts as taken time (the four clash facts, in memory only).
+2. **The first time.** One bubble: the count and the titles, and a yes before anything is linked (kind `adopt`;
+   said, with its answer window, kept when unanswered, like the first mirror). "Not now": nothing is linked, and
+   it is offered again at the next start, as the first mirror is. After the yes, `calendar.adopt` is on in
+   `state.json`: a task added in the app is adopted at the next sync, without a bubble and without a line; the log
+   records how many, never a title.
+3. **Told apart.** The link records where the pair came from: `from: "app"` for an adopted task, nothing for one
+   Roamies made (so today's links need no migration). It decides two things only: what is said when the to-do is
+   removed (6), and nothing is ever created in the app for it. The sync itself doesn't look at it.
+4. **What "only Roamies' blocks change" becomes.** Roamies writes to a linked task, whoever made it, and only the
+   seven fields, and only what was changed in Roamies: a block placed, moved or taken off, the title, done, the due
+   time, urgent, important. It still never touches notes, other tags, sub-tasks, the project or a repeat rule,
+   never writes to a task that isn't linked (a sub-task, a released task), and never sends `DELETE`. The requests
+   stay the five in `SP.requests`.
+5. **Done, archived, repeating.**
+   - Done or archived tasks are not adopted. An adopted task finished on either side is retired like any pair. A
+     retired or released task opened again in the app is taken up again by its old to-do if that still exists, else
+     adopted as new.
+   - A repeating task: the app makes a separate task for each occurrence. Proposed: each occurrence that is open in
+     the list is adopted like any task, and changes made in Roamies reach that occurrence only; the repeat rule is
+     never read or written. Consequence: a daily repeating task adds a to-do a day, and an occurrence left undone
+     stays on the list until it is done or removed. The alternative is to leave repeating tasks out (clash facts
+     only). **Owner to choose.**
+6. **Removed in Roamies.** Roamies still never deletes in the app. Proposed: a to-do that came from the app and is
+   taken off Roamies' list leaves its task exactly as it is, time included, because the task and its time were the
+   owner's before Roamies knew of it, and taking it off Roamies' list says "stop tracking this", not "undo it". Its
+   id is kept in `state.json` (`calendar.released`) so the next sync doesn't adopt it again; it still counts as
+   taken time; the entry goes when the task is done, archived or deleted in the app. One line says so: "X is off
+   my list. Its task stays in Super Productivity as it is (I never delete there), and I won't bring it back."
+   A to-do Roamies made keeps today's rule (its task loses its time and stays) and is released the same way, or it
+   would come back at the next sync. **Owner to confirm "as it is" against "loses its time".**
+7. **Duplicates.**
+   - A task is one to-do: adoption skips an id that is linked, retired, released, or named in an unfinished create.
+   - A to-do is one task: before a task is created for an unlinked to-do, an open unlinked task with the same title
+     (as `sameName` compares) is looked for; exactly one such pair is linked instead of creating a second task. The
+     first-time bubble lists those separately ("already on my list, linked, not added twice"). This also takes
+     care of the stray task a create cut short leaves behind.
+   - A to-do that already has its own task, and a different task of the same title made in the app: two tasks in
+     the app are two to-dos in Roamies. Nothing is merged, because merging would mean deleting one. Asking for a
+     block by that title then gets the existing "which one" question.
+8. **What follows from it, to be aware of.**
+   - **Privacy.** Titles, times and deadlines of every open task in the app become part of the to-do list, and so
+     of the conversation with the AI provider (the live state, `list_commitments`, briefings, saved memory). Until
+     now only titles of Roamies' own to-dos were, plus a hand-made task's title in an overlap question. Guarantee 1
+     is not broken (nothing new leaves except through the conversation), but what the conversation can contain is
+     wider. `PRIVACY.md` and `LOCAL-ONLY.md` will say so.
+   - A deadline on an adopted task becomes the to-do's due time, so Roamies' own reminders fire for it.
+   - `show_day` names adopted tasks; a day plan and the matrix can use them. An adopted task that is urgent and
+     important with no block gets no automatic block offer at adoption (it would be one line per task).
+   - The first bubble can be long (every open task of every project): titles are shown up to a limit (a new entry
+     in `limits`), then "and N more".
+   - A sync still costs one "are you there" and one task list; no extra requests for adoption.
+9. **To check against the real app before building** (one read of the task list with the token; needs the owner's
+   yes, as the check of 2026-11-15 did): that the list holds the tasks of every project; which field marks a
+   sub-task and which a repeating task, and whether sub-tasks appear in the list at all.
+10. **Build order, one commit each, tests with each.** (a) parse: sub-task and repeat marks, `from`, `released`,
+    `adopt` in state, defaults that keep today's `state.json` working; (b) adoption inside a run, after the links
+    are settled and before creates, the title link of 7, the quiet add to Roamies' list; (c) the first-time bubble
+    and its pending kind; (d) removal and release, the new line; (e) `show_day`, the live state, the tools' and
+    the model's wording; (f) `LOCAL-ONLY.md`, `CLAUDE.md` (guarantee 1's sentence on which tasks are written, the
+    header of `calendar.mjs`), `PRIVACY.md`, `reference` in `settings.default.json`. Tests: the stand-in app with
+    hand-made tasks in two projects, a sub-task, a done and an archived task, a repeating one, same-title cases,
+    removal and no re-adoption, never a `DELETE`, and the secret-in-notes check that already runs over every file
+    and log line.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -361,6 +440,12 @@ the screen blocks clicks.
   is kept with the second; a second one chosen without a length is refused with "how long", and the question is
   asked again on the next call. Not fixed, because it is the recogniser's: "at 9 for 30 minutes" heard as "at
   9.30 minutes". What stays an instruction to the model, not a rule in code: that it passes the title as said.
+- **2026-11-19.** Roamies is to see every open task in Super Productivity, not only the ones it made (feature 23).
+  Reverses "tasks Roamies did not create are never imported" and "tasks made by hand in the app are read but never
+  changed" (Prompt D), on the owner's decision. Still fixed: never a `DELETE`; only title, start, length, done
+  state, deadline and the two matrix tags are read; a sub-task is not adopted. Plan written (section 2, feature
+  23); nothing built; it waits for the owner's "go" and three answers (repeating tasks, what removal does to the
+  task, the read of the real task list).
 
 ## 6. Still to test
 
