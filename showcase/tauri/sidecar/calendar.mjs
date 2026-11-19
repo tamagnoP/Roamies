@@ -25,7 +25,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { FIRST, MOVE_WORDS, SECOND, SECOND_WORDS, byButton, whichButton } from './answers.mjs';
+import { FIRST, MOVE_WORDS, NEW_WORDS, SECOND, SECOND_WORDS, THAT_WORDS, byButton, whichButton } from './answers.mjs';
 import { SP, limitsFor, loadSettings, readState, writeState } from './pi.mjs';
 
 const ROUTES = [['GET', /^\/health$/], ['GET', /^\/tasks(\?[\w=&]*)?$/], ['GET', /^\/tasks\/[^/?#]+$/], ['POST', /^\/tasks$/], ['PATCH', /^\/tasks\/[^/?#]+$/]];
@@ -115,6 +115,21 @@ export function minutesBetween(start, end) {
 }
 /** A title as it is compared with another: case, the spaces around it and a leading "the" don't count. */
 export const sameName = (t) => title(t).toLowerCase().replace(/^the\s+/, '').trim();
+/** The words of a title as they are compared: sameName, with punctuation as a space. */
+const nameWords = (t) => sameName(t).replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(' ').filter(Boolean);
+/** Two titles that are not the same, where one holds the other as whole words in a row ("Flow test, second run" and
+ *  "the flow test"; not "Flow tests"). A title of fewer than two words never matches this way. → how many words they
+ *  share, 0 for no match. */
+export function nearName(a, b) {
+  const x = nameWords(a), y = nameWords(b);
+  if (x.length < 2 || y.length < 2 || x.join(' ') === y.join(' ')) return 0;
+  const [long, short] = x.length >= y.length ? [x, y] : [y, x];
+  for (let i = 0; i + short.length <= long.length; i++) if (short.every((w, j) => long[i + j] === w)) return short.length;
+  return 0;
+}
+// "Is this <title>, or a new task?": its two buttons, and the phrases that answer it by voice.
+const NEAR_CHOICES = ['That one', 'New task'];
+const NEAR_WHICH = { first: [...THAT_WORDS], second: [...NEW_WORDS], hint: '"that one" or "a new task"' };
 // "Move it, or make a second one?": its two buttons, and the phrases that answer it by voice.
 const SAME_CHOICES = ['Move it', 'New one'];
 const SAME_WHICH = { first: [...MOVE_WORDS], second: [...SECOND_WORDS], hint: '"move it" or "a new one"' };
@@ -669,6 +684,21 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     if (a !== FIRST && a !== SECOND) throw Object.assign(new Error(`They were asked whether to move ${quote(t.text)} (${block.booked ? 'booked for' : 'slot kept for'} ${at}) or make a second one, and chose neither. Nothing was changed and no to-do was made. Don't choose for them, and don't try again under another title.`), { declined: true });
     return a === FIRST;
   }
+  /** The open to-do whose title is nearest to this one without being it (nearName): the one sharing most words,
+   *  the first on the list among equals. null: none. */
+  const nearTitle = async (name) => { let best = null, most = 0; for (const t of await todos.all()) { const n = t.status === 'open' && t.kind === 'commitment' ? nearName(name, t.text) : 0; if (n > most) { best = t; most = n; } } return best; };
+  /** A block asked for by a title that no open to-do has, but that holds an open to-do's title or is held by one
+   *  (2026-11-19: "Flow test, second run" beside "Flow test"): the owner is asked whether it is that to-do or a new
+   *  task. Said, with its answer window and spoken answers (NEAR_WHICH); the model is never asked. A no, or neither,
+   *  changes nothing. → true: that one; false: a new task. */
+  async function nearAsked(t, block, args, signal, kept = null) {
+    const question = `Is this ${t.text}, or a new task?`;
+    const where = block ? `${block.booked ? 'booked for' : 'slot kept for'} ${dayName(new Date(block.start))} at ${hm(block.start)}` : '';
+    const a = whichButton(await ask({ placeholder: block ? `${question}\n${t.text} is ${block.booked ? where : `not booked yet: a slot is kept for ${dayName(new Date(block.start))} at ${hm(block.start)}`}; as that one, it moves.` : question, spoken: question, choices: NEAR_CHOICES, which: NEAR_WHICH, pending: keep(kept, 'near', question, { todo: t.id, was: block?.start ?? null, args }) }, signal), NEAR_CHOICES);
+    log('calendar_near', { asked: true, that: a === FIRST, fresh: a === SECOND });
+    if (a !== FIRST && a !== SECOND) throw Object.assign(new Error(`They were asked whether ${quote(args.title)} is ${quote(t.text)}${where ? ` (${where})` : ''} or a new task, and chose neither. Nothing was changed and no to-do was made. Don't choose for them, and don't try again under another title.`), { declined: true });
+    return a === FIRST;
+  }
   const dueTold = (t) => { const b = get().actions.find((a) => a.todo === t.id) ?? null, at = get().links[t.id]?.local.start ?? null; return `${t.due ? `due ${dayName(new Date(t.due))}, ${hm(t.due)}` : 'no due time'}${at !== null ? `; on the calendar ${slot({ start: at, minutes: get().links[t.id].local.minutes })}` : b ? `; slot kept for ${slot(b)}` : ''}`; };
   /** "Next friday" (nextDays): the owner is asked which of the two it is, in a bubble that takes a click or a spoken
    *  answer and has its answer window; the model is never asked for the date. Anything else is returned as it came.
@@ -699,7 +729,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         const mins = lengthOf(start, end, given);
         // A title that an open to-do has is that to-do: no second one of the same name is made, unless that to-do
         // already has a block and the owner, asked, wants a second one (another: that was their answer).
-        let found = null, second = null; // found: the to-do of that title that is used; second: the one a second is made beside
+        let found = null, second = null, apart = null; // found: the to-do that is used; second: the one a second is made beside; apart: the near one this is not
         if (!todo && !another) {
           const same = await sameTitle(name);
           if (same.length > 1) throw new Error(`${same.length} open to-dos are called ${quote(title(name))}: ${same.map((t) => `${t.id} (${dueTold(t)})`).join('; ')}. Nothing was changed and no new to-do was made. Ask which one they mean, telling them apart by those times, then call this again with its todo id.`);
@@ -711,10 +741,21 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
             const move = await sameAsked(same[0], block, { title: title(name), date: fixed, start, ...(end ? { end } : {}), ...(given ? { minutes: given } : {}) }, signal, kept?.kind === 'same' ? kept : null);
             if (move) { todo = same[0].id; found = { ...same[0], block }; } else { another = true; second = { ...same[0], block }; }
           } else if (same.length === 1) { todo = same[0].id; found = same[0]; }
+          else {
+            // No to-do has this title. One whose title holds it, or is held by it, may be the one that is meant:
+            // the owner says, not the model and not the code.
+            const near = await nearTitle(name);
+            if (near) {
+              const block = blockOf(near.id);
+              const fixed = nextDays(date, now()) ? date : ymd(when(date, start, mins).day);
+              const that = await nearAsked(near, block, { title: title(name), date: fixed, start, ...(end ? { end } : {}), ...(given ? { minutes: given } : {}) }, signal, kept?.kind === 'near' ? kept : null);
+              if (that) { todo = near.id; found = { ...near, block, near: true }; } else { another = true; apart = near; }
+            }
+          }
         }
-        if (another && !todo && !mins) throw new Error(`${second ? 'They chose a second one. ' : ''}How long does it take? Ask, then give minutes${second ? ' (the app will ask them again whether to move the first or make a second)' : ''}.`);
-        const used = found ? `the to-do already on the list was used, ${quote(found.text)} (${todo}${found.block ? '' : `, ${dueTold(found)}`}), and no new one was made${found.block ? ': they chose to move it' : ''}. Tell them it is the one already on their list` : '';
-        const beside = second ? `a second to-do of that name, as they chose; the first (${second.id}) stays ${slot(second.block)}` : '';
+        if (another && !todo && !mins) throw new Error(`${second ? 'They chose a second one. ' : apart ? 'They chose a new task. ' : ''}How long does it take? Ask, then give minutes${second ? ' (the app will ask them again whether to move the first or make a second)' : apart ? ' (the app will ask them again whether it is the one on the list or a new task)' : ''}.`);
+        const used = found ? `the to-do already on the list was used, ${quote(found.text)} (${todo}${found.block ? '' : `, ${dueTold(found)}`}), and no new one was made${found.near ? `: they said ${quote(title(name))} is that one` : found.block ? ': they chose to move it' : ''}. Tell them it is the one already on their list` : '';
+        const beside = second ? `a second to-do of that name, as they chose; the first (${second.id}) stays ${slot(second.block)}` : apart ? `a new to-do, as they chose; ${quote(apart.text)} (${apart.id}) is left as it is` : '';
         date = await dayAsked(date, { start, mins, what: `"${String(date).trim()}" for ${quote(todo ? (await openTodo(todo)).text : title(name))}`, pending: { tool: 'schedule_block', args: { ...(todo ? { todo } : { title: title(name), ...(another ? { another: true } : {}) }), date, start, ...(end ? { end } : {}), ...(given ? { minutes: given } : {}) }, was: todo ? get().links[todo]?.local.start ?? null : null }, signal, kept: kept?.kind === 'day' ? kept : null });
         const at = when(date, start, mins);
         let pre;
@@ -748,7 +789,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         await place(id, t.text, at.start, length, signal);
         log('calendar_block', { what: moved ? 'moved' : 'placed' });
         const where = `${quote(t.text)} is on the calendar ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}`;
-        return { text: settle(pre, `${where}${moved ? ` (moved from ${found?.block ? slot(found.block) : 'where it was'})` : ''}${found ? `: ${used}` : todo ? '' : `, and on the to-do list as ${id}${beside ? `: ${beside}` : ''}`}.`), say: `${where}${found && !found.block ? ', using the to-do already on your list' : ''}.` };
+        return { text: settle(pre, `${where}${moved ? ` (moved from ${found?.block ? slot(found.block) : 'where it was'})` : ''}${found ? `: ${used}` : todo ? '' : `, and on the to-do list as ${id}${beside ? `: ${beside}` : ''}`}.`), say: `${where}${found && (!found.block || found.near) ? ', using the to-do already on your list' : ''}.` };
   }
   /** move_block. → { text, say }, as doSchedule. */
   async function doMove({ todo, date, start, end, minutes: given }, signal, kept = null) {
@@ -788,7 +829,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   const blockTools = [
     {
       name: 'schedule_block',
-      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title: what they called it, in their words. Never add to a title, number it or reword it to tell it apart from a to-do already on the list ("flow test" stays "Flow test", never "Flow test, second run"): whether it is the same to-do or a second one is not yours to decide. With a title, the app uses the open to-do of that title when there is exactly one (the result says which: tell them it is the one already on their list); when that to-do already has a block, the app asks them itself whether to move it or make a second one (don\'t ask that yourself, and say what the result says they chose); it makes a new to-do when there is none; and when several have it the result lists them with their due times: ask which, then give its todo id. A to-do has one block: scheduling it again by its todo id moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked. ' + DATE_ARG,
+      description: 'Put a to-do on the calendar in Super Productivity as a block of time: a start and a length. Give todo (the id of an open to-do), or title: what they called it, in their words. Never add to a title, number it or reword it to tell it apart from a to-do already on the list ("flow test" stays "Flow test", never "Flow test, second run"): whether it is the same to-do or a second one is not yours to decide. With a title, the app uses the open to-do of that title when there is exactly one (the result says which: tell them it is the one already on their list); when that to-do already has a block, the app asks them itself whether to move it or make a second one (don\'t ask that yourself, and say what the result says they chose); when no to-do has that title but one has a title that holds it or is held by it ("Flow test, second run" beside "Flow test"), the app asks them itself whether it is that one or a new task; it makes a new to-do when there is none; and when several have it the result lists them with their due times: ask which, then give its todo id. A to-do has one block: scheduling it again by its todo id moves it. minutes is needed unless the to-do already has a length; if they didn\'t say how long, ask. A block they dictate goes straight in; if it overlaps something, the app asks them itself. If Super Productivity is closed the app keeps the slot and books it itself when it is open again: the result says so, and you say what the result says, never that it is booked. ' + DATE_ARG,
       parameters: z.object({ todo: z.string().optional(), title: z.string().min(2).max(200).optional(), date: z.string(), start: z.string(), end: z.string().optional(), minutes: minutesArg.optional() }),
       execute: async ({ todo, title: name, date, start, end, minutes: given }, ctx) => (await doSchedule({ todo, title: name, date, start, end, minutes: given }, ctx?.signal)).text, // "another" is the owner's answer, never the model's
     },
@@ -1026,6 +1067,22 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       let mins = 0;
       try { mins = lengthOf(args.start, args.end, args.minutes) ?? b.minutes; } catch { return DONE; }
       if (day && at !== null && !(day.getTime() + (at + mins) * 60_000 > now())) return { dropped: `I had asked whether to move ${quote(t.text)} to ${dayName(day)}, ${hm(day.getTime() + at * 60_000)}, or make a second one. That time has passed, so nothing was changed.` };
+      return { ask: async () => {
+        try { return { say: (await doSchedule(args, undefined, q)).say }; } catch (e) { if (e.declined) return {}; throw e; }
+      } };
+    },
+    // "Is this <title>, or a new task?" that got no answer: asked again, and then the block is placed (or kept) as
+    // it would have been.
+    async near(q) {
+      const { todo, was = null, args = {} } = q.data ?? {};
+      const t = (await todos.all()).find((x) => x.id === todo);
+      if (!t || t.status !== 'open' || !nearName(args.title, t.text)) return DONE; // done, off the list or renamed: the question no longer stands
+      if ((blockOf(todo)?.start ?? null) !== was) return DONE; // a later request placed or moved its block
+      if ((await sameTitle(args.title)).length) return DONE; // a to-do of exactly that title was made since
+      const day = dayOf(args.date), at = clockOf(args.start);
+      let mins = 0;
+      try { mins = lengthOf(args.start, args.end, args.minutes) ?? 0; } catch { return DONE; }
+      if (day && at !== null && !(day.getTime() + (at + mins) * 60_000 > now())) return { dropped: `I had asked whether ${quote(args.title)}, for ${dayName(day)}, ${hm(day.getTime() + at * 60_000)}, is ${quote(t.text)} or a new task. That time has passed, so nothing was changed.` };
       return { ask: async () => {
         try { return { say: (await doSchedule(args, undefined, q)).say }; } catch (e) { if (e.declined) return {}; throw e; }
       } };

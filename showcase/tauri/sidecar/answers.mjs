@@ -38,6 +38,10 @@ export const SPOKEN_HINT = 'Say yes or no, or click.';
 // the phrases that answer it, alone or several of one side together. A no word answers neither.
 export const MOVE_WORDS = ['move it', 'move', 'move that one', 'move the same one', 'the same one', 'same one', 'the same', 'same'];
 export const SECOND_WORDS = ['a new one', 'new one', 'a new', 'new', 'make a new one', 'a second one', 'second one', 'a second', 'make a second one', 'another one', 'another'];
+// "Is this <title>, or a new task?" (calendar.mjs: a block asked for by a title that contains an open to-do's title,
+// or is contained in one): the phrases that answer it. A yes or a no word answers neither.
+export const THAT_WORDS = ['that one', 'that', 'this one', 'it is that one', 'the same one', 'same one', 'the same', 'same', 'the existing one', 'the old one'];
+export const NEW_WORDS = ['a new task', 'new task', 'a new one', 'new one', 'a new', 'new', 'make a new one', 'make a new task', 'another one', 'another', 'a second one', 'second one'];
 
 export const plain = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/[^a-z]+/g, ' ').trim();
 // Longest first, so "yes please" is one phrase and not "yes" followed by something else.

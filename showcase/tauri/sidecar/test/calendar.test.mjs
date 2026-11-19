@@ -20,7 +20,7 @@ for (const name of ['writeFileSync', 'appendFileSync']) { const real = fs[name];
 for (const name of ['writeFile', 'appendFile']) { const real = fs.promises[name]; fs.promises[name] = (file, data, ...rest) => { written.push({ file: String(file), data: String(data) }); return real(file, data, ...rest); }; }
 
 const { CALENDAR, LIMITS, SP, codeReference, loadSettings } = await import('../pi.mjs');
-const { Down, FIELDS, createCalendar, createClient, dayChoice, dayFrom, minutesBetween, nextDays, noticeVoice, placeDay, quiet, sameName } = await import('../calendar.mjs');
+const { Down, FIELDS, createCalendar, createClient, dayChoice, dayFrom, minutesBetween, nearName, nextDays, noticeVoice, placeDay, quiet, sameName } = await import('../calendar.mjs');
 const { SECOND, whichAnswer } = await import('../answers.mjs');
 const { settingsNotice, settingsReference } = await import('../reference.mjs');
 
@@ -757,9 +757,9 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   // what was asked on 18 November with the app closed, said the way it was: saved and kept, then caught up
   const closed = createCalendar({ home, todos, port: 1, tokenFile, now: () => clock, ask: async () => null });
   mark = app.log.length;
-  out = await closed.tools.find((t) => t.name === 'schedule_block').execute({ title: 'Named: experiment part I', date: 'friday', start: '10:00', end: '11:00' });
+  out = await closed.tools.find((t) => t.name === 'schedule_block').execute({ title: 'Named: trial part I', date: 'friday', start: '10:00', end: '11:00' });
   const partOne = list.at(-1);
-  assert.match(out, new RegExp(`^NOT on the calendar yet: .* "Named: experiment part I" is saved on the to-do list as ${partOne.id}, and its slot, Friday 20 November, 10:00 to 11:00, is kept\\. .*the task is saved, and the slot will be booked when Super Productivity is open\\.`));
+  assert.match(out, new RegExp(`^NOT on the calendar yet: .* "Named: trial part I" is saved on the to-do list as ${partOne.id}, and its slot, Friday 20 November, 10:00 to 11:00, is kept\\. .*the task is saved, and the slot will be booked when Super Productivity is open\\.`));
   assert.doesNotMatch(out, /is on the calendar Friday|\badded\b(?! to the calendar, booked)|\bscheduled\b(?! or moved)/);
   // a to-do made the ordinary way while the app is closed, too
   const offTools = closed.wrap([{ name: 'remember_commitment', execute: async ({ text }) => { const c = add(text); return `Saved as ${c.id}.`; } }]);
@@ -768,9 +768,9 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   assert.deepEqual(writes(mark), []); assert.equal(linkOf(partOne), undefined); assert.equal(linkOf(whileClosed), undefined);
   // the first sync after the app is open: both to-dos become tasks, and the block is on the calendar
   await cal.sync('timer');
-  assert.deepEqual(writes(mark).map((w) => [w.method, w.body]), [['POST', { title: 'Named: experiment part I', isIgnoreShortSyntax: true }], ['POST', { title: 'Named: made while closed', isIgnoreShortSyntax: true }], ['PATCH', { dueWithTime: at(20, 10), timeEstimate: 60 * M }]]);
-  assert.deepEqual([taskOf(partOne).title, taskOf(partOne).dueWithTime, taskOf(partOne).timeEstimate], ['Named: experiment part I', at(20, 10), 60 * M]); assert.equal(taskOf(whileClosed).title, 'Named: made while closed');
-  assert.deepEqual(cal.takeHeld().lines, ['"Named: experiment part I" is on the calendar now, Friday 20 November, 10:00 to 11:00: the slot I kept while Super Productivity was closed.']);
+  assert.deepEqual(writes(mark).map((w) => [w.method, w.body]), [['POST', { title: 'Named: trial part I', isIgnoreShortSyntax: true }], ['POST', { title: 'Named: made while closed', isIgnoreShortSyntax: true }], ['PATCH', { dueWithTime: at(20, 10), timeEstimate: 60 * M }]]);
+  assert.deepEqual([taskOf(partOne).title, taskOf(partOne).dueWithTime, taskOf(partOne).timeEstimate], ['Named: trial part I', at(20, 10), 60 * M]); assert.equal(taskOf(whileClosed).title, 'Named: made while closed');
+  assert.deepEqual(cal.takeHeld().lines, ['"Named: trial part I" is on the calendar now, Friday 20 November, 10:00 to 11:00: the slot I kept while Super Productivity was closed.']);
   for (const c of [named, partOne, whileClosed]) c.status = 'done';
   await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
 }
@@ -820,7 +820,7 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   const partThree = list.at(-1);
   await cal.sync('timer'); cal.takeHeld();
   assert.equal(seen.length, 0, 'a title no open to-do has: nothing is asked');
-  for (const n of ['schedule_block']) assert.match(O(n).description, /With a title, the app uses the open to-do of that title when there is exactly one \(the result says which: tell them it is the one already on their list\); when that to-do already has a block, the app asks them itself whether to move it or make a second one \(don't ask that yourself, and say what the result says they chose\); it makes a new to-do when there is none; and when several have it the result lists them with their due times: ask which/);
+  for (const n of ['schedule_block']) assert.match(O(n).description, /With a title, the app uses the open to-do of that title when there is exactly one \(the result says which: tell them it is the one already on their list\); when that to-do already has a block, the app asks them itself whether to move it or make a second one \(don't ask that yourself, and say what the result says they chose\); when no to-do has that title but one has a title that holds it or is held by it \("Flow test, second run" beside "Flow test"\), the app asks them itself whether it is that one or a new task; it makes a new to-do when there is none; and when several have it the result lists them with their due times: ask which/);
 
   // -- 1b. a title that an open to-do with a block already has: "move it, or make a second one?" (2026-11-19).
   // What the log of 19 November shows: with "Flow test" booked, "schedule flow test tomorrow ..." reached the tool
@@ -900,6 +900,84 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   assert.deepEqual(await (await open.resume.day({ id: 'qd', at: qs.at, kind: 'day', data: { tool: 'schedule_block', args: { title: 'Dup: Flow test', another: true, date: 'next friday', start: '13:00', end: '14:00' }, was: null, name: 'Friday', first: '2026-11-20', second: '2026-11-27' } })).ask(), { say: '"Dup: Flow test" is on the calendar Friday 20 November, 13:00 to 14:00.' });
   assert.deepEqual(seen.map((o) => o.choices[0]), ['Friday the 20th'], 'the first answer stands: only the day is asked again'); assert.equal(list.length, n + 1);
   for (const c of [dup, list.at(-1)]) c.status = 'done';
+  await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
+
+  // -- 1c. a title that is not an open to-do's, but holds one or is held by one as whole words: "Is this <title>,
+  // or a new task?" (2026-11-19, the guard in code for "Flow test, second run")
+  for (const [a, b, n] of [['Flow test, second run', 'Flow test', 2], ['flow test', 'The Flow Test (second run)', 2], ['the flow test', 'Second flow test run', 2], ['SERS experiment part one', 'Experiment part', 2], ['Flow test 2', 'flow test', 2], ['Write the paper draft', 'the paper draft', 2]]) { assert.equal(nearName(a, b), n, `${a} / ${b}`); assert.equal(nearName(b, a), n); }
+  for (const [a, b] of [['Flow test', 'flow test'], ['the Flow test', 'FLOW TEST'], ['Flow test', 'Flow tests'], ['Flow testing run', 'Flow test'], ['Flow the test', 'Flow test'], ['Test flow run', 'Flow test'], ['Paper', 'Write the paper'], ['Write the paper', 'paper'], ['The paper', 'Write the paper'], ['Flow', 'Flow'], ['', 'Flow test'], ['Flow test', 'Flow second test']]) { assert.equal(nearName(a, b), 0, `${a} / ${b}`); assert.equal(nearName(b, a), 0); }
+  const near = add('Near: flow test'); await cal.sync('timer');
+  const sec = { title: 'Near: Flow test, second run', date: 'tomorrow', start: '09:30', minutes: 30 }; // what the tool received on 19 November
+  const NQ = 'Is this Near: flow test, or a new task?';
+  // a no, or neither: nothing is made or changed
+  reply = null; seen.length = 0; n = list.length; mark = app.log.length;
+  await assert.rejects(O('schedule_block').execute(sec), /^Error: They were asked whether "Near: Flow test, second run" is "Near: flow test" or a new task, and chose neither\. Nothing was changed and no to-do was made\. Don't choose for them, and don't try again under another title\.$/);
+  assert.equal(list.length, n); assert.deepEqual(writes(mark), []);
+  assert.deepEqual([seen[0].placeholder, seen[0].spoken, seen[0].choices, seen[0].which.hint], [NQ, NQ, ['That one', 'New task'], '"that one" or "a new task"']);
+  assert.deepEqual(seen[0].pending, { kind: 'near', brief: NQ, data: { todo: near.id, was: null, args: { title: 'Near: Flow test, second run', date: '2026-11-15', start: '09:30', minutes: 30 } } });
+  for (const [said, a] of [['that one', 'yes'], ['That one.', 'yes'], ['the same one', 'yes'], ['a new task', SECOND], ['New task.', SECOND], ['a new one', SECOND], ['another one', SECOND], ['no', 'no'], ['cancel', 'no'], ['yes', null], ['flow test', null], ['that one or a new task', null], ['', null]]) assert.equal(whichAnswer(said, seen[0].which), a, said);
+  assert.deepEqual([codeReference().spokenAnswers.thatOrNew.that, codeReference().spokenAnswers.thatOrNew.new], [seen[0].which.first, seen[0].which.second]);
+  assert.match(codeReference().spokenAnswers.titleMatch, /fewer than two words never match that way/);
+  // "That one": the to-do on the list is used under its own title, and no new one is made
+  reply = 'yes'; seen.length = 0; mark = app.log.length;
+  out = await O('schedule_block').execute(sec);
+  assert.equal(out, `"Near: flow test" is on the calendar Sunday 15 November, 09:30 to 10:00: the to-do already on the list was used, "Near: flow test" (${near.id}, no due time), and no new one was made: they said "Near: Flow test, second run" is that one. Tell them it is the one already on their list.`);
+  assert.equal(list.length, n); assert.equal(seen.length, 1); assert.ok(!writes(mark).some((w) => w.method === 'POST')); assert.equal(near.text, 'Near: flow test'); assert.equal(linkOf(near).local.start, at(15, 9, 30));
+  // it has a block now: the bubble says where, and that it would move; the question as it is said stays short
+  reply = null; seen.length = 0;
+  await assert.rejects(O('schedule_block').execute({ ...sec, start: '11:00' }), /is "Near: flow test" \(booked for Sunday 15 November at 09:30\) or a new task, and chose neither/);
+  assert.deepEqual([seen[0].placeholder, seen[0].spoken, seen[0].pending.data.was], [`${NQ}\nNear: flow test is booked for Sunday 15 November at 09:30; as that one, it moves.`, NQ, at(15, 9, 30)]);
+  reply = 'yes'; out = await O('schedule_block').execute({ ...sec, start: '11:00' });
+  assert.match(out, /^"Near: flow test" is on the calendar Sunday 15 November, 11:00 to 11:30 \(moved from Sunday 15 November, 09:30 to 10:00\): the to-do already on the list was used/); assert.equal(list.length, n);
+  // the model can't answer for them
+  reply = null; seen.length = 0; await assert.rejects(O('schedule_block').execute({ ...sec, another: true }), /chose neither/); assert.equal(seen.length, 1);
+  // "New task": a new to-do under the title given, and the other left as it is
+  reply = SECOND; seen.length = 0; mark = app.log.length;
+  out = await O('schedule_block').execute({ ...sec, start: '13:00' });
+  const run2 = list.at(-1);
+  assert.equal(out, `"Near: Flow test, second run" is on the calendar Sunday 15 November, 13:00 to 13:30, and on the to-do list as ${run2.id}: a new to-do, as they chose; "Near: flow test" (${near.id}) is left as it is.`);
+  assert.equal(list.length, n + 1); assert.equal(seen.length, 1); assert.equal(linkOf(near).local.start, at(15, 11));
+  // the title now is that of a to-do: the usual rule (it is booked: move it, or a second one?), not this question
+  reply = null; seen.length = 0; await assert.rejects(O('schedule_block').execute(sec), /or make a second one, and chose neither/); assert.equal(seen[0].choices[0], 'Move it');
+  // the other way round (the title given is held by the to-do's), and the nearest when several fit
+  seen.length = 0; await assert.rejects(O('schedule_block').execute({ title: 'second run', date: 'tomorrow', start: '15:00', minutes: 30 }), /is "Near: Flow test, second run"/); assert.equal(seen[0].spoken, 'Is this Near: Flow test, second run, or a new task?');
+  seen.length = 0; await assert.rejects(O('schedule_block').execute({ title: 'Near: flow test, second run, repeated', date: 'tomorrow', start: '15:00', minutes: 30 }), /chose neither/); assert.equal(seen[0].pending.data.todo, run2.id, 'the one sharing most words');
+  // fewer than two words never match this way; nor a done to-do, a reminder, or words that only begin alike
+  seen.length = 0; n = list.length;
+  const single = add('Nearness');
+  for (const t of ['Nearness check', 'Near: flow tests', 'Flow near test']) await O('schedule_block').execute({ title: t, date: 'tomorrow', start: '16:00', minutes: 5 }).catch((e) => { if (!/overlap/.test(e.message)) throw e; });
+  assert.equal(seen.filter((o) => o.choices?.[0] === 'That one').length, 0); assert.equal(list.length, n + 4);
+  for (const c of list.slice(n)) c.status = 'done';
+  run2.status = 'done'; seen.length = 0;
+  await assert.rejects(O('schedule_block').execute({ title: 'second run', date: 'tomorrow', start: '15:00' }), /^Error: How long does it take/); assert.equal(seen.length, 0, 'a done to-do is not asked about');
+  // a new task chosen without a length: asked how long, nothing made
+  reply = SECOND; n = list.length; await assert.rejects(O('schedule_block').execute({ title: 'Near: flow test again', date: 'tomorrow', start: '15:00' }), /^Error: They chose a new task\. How long does it take\? Ask, then give minutes \(the app will ask them again whether it is the one on the list or a new task\)\.$/); assert.equal(list.length, n);
+  // what is wrong with the request is said before the question
+  seen.length = 0; await assert.rejects(O('schedule_block').execute({ ...sec, title: 'Near: flow test again', date: 'someday' }), /The date has to be/); assert.equal(seen.length, 0);
+  // with the app closed: asked the same way; "that one" keeps the slot for it, "new task" makes the to-do and keeps its slot
+  reply = 'yes'; seen.length = 0; n = list.length;
+  out = await C('schedule_block').execute({ title: 'Near: flow test again', date: 'tomorrow', start: '17:00', minutes: 30 });
+  assert.match(out, new RegExp(`^NOT on the calendar yet: .* "Near: flow test" is on the to-do list \\(the to-do already on the list was used, "Near: flow test" \\(${near.id}\\), and no new one was made: they said "Near: flow test again" is that one\\. Tell them it is the one already on their list\\), and its slot, Sunday 15 November, 17:00 to 17:30, is kept\\.`));
+  assert.equal(seen.length, 1); assert.equal(list.length, n); assert.deepEqual(state().actions.map((a) => a.todo), [near.id]);
+  await cal.sync('timer'); cal.takeHeld(); assert.deepEqual(state().actions, []); assert.equal(linkOf(near).local.start, at(15, 17));
+  reply = SECOND; out = await C('schedule_block').execute({ title: 'Near: flow test again', date: 'tomorrow', start: '18:00', minutes: 30 });
+  assert.match(out, new RegExp(`is saved on the to-do list as ${list.at(-1).id} \\(a new to-do, as they chose; "Near: flow test" \\(${near.id}\\) is left as it is\\)`)); assert.equal(list.length, n + 1);
+  list.at(-1).status = 'done'; await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
+  // nobody answers: kept, and asked again later
+  reply = 'nobody'; seen.length = 0;
+  await assert.rejects(O('schedule_block').execute({ ...sec, start: '19:00' }), (e) => e.name === 'Unanswered');
+  const qn = { id: 'qn1', at: new Date(clock).toISOString(), ...seen.at(-1).pending };
+  assert.deepEqual([qn.kind, qn.data.todo, qn.data.was, qn.data.args.date], ['near', near.id, at(15, 17), '2026-11-15']);
+  let rn = await open.resume.near(qn); assert.equal(typeof rn.ask, 'function');
+  reply = null; seen.length = 0; assert.deepEqual(await rn.ask(), {}, 'a no: nothing, and nothing said'); assert.deepEqual([seen[0].spoken, seen[0].pending.id, seen[0].pending.at], [NQ, 'qn1', qn.at]);
+  const clockN = clock; clock = at(15, 19, 30);
+  assert.deepEqual(await open.resume.near(qn), { dropped: 'I had asked whether "Near: Flow test, second run", for Sunday 15 November, 19:00, is "Near: flow test" or a new task. That time has passed, so nothing was changed.' });
+  clock = clockN;
+  reply = 'yes'; assert.deepEqual(await (await open.resume.near(qn)).ask(), { say: '"Near: flow test" is on the calendar Sunday 15 November, 19:00 to 19:30, using the to-do already on your list.' });
+  assert.deepEqual(await open.resume.near(qn), { done: true }, 'its block was moved since: settled');
+  near.text = 'Something else'; assert.deepEqual(await open.resume.near({ ...qn, data: { ...qn.data, was: at(15, 19) } }), { done: true }, 'renamed: the question no longer stands'); near.text = 'Near: flow test';
+  near.status = 'done'; assert.deepEqual(await open.resume.near({ ...qn, data: { ...qn.data, was: at(15, 19) } }), { done: true });
+  reply = null; seen.length = 0;
   await cal.sync('timer'); await cal.sync('timer'); cal.takeHeld();
 
   // -- 2. "next friday": the two it can be, worked out here

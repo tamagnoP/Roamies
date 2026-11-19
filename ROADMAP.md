@@ -440,6 +440,14 @@ the screen blocks clicks.
   is kept with the second; a second one chosen without a length is refused with "how long", and the question is
   asked again on the next call. Not fixed, because it is the recogniser's: "at 9 for 30 minutes" heard as "at
   9.30 minutes". What stays an instruction to the model, not a rule in code: that it passes the title as said.
+- **2026-11-19.** A second guard, in code, for the second "Flow test" (the owner's change d): a title given to
+  `schedule_block` that is no open to-do's but holds one's title, or is held by one (whole words in a row,
+  ignoring case, punctuation and a leading "the"), asks "Is this <existing title>, or a new task?" (buttons That
+  one, New task; said, answer window, "that one" / "a new task"; a no changes nothing; kind `near`). Titles of
+  fewer than two words never match this way. With this, "Flow test, second run" would have been asked about.
+  Decided while building: if the to-do has a block the bubble says so and "That one" moves it, with no second
+  question; among several close to-dos the one sharing most words is asked about, the first on the list among
+  equals; the to-do keeps its own title; "yes" answers neither.
 - **2026-11-19.** Roamies is to see every open task in Super Productivity, not only the ones it made (feature 23).
   Reverses "tasks Roamies did not create are never imported" and "tasks made by hand in the app are read but never
   changed" (Prompt D), on the owner's decision. Still fixed: never a `DELETE`; only title, start, length, done
@@ -475,6 +483,9 @@ the screen blocks clicks.
 - [ ] Spoken notices (2026-11-19) on the Mac, after an install: with Super Productivity closed, a block asked for;
   after opening the app and with no exchange open, the bubble that says it is on the calendar is also said, in
   one sentence; not said while you are talking or a bubble is open; `"speakNotices": false` leaves it silent.
+- [ ] A close title (2026-11-19) on the Mac, after an install: with "Flow test" open, a block asked for as "flow
+  test second run" brings "Is this Flow test, or a new task?", said; each button and "that one" / "a new task"
+  answer it; "no" changes nothing.
 - [ ] The same title (2026-11-19) on the Mac, after an install: with "flow test" booked, "schedule flow test
   tomorrow at 9 for 30 minutes": the bubble "Flow test is already booked for ... Move it, or make a second one?",
   said, with the buttons Move it and New one; answered by "move it", by "a second one", by each button, by "no";

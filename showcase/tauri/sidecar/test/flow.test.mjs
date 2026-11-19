@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, SECOND, SECOND_WORDS, createAnswers, heardLine, isClosing, unfilled, whichAnswer } from '../answers.mjs';
+import { Unanswered, CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, NEW_WORDS, SECOND, SECOND_WORDS, THAT_WORDS, createAnswers, heardLine, isClosing, unfilled, whichAnswer } from '../answers.mjs';
 import { createFlow, SAME, sameKey } from '../flow.mjs';
 import { HANDS_FREE_SEND, LIMITS, WINDOW, briefly, codeReference, createPi, isHandsFreeSend, loadSettings, readState, settingsDefaults } from '../pi.mjs';
 import { createSpeaker } from '../speaker.mjs';
@@ -728,6 +728,31 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.deepEqual(pendingNow().map((q) => [q.kind, q.brief]), [['same', Q]]);
   assert.equal(sameKey({ kind: 'same', data: { todo: 'c1', was: 2, args: { title: 'Flow test', date: 'monday' } } }), sameKey(pendingNow()[0]), 'the same to-do');
   assert.notEqual(sameKey({ kind: 'same', data: { todo: 'c2' } }), sameKey(pendingNow()[0]));
+  await reset();
+}
+
+// ================= "Is this <title>, or a new task?" (2026-11-19; calendar.mjs asks it when a title given for a
+// block holds an open to-do's title or is held by it): said, answer window, voice or either button, kept unanswered
+{
+  const which = { first: [...THAT_WORDS], second: [...NEW_WORDS], hint: '"that one" or "a new task"' };
+  const Q = 'Is this Flow test, or a new task?';
+  const askNear = () => settled(answers.ask({ placeholder: Q, spoken: Q, choices: ['That one', 'New task'], which, pending: { kind: 'near', brief: Q, data: { todo: 'c1', was: null, args: { title: 'Flow test, second run' } } } }));
+  await reset(); await exchange();
+  let p = askNear(); await tick();
+  assert.equal(overlay.said.at(-1), Q); assert.deepEqual(bubble().opts.choices, ['That one', 'New task']); assert.equal(bubble().opts.second, SECOND);
+  await played(); assert.notEqual(flow.window(), null);
+  assert.equal(await inWindow('Yes.'), 'heard'); assert.equal(bubble().open, true, 'a yes is not an answer to it');
+  assert.equal(await inWindow('A new task.'), 'heard'); assert.equal((await p).value, SECOND);
+  for (const [said, a] of [['that one', 'yes'], ['the same one', 'yes'], ['new task', SECOND], ['No.', null]]) { p = askNear(); await tick(); await played(); assert.equal(await inWindow(said), 'heard'); assert.equal((await p).value, a, said); }
+  p = askNear(); await tick(); click(true); assert.equal((await p).value, 'yes');
+  p = askNear(); await tick(); bubble().resolve(SECOND); assert.equal((await p).value, SECOND);
+  assert.deepEqual(pendingNow(), []);
+  await reset(); await exchange();
+  p = askNear(); await tick(); await played(); await advance(10_000);
+  assert.ok((await p).error instanceof Unanswered);
+  assert.deepEqual(pendingNow().map((q) => [q.kind, q.brief]), [['near', Q]]);
+  assert.equal(sameKey({ kind: 'near', data: { todo: 'c1', was: 5, args: { title: ' flow test, SECOND run', date: 'monday' } } }), sameKey(pendingNow()[0]));
+  assert.notEqual(sameKey({ kind: 'near', data: { todo: 'c1', args: { title: 'Flow test, third run' } } }), sameKey(pendingNow()[0]));
   await reset();
 }
 
