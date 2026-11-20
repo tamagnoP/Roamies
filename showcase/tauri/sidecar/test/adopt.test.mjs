@@ -261,7 +261,6 @@ assert.deepEqual(cal.takeHeld().asks.map((a) => a.title), ['Deleted soon'], 'the
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.ok(side.includes('const memory = `${cal.outline()}\n') && !side.includes('Open commitments:') && !side.includes('function commitmentsText') && !side.includes('function doneTodayText'), 'the memory section is the outline');
 assert.ok(side.includes('commitmentsText: () => cal.outline(),'), 'and upstream\'s list_commitments, were it ever left in, has nothing else to give');
-assert.ok(side.includes("const named = due.filter((c) => links[c.id]?.from !== 'app'), counted = due.length - named.length;"), 'a to-do from the app that comes due is counted for the model, not named');
 assert.ok(side.includes("adopt: async (text, due) => { const c = await addCommitment(text, due, 'commitment', { reminded: due !== null && due <= Date.now() });"), 'a task adopted with a due time already past gets no nudge');
 assert.ok(side.includes('if (!adoptOffered && cal.adoptable()) {'), 'the first-time question waits for a quiet moment, once per start');
 const pi = fs.readFileSync(new URL('../pi.mjs', import.meta.url), 'utf8');

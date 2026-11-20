@@ -42,7 +42,7 @@ import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the e
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
-import { createCalendar, noticeVoice, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
+import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
@@ -1971,22 +1971,20 @@ ensureModel();
 // The first request after launch gets a warm Claude Code too.
 if (config.onboarded) warmUp();
 // Due commitments turn into a nudge, but only when Sidekick isn't mid-conversation.
+// Local-only build (2026-11-19): the nudge is worded by code from a fixed pattern (nudgeLine, calendar.mjs: "<title>
+// is due at <time>."), shown and spoken. Nothing about it is sent to the model: no request is made. It is the same
+// for a to-do the owner gave Roamies and for one that came from Super Productivity. It waits while a reply is being
+// made or spoken or the owner is talking.
 async function remindTick() {
-  if (busy || loggingIn || onboarding) { reminderRetry(); return; }
+  if (busy || queued || loggingIn || onboarding || voiceState !== 'idle' || Date.now() < lineUntil) { reminderRetry(); return; }
   const due = await takeDueReminders();
   if (!due.length) return;
   menu(); showList({ flash: due[0].id, seconds: 6 });
-  // Local-only build (2026-11-19): a to-do that came from Super Productivity is not named to the model when it
-  // comes due, only counted; the list on screen shows it. One the owner gave Roamies with a time is named, as before.
-  const links = (() => { try { return cal.state().links; } catch { return {}; } })();
-  const named = due.filter((c) => links[c.id]?.from !== 'app'), counted = due.length - named.length;
-  const list = [...named.map((c) => `- ${c.id}: ${c.text}${c.due ? ` (was due ${fmtWhen(c.due)})` : ''}${c.kind === 'reminder' ? ' [plain reminder: already cleared, nothing to mark done]' : ''}`), ...(counted ? [`- ${named.length ? 'and ' : ''}${counted} task${counted === 1 ? '' : 's'} from Super Productivity ${counted === 1 ? 'is' : 'are'} due now: say how many, and that the list on screen shows ${counted === 1 ? 'it' : 'them'}; you aren't given ${counted === 1 ? 'its title' : 'their titles'}.`] : [])].join('\n');
-  if (signedIn.size && [...signedIn.values()].some(Boolean)) {
-    enqueue(`(System, not ${userName}: these commitments are due now. Nudge ${userName} about them in one or two sentences, in character. Start with the [remind] tag, or [upset] if it's well overdue.)\n${list}`);
-  } else {
-    ui({ kind: 'agent', e: { type: 'emote', action: 'remind' } });
-    say(`Reminder: ${due[0].text}`, 'concerned');
-  }
+  const line = nudgeLine(due);
+  logLine('nudge', { todos: due.length, chars: line.length });
+  ui({ kind: 'agent', e: { type: 'emote', action: 'remind' } });
+  say(line, 'concerned');
+  voiceLine(forVoice(line));
 }
 function reminderRetry() { setTimeout(() => remindTick().catch(() => {}), 2000); }
 // Sleeps until the next due reminder (to the second), not a once-a-minute poll. A long sleep is capped

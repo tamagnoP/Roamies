@@ -19,7 +19,8 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    due today, due this week, overdue and without a date, and today's planned blocks in full. A title outside
    today's plan reaches the provider when the owner asks about it or names it (`list_commitments` with a filter,
    `SP.titlesShown` at most at a time, then "and N more"), never because a request was made. Do not put the list,
-   or any title from it, into the live state, a briefing note or a nudge. From a task in the app only title, done,
+   or any title from it, into the live state or a briefing note. A nudge for a due to-do is worded by code (`nudgeLine`), shown and
+   spoken, and makes no request. From a task in the app only title, done,
    start, length, deadline and the two matrix tags are read (and whether it repeats); only linked tasks are
    written to, only those fields; none is ever deleted.
 2. **Roamies does not touch files or run commands itself.** File work is handed to pi (`pi.mjs`). The only files it

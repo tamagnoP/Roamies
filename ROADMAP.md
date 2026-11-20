@@ -137,7 +137,7 @@ Roamies did not create are never imported". Built, not merged, not installed. Wh
 - **What the model is given:** an outline with each request (numbers, and today's planned blocks), never the list.
   Titles through `list_commitments` with a filter, ten at a time, when the owner asks. `show_matrix` gives numbers.
   The morning briefing has the same outline; its note counts kept blocks and says a pending question about a to-do
-  without the title. A to-do from the app that comes due is counted in the nudge, not named.
+  without the title. A nudge for a due to-do is worded by code and makes no request (decisions log).
 - **Seen in the real app** (one read of the task list on 2026-11-19, field names and counts only): 73 tasks, 34
   open, two projects in one list. No task had `parentId`, `subTaskIds` entries or `repeatCfgId`, so those three
   names are the app's documented ones and have not been seen in an answer.
@@ -416,6 +416,15 @@ the screen blocks clicks.
   repeats, the rule is never touched; a to-do from the app that is removed in Roamies leaves its task exactly as it
   is, time included; one read of the real task list was allowed, field names and counts only. Built on
   `voice-flow` (section 2).
+- **2026-11-19.** A nudge for a to-do that has come due is worded by code and no longer goes through the model (the
+  owner's answer to question 1 on feature 26). Until now every nudge was a request to the model: a note with each
+  due to-do's id, title and due time, and the model wrote the one or two sentences (only when signed out did the
+  app say "Reminder: <title>" itself). Now `nudgeLine` builds "<title> is due at <time>." ("was due" after five
+  minutes, with the day when it isn't today; three named, the rest counted), the app shows and says it, and no
+  request is made. The same for the owner's to-dos and adopted ones. Decided while building: the model is not told
+  of a nudge afterwards either; an answer in words is an ordinary request, and the model is told to look among the
+  overdue to-dos when the answer doesn't name one. Lost with this: the nudge in the character's voice, and
+  `[upset]` for one well overdue.
 - **2026-11-19.** The model is given the to-do list in outline, not the list (the owner's change c, with e).
   Until now every request carried the whole list when it had changed: each open to-do with its id, title and due
   time, and the titles of those done today. Now a request carries the number open, due today, due this week,
@@ -464,6 +473,8 @@ the screen blocks clicks.
   a minute, silently; a to-do from the app taken off the list leaves its task as it was and doesn't come back; a
   sub-task and a repeating task behave as written (neither was in the app on 19 November, so the field names
   `parentId` and `repeatCfgId` are unconfirmed).
+- [ ] The nudge (2026-11-19) on the Mac: a to-do with a time comes due and "<title> is due at <time>." is shown and
+  said, with no reply from the model before or after; "done" said after it ticks the right to-do.
 - [ ] The outline (2026-11-19) on the Mac: "what's open?" is answered with numbers and today's plan and an offer of
   details; "what's due this week?" names at most ten and says how many more; the morning briefing names nothing
   outside today's plan. The log line `live` shows the smaller size.

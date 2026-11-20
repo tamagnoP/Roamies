@@ -33,6 +33,9 @@ export const REMOVED = new Set(['read_file', 'list_files', 'search_files', 'writ
 const DURING = new Set(['stop_pi', 'remember_commitment', 'update_commitment', 'forget_fact', 'list_commitments', 'show_list', 'write_note', 'search_notes', 'read_note', 'show_pending', 'sync_todos', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'set_priority', 'sort_tasks', 'show_matrix']);
 
 // Super Productivity (calendar.mjs): the to-do list is mirrored there through that app's local REST API. Where it
+// The nudge for a to-do that has come due is worded by code (nudgeLine in calendar.mjs), never by the model: how many
+// are named in one nudge before the rest are counted, and after how many minutes "is due" becomes "was due".
+export const NUDGE = { named: 3, lateMinutes: 5 };
 // listens, where its access token is kept (read when a request is made, never stored), the two tags its Eisenhower
 // matrix goes by, how long the "is it there?" check may take, and the only requests Roamies sends (never DELETE).
 export const SP = {
@@ -898,6 +901,7 @@ export function codeReference() {
       fromTasksWithoutAToDo: ['title', 'start time', 'length', 'done'],
       titlesShown: SP.titlesShown,
     },
+    dueNudge: { wording: '"<title> is due at <time>." ("was due" once it is late; with the day when that isn\'t today), built by the app, shown and spoken', sentToTheModel: 'nothing', namedInOne: NUDGE.named, thenCounted: 'and N more are due: the list shows them', wasDueAfterMinutes: NUDGE.lateMinutes },
     sandbox: {
       builtInToolFolders: [...TOOL_FOLDERS],
       blockedFolders: blocked.filter(([kind]) => kind === 'subpath').map(([, p]) => p),

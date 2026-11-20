@@ -33,7 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { FIRST, MOVE_WORDS, NEW_WORDS, SECOND, SECOND_WORDS, THAT_WORDS, byButton, whichButton } from './answers.mjs';
-import { SP, limitsFor, loadSettings, readState, writeState } from './pi.mjs';
+import { NUDGE, SP, limitsFor, loadSettings, readState, writeState } from './pi.mjs';
 
 const ROUTES = [['GET', /^\/health$/], ['GET', /^\/tasks(\?[\w=&]*)?$/], ['GET', /^\/tasks\/[^/?#]+$/], ['POST', /^\/tasks$/], ['PATCH', /^\/tasks\/[^/?#]+$/]];
 const TOKEN = /^[A-Za-z0-9]{32}$/;
@@ -175,6 +175,18 @@ export const quiet = ({ ready, busy, queued, asking, voice, speakingUntil = 0, n
  *  owner's behalf (a kept block placed or dropped, a conflict resolved), each in its one short sentence, and only
  *  while the "speakNotices" setting is on. → the text to say, '' for nothing. */
 export const noticeVoice = ({ lines = [], notices = [] } = {}, { exchange = false, speakNotices = true } = {}) => (exchange ? lines.join('\n') : speakNotices ? notices.join(' ') : '');
+
+/** The nudge for to-dos that have come due (2026-11-19): worded here from a fixed pattern, never by the model, and
+ *  nothing about it is sent to the model. "<title> is due at <time>." for each, soonest first; "was due" once it is
+ *  NUDGE.lateMinutes late, with the day when that isn't today. NUDGE.named at most are named; the rest are counted.
+ *  due: [{ text, due }] → the text to show and say, '' for none. */
+export function nudgeLine(due, now = Date.now()) {
+  const all = (due ?? []).filter((c) => c && typeof c.due === 'number' && String(c.text ?? '').trim()).sort((a, b) => a.due - b.due);
+  const today = new Date(now).toDateString();
+  const one = (c) => { const d = new Date(c.due); return `${String(c.text).trim().replace(/[.!?]+$/, '')} ${now - c.due >= NUDGE.lateMinutes * 60_000 ? 'was' : 'is'} due ${d.toDateString() === today ? '' : `${dayName(d)} `}at ${hm(c.due)}.`; };
+  const rest = all.length - Math.min(all.length, NUDGE.named);
+  return [...all.slice(0, NUDGE.named).map(one), ...(rest ? [`And ${rest} more ${rest === 1 ? 'is' : 'are'} due: the list shows ${rest === 1 ? 'it' : 'them'}.`] : [])].join(' ');
+}
 
 /** The requests, and nothing else, to the app on this Mac. */
 export function createClient({ home = os.homedir(), port = SP.port, tokenFile = path.join(home, SP.tokenFile) } = {}) {
@@ -1082,7 +1094,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       `To-do list, in outline: ${open.length} open: ${count('today')} due today, ${count('week')} due this week, ${count('overdue')} overdue, ${count('none')} without a date.${done ? ` ${done} done today.` : ''}`,
       plan.length ? `Planned for today: ${plan.map((b) => `${span(b)} ${quote(b.title)} [${b.todo}]${b.kept ? ' (slot kept, not booked yet)' : ''}`).join('; ')}.` : 'Nothing is planned for today.',
       ...(taken ? [`${taken} other stretch${taken === 1 ? '' : 'es'} of today ${taken === 1 ? 'is' : 'are'} taken in Super Productivity by tasks that aren't on the to-do list.`] : []),
-      'This outline is all you are given of the list: no other title is sent to you. When they ask what is open or how the list stands, say these numbers and today\'s plan first, and offer the details. A to-do\'s title or id comes from list_commitments with a filter (due, words, quadrant), and only when they ask about those to-dos or name one.',
+      'This outline is all you are given of the list: no other title is sent to you. When they ask what is open or how the list stands, say these numbers and today\'s plan first, and offer the details. A to-do\'s title or id comes from list_commitments with a filter (due, words, quadrant), and only when they ask about those to-dos or name one. The app reminds them itself when a to-do comes due, in its own words, and tells you nothing of it: when they answer such a reminder without naming the to-do ("done", "push it an hour"), find it with list_commitments, due "overdue" or "today".',
     ].join('\n');
   }
   /** For the morning briefing: the same outline, as a note for the model. */

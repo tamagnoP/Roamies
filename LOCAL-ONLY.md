@@ -503,8 +503,12 @@ provider. They do when you ask about them, not with every request:
 - "Show the matrix" gives the number in each quadrant; the to-dos of a quadrant come when you ask for them.
 - What the app shows you itself never goes through the provider: the list on screen, and every bubble (the first-time
   question with its titles, an overlap, a deleted task).
-- A to-do that comes due is named in its nudge if you gave it to Roamies with a time. One that came from Super
-  Productivity is only counted there ("one task from Super Productivity is due"), and the list on screen shows it.
+- A to-do that comes due: Roamies builds the nudge itself, from a fixed pattern ("Write report is due at 17:00.";
+  "was due" once it is five minutes late, with the day when that isn't today), shows it and says it. No request is
+  made for it and nothing about it is sent to the AI provider, whether the to-do was yours or came from Super
+  Productivity. Up to three are named in one nudge; more are counted ("And 2 more are due: the list shows them.").
+  If you answer a nudge in words, that is an ordinary request; the model was not told of the nudge, so it looks the
+  to-do up among the overdue ones when you don't name it.
 - What you asked about stays in the conversation afterwards, like anything else said in it, until the conversation
   is folded or you start a new one.
 
@@ -568,7 +572,7 @@ ways like a to-do of its own.
   differ, the app's title and deadline are taken. Two tasks of the same title in the app are two to-dos: nothing is
   merged, because merging would mean deleting one. Asked for by that title, Roamies asks which.
 - A deadline in the app is the to-do's due time. An adopted task whose deadline had already passed gets no nudge;
-  one that comes due later is counted in the nudge, not named (see Safeguards).
+  one that comes due later is nudged like any to-do (see Safeguards).
 - How a link came about is kept with it in `state.json`: `from: "app"` for an adopted task, nothing for one Roamies
   made; `repeats: true` for a repeating one. `calendar.adopt` is the yes; `calendar.released` lists the tasks taken
   off Roamies' list.
