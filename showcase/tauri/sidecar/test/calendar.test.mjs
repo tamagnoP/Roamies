@@ -86,9 +86,9 @@ const todos = {
   add: async (text) => add(text),
 };
 const logged = [];
-let answer = null; const asked = [];
+let answer = null; const asked = [], askedFull = [], booked = [];
 let clock = new Date(2026, 10, 14, 8).getTime();
-const make = () => createCalendar({ home, todos, port, tokenFile, now: () => clock, ask: async (o) => { asked.push(o.placeholder); return answer; }, log: (kind, data) => logged.push({ kind, data }) });
+const make = () => createCalendar({ home, todos, port, tokenFile, now: () => clock, book: (o) => booked.push(o), ask: async (o) => { asked.push(o.placeholder); askedFull.push(o); if (answer === 'nobody') throw Object.assign(new Error('no answer'), { name: 'Unanswered' }); return answer; }, log: (kind, data) => logged.push({ kind, data }) });
 const cal = make();
 const state = () => (fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')).calendar : undefined);
 const taskOf = (c) => app.tasks.get(state().links[c.id].task);
@@ -258,11 +258,11 @@ assert.ok(app.log.slice(mark).some((q) => q.query === '?includeDone=true&source=
 assert.equal(arch.status, 'done'); assert.equal(state().retired[arch.id], archTask); assert.deepEqual(writes(mark), []);
 assert.equal(state().links[gone.id], undefined); assert.equal(gone.status, 'open', 'the to-do is left alone until the owner answers');
 assert.deepEqual(state().held, [{ ask: { todo: gone.id, title: 'Delete me' } }], 'a question, kept until it can be shown');
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [{ todo: gone.id, title: 'Delete me' }], blocks: [] }); assert.deepEqual(state().held, []);
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [{ todo: gone.id, title: 'Delete me' }], offers: [], blocks: [] }); assert.deepEqual(state().held, []);
 mark = app.log.length; await cal.sync('timer'); await cal.sync('tool');
-assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] }, 'asked once');
+assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] }, 'asked once');
 // the owner keeps it: it is a to-do without a task, so it gets a new one
-await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] });
+await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] });
 
 // ---- 9. taken off Roamies' list: the time is cleared, the link dropped, the owner told; never a DELETE
 await cal.setLocal(gone.id, { start: at(19, 10), minutes: 30 }); await cal.sync('timer');
@@ -302,10 +302,11 @@ assert.equal(taskOf(offline).title, 'Made while the app was hung'); assert.equal
 taskOf(third).title = 'Book the big room';
 assert.match(await tool('list_commitments').execute({ words: 'big room' }), /Book the big room/); // the app's change is in before the list is read
 mark = app.log.length; assert.equal(await tool('draw').execute({}), 'drawn'); assert.equal(app.log.length, mark);
-// from a tool, what a sync has to say goes to the model with the result, and is not held for a bubble
+// from a tool too, what a sync has to say is held for a bubble, and is no part of the result (2026-11-19)
 third.text = 'Book room A'; taskOf(third).title = 'Book room B';
 const told = await tool('list_commitments').execute({ words: 'room' });
-assert.match(told, /Book room B[^]*\n\n"Book room B": the title changed both here and in Super Productivity\. I kept what the app has\.$/); assert.deepEqual(state().held, []);
+assert.match(told, /^1 open to-do with "room" in the title:\n- c\d+: Book room B$/); assert.ok(!/changed both|I kept/.test(told));
+assert.deepEqual(cal.takeHeld(), { lines: ['"Book room B": the title changed both here and in Super Productivity. I kept what the app has.'], notices: ['"Book room B" changed both here and in Super Productivity, and I kept what the app has.'], asks: [], offers: [], blocks: [] }, 'shown, and said by the speakNotices rule');
 // a slow answer to a real request ends the run without half-made changes being lost or repeated
 app.hang = (m) => m === 'POST';
 fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, limits: { ...file0.limits, calendarTimeoutSeconds: 2 } }));
@@ -342,7 +343,7 @@ assert.deepEqual(heldNow.notices, ['"Book room D" changed both here and in Super
 assert.equal(noticeVoice(heldNow, { exchange: false, speakNotices: true }), heldNow.notices[0]);
 assert.equal(noticeVoice(heldNow, { exchange: false, speakNotices: false }), '', 'the setting turns the voice off for them');
 assert.equal(noticeVoice(heldNow, { exchange: true, speakNotices: false }), heldNow.lines.join('\n'), 'in an exchange started by voice everything shown is said, as before');
-assert.equal(noticeVoice({ lines: ['"X" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?'], notices: [] }, { exchange: false, speakNotices: true }), '', 'a line that is not a notice stays silent outside an exchange');
+assert.equal(noticeVoice({ lines: ['"X" is off my list. Its task is still in Super Productivity, without a time: delete it there if you don\'t want it.'], notices: [] }, { exchange: false, speakNotices: true }), '', 'a line that is not a notice stays silent outside an exchange');
 assert.equal(noticeVoice({ lines: ['a', 'b', 'c'], notices: ['One.', 'Two.'] }, { exchange: false, speakNotices: true }), 'One. Two.');
 for (const n of heldNow.notices) assert.ok(n.length < 120 && (n.match(/[.!?](\s|$)/g) ?? []).length === 1, `one short sentence: ${n}`);
 assert.equal(loadSettings(home).speakNotices, true); assert.equal(settingsReference(home).speakNotices, true, 'in settings.default.json, on');
@@ -588,17 +589,35 @@ answer = 'yes'; mark = app.log.length;
 out = await T('sort_tasks').execute({ proposals });
 assert.deepEqual(writes(mark).map((w) => w.body), [{ tagIds: ['EM_URGENT', 'EM_IMPORTANT'] }], 'all of it, and "neither" needs no tag');
 assert.deepEqual([linkOf(m3).local.urgent, linkOf(m3).local.important, linkOf(m4).sorted], [true, true, true]);
-// ---- urgent and important, with no block: one is offered, once
-assert.equal(out, 'Sorted 2 to-dos.\n"Matrix: reply to editor" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?');
+// ---- urgent and important, with no block: one is offered, once, as a question of the app's own (2026-11-19)
+assert.equal(out, 'Sorted 2 to-dos.', 'the tool\'s result has nothing of it');
+assert.deepEqual(state().held, [{ offer: { todo: m3.id, title: 'Matrix: reply to editor' } }]);
+let heldOffers = cal.takeHeld(); assert.deepEqual(heldOffers, { lines: [], notices: [], asks: [], offers: [{ todo: m3.id, title: 'Matrix: reply to editor' }], blocks: [] });
+// the question: the owner's wording, Yes and No, said, kept when unanswered
+askedFull.length = 0; booked.length = 0; answer = 'nobody';
+await assert.rejects(cal.askOffer(heldOffers.offers[0]), (e) => e.name === 'Unanswered');
+assert.equal(askedFull[0].placeholder, 'Matrix: reply to editor is urgent and important and has no block. Book one?'); assert.equal(askedFull[0].spoken, askedFull[0].placeholder);
+assert.deepEqual(askedFull[0].choices, ['Yes', 'No']); assert.equal(askedFull[0].always, true, 'said outside an exchange too, by the speakNotices rule');
+assert.deepEqual(askedFull[0].pending, { kind: 'offer', brief: 'Matrix: reply to editor is urgent and important and has no block. Book one?', data: { todo: m3.id } }); assert.deepEqual(booked, []);
+// asked again later (flow.mjs), as old as it was; a no changes nothing and books nothing
+const qo = { id: 'qo', at: new Date(clock).toISOString(), ...askedFull[0].pending };
+let ro = await cal.resume.offer(qo); assert.equal(typeof ro.ask, 'function');
+answer = 'no'; askedFull.length = 0; mark = app.log.length; assert.deepEqual(await ro.ask(), { say: '' }); assert.deepEqual([askedFull[0].pending.id, askedFull[0].pending.at], ['qo', qo.at]); assert.deepEqual(booked, []); assert.deepEqual(writes(mark), []);
+// a yes: the to-do is handed on, so that the day and time are asked for in the usual way; nothing is booked by the yes itself
+answer = 'yes'; mark = app.log.length; assert.equal(await cal.askOffer({ todo: m3.id }), true);
+assert.deepEqual(booked, [{ todo: m3.id, title: 'Matrix: reply to editor' }]); assert.deepEqual(writes(mark), []); assert.equal(linkOf(m3).local.start, null);
+assert.deepEqual(logged.filter((l) => l.kind === 'calendar_offer').map((l) => l.data), [{ yes: false }, { yes: true }], 'the log has the answer, never a title');
+// it no longer stands once the to-do has a block, isn't urgent and important any more, or is done: nothing is asked
+askedFull.length = 0; assert.equal(await cal.askOffer({ todo: m1.id }), null, 'one that has a block'); assert.equal(await cal.askOffer({ todo: 'nope' }), null); assert.equal(askedFull.length, 0);
 out = await T('show_matrix').execute({});
-assert.ok(!/Shall I put a block/.test(out), 'not offered a second time'); assert.equal(out.split('\n')[0], 'Urgent and important: 2'); assert.ok((await Q4('urgent_important')).some((l) => l.includes('Matrix: reply to editor'))); assert.match(await tool('list_commitments').execute({ quadrant: 'unsorted', words: 'matrix' }), /^No open to-do is /, 'none of them is unsorted now');
-await cal.sync('timer'); await T('set_priority').execute({ todo: m3.id, urgent: false }); out = await T('set_priority').execute({ todo: m3.id, urgent: true });
+assert.deepEqual(cal.takeHeld().offers, [], 'not offered a second time'); assert.equal(out.split('\n')[0], 'Urgent and important: 2'); assert.ok((await Q4('urgent_important')).some((l) => l.includes('Matrix: reply to editor'))); assert.match(await tool('list_commitments').execute({ quadrant: 'unsorted', words: 'matrix' }), /^No open to-do is /, 'none of them is unsorted now');
+await cal.sync('timer'); await T('set_priority').execute({ todo: m3.id, urgent: false }); assert.deepEqual(await cal.resume.offer(qo), { done: true }, 'no longer urgent and important: the kept question is cleared without a word'); out = await T('set_priority').execute({ todo: m3.id, urgent: true });
 assert.equal(out, '"Matrix: reply to editor": urgent and important.', 'nor when it becomes urgent and important again');
 out = await T('set_priority').execute({ todo: m1.id, urgent: true });
-assert.equal(out, '"Matrix: grant report": urgent and important.', 'one that has a block is offered none');
+assert.equal(out, '"Matrix: grant report": urgent and important.', 'one that has a block is offered none'); assert.deepEqual(cal.takeHeld().offers, []);
 // made urgent and important in the app, with nobody asking: the offer waits for a quiet moment, in a bubble
 app.tasks.get(linkOf(m5).task).tagIds = ['EM_URGENT', 'EM_IMPORTANT']; await cal.sync('timer'); await cal.sync('timer');
-assert.deepEqual(cal.takeHeld().lines, ['"Matrix: call bank" is urgent and important, and isn\'t on the calendar. Shall I put a block for it there?']);
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [{ todo: m5.id, title: 'Matrix: call bank' }], blocks: [] });
 // ---- with the app away, what is said is kept here and goes over at the next sync
 app.hang = (m, p) => p === '/health'; mark = app.log.length;
 out = await T('set_priority').execute({ todo: m4.id, important: true });
@@ -668,7 +687,7 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   assert.deepEqual(held.blocks.map((b) => [b.todo, b.title, b.start, b.minutes]), [[ka.id, 'Kept: a', D(3, 10, 15), 30]], 'a clash becomes the usual question');
   // never twice: the next runs write nothing and say nothing
   mark = app.log.length; await cal.sync('timer'); await cal.sync('tool'); await make().sync('start');
-  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] });
+  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] });
   // the clash: asked as an overlap is; a no leaves it off, a yes places it
   answer = null; asked.length = 0;
   assert.equal(await cal.placeKept(held.blocks[0]), ''); assert.equal(linkOf(ka).local.start, null); assert.deepEqual(writes(mark), []);
@@ -708,7 +727,7 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   clock += 24 * 3600_000; await closed.sync('timer'); assert.equal(state().actions.length, 1);
   clock += 1; r = await cal.sync('tool');
   assert.deepEqual(state().actions, []); assert.equal(linkOf(ka).local.start, null);
-  assert.match(r.text, /^I had kept a slot for "Kept: a", Wednesday 9 December, 09:00 to 09:30, until Super Productivity was open\. That was more than 24 hours ago, so it isn't on the calendar\.$/);
+  assert.equal(r.text, '', 'from a tool too it is held for a bubble'); assert.match(cal.takeHeld().lines.join('|'), /^I had kept a slot for "Kept: a", Wednesday 9 December, 09:00 to 09:30, until Super Productivity was open\. That was more than 24 hours ago, so it isn't on the calendar\.$/);
   clock = clock0;
   assert.ok(logK.some((l) => l.kind === 'calendar_kept' && l.data.what === 'place') && logK.some((l) => l.data.what === 'move') && !JSON.stringify(logK).includes('Kept:'), 'logged by what it was, without the titles');
   for (const c of [ka, km, flowTest]) c.status = 'done';
@@ -1068,16 +1087,19 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
 // ---- 14b. a sync that fails says what failed, in plain words, with the app's own reason
 {
   const S = () => cal.tools.find((t) => t.name === 'sync_todos').execute({});
-  const why = async () => { try { await S(); } catch (e) { return e.message; } return 'no failure'; };
+  // 2026-11-19: a reason that names a to-do is the bubble's; the tool is told only that a step failed. A reason
+  // without a title (the token, the task list, the app not ready) still goes to the tool as it is.
+  const STEP = 'Super Productivity answered, but a step of the sync failed. The app tells them which, in a bubble of its own.', IN_STEP = 'I couldn\'t bring my to-do list and Super Productivity in step. ';
+  const why = async () => { cal.takeHeld(); try { await S(); } catch (e) { const h = cal.takeHeld(); if (e.message !== STEP) return e.message; assert.equal(h.lines.length, 1); assert.deepEqual(h.notices, ['I couldn\'t bring my to-do list and Super Productivity in step: the bubble says why.'], 'said by the speakNotices rule'); assert.ok(h.lines[0].startsWith(IN_STEP)); return h.lines[0].slice(IN_STEP.length); } return 'no failure'; };
   cal.takeHeld();
   // refused by the app: the answer is shaped as the real app's refusals are ({ ok: false, error: { code, message } })
   const f1 = add('Fails: create'); mark = app.log.length;
   app.refuse = (m) => (m === 'POST' ? { status: 400, code: 'INVALID_INPUT', message: `title is not allowed, said with ${TOKEN}` } : null);
-  let w = await why();
-  assert.equal(w, 'Super Productivity refused to make a task for "Fails: create": title is not allowed, said with […] (INVALID_INPUT, HTTP 400).');
+  await assert.rejects(S(), (e) => e.message === STEP, 'the tool is not given the title');
+  const w = 'Super Productivity refused to make a task for "Fails: create": title is not allowed, said with […] (INVALID_INPUT, HTTP 400).';
   assert.equal(linkOf(f1), undefined);
-  // on the timer the owner is told once, not every minute; and again only when the reason changes
-  await cal.sync('timer'); await cal.sync('timer'); await cal.sync('change');
+  // the owner is told once, in a bubble, not every minute; and again only when the reason changes
+  await cal.sync('timer'); await cal.sync('timer'); await cal.sync('change'); await assert.rejects(S(), (e) => e.message === STEP);
   assert.deepEqual(cal.takeHeld().lines, [`I couldn't bring my to-do list and Super Productivity in step. ${w}`]);
   app.refuse = null; await cal.sync('timer'); assert.ok(linkOf(f1)); assert.deepEqual(cal.takeHeld().lines, []);
   // each kind of change is named

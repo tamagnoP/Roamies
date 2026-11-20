@@ -502,7 +502,8 @@ provider. They do when you ask about them, not with every request:
 - Asked "what's open?", Roamies gives the numbers and today's plan first, and offers the details.
 - "Show the matrix" gives the number in each quadrant; the to-dos of a quadrant come when you ask for them.
 - What the app shows you itself never goes through the provider: the list on screen, and every bubble (the first-time
-  question with its titles, an overlap, a deleted task).
+  question with its titles, an overlap, a deleted task, the offer of a block), and every line a sync leaves (a
+  conflict, a failed step, a to-do taken off the list).
 - A to-do that comes due: Roamies builds the nudge itself, from a fixed pattern ("Write report is due at 17:00.";
   "was due" once it is five minutes late, with the day when that isn't today), shows it and says it. No request is
   made for it and nothing about it is sent to the AI provider, whether the to-do was yours or came from Super
@@ -689,15 +690,22 @@ the to-do's flags.
   a bubble, quadrant by quadrant, and applied only after your yes. A to-do that already has its place is not
   re-sorted this way.
 - "Show me the matrix": the four quadrants and what isn't sorted yet, said briefly.
-- A to-do that is urgent and important and has no block: Roamies offers one, once for each to-do, whether it became
-  so here or in the app.
+- A to-do that is urgent and important and has no block: the app asks, once for each to-do, whether it became so
+  here or in the app: "Write report is urgent and important and has no block. Book one?", with Yes and No. It is a
+  question like the others: said, with an answer window in a spoken exchange, kept when unanswered and asked again
+  later, and dropped without a word once the to-do has a block, is done, or is no longer urgent and important. A
+  yes books nothing by itself: Roamies then asks you for the day and time in the usual way (that one to-do is
+  handed to the model for it, because you said yes to it). A no changes nothing. (A task adopted from the app that
+  is already urgent and important gets no such question.)
 - A to-do counts as sorted once it has been given a place, here or in the app, "neither" included.
 - With the app not answering, what you say is kept and reaches the app at the next sync.
 
 **What a sync has to say** (a clash, a deleted task, the first-time question) when nobody asked for one waits until
 nothing else is going on: no reply being made or read out, nobody talking, no bubble waiting for an answer. Then it
 is shown in a bubble. It is kept in `state.json` until shown, so quitting doesn't lose it. During a request of
-yours, it is part of Roamies' reply instead.
+yours it is the same: the sync's lines go to a bubble after the reply, worded by the app, and never into what the
+model is given (2026-11-19). When a step of a sync fails during a request and the reason names a to-do, the model
+is told only that a step failed; the bubble has the reason.
 
 A line that reports something Roamies did or lost on your behalf is a **notice**, and is spoken as well as shown,
 in one short sentence (the bubble keeps the full wording), whether or not you are in a spoken exchange:
@@ -706,12 +714,13 @@ in one short sentence (the bubble keeps the full wording), whether or not you ar
   after its overlap question;
 - a kept block dropped because its time passed or it waited too long;
 - a conflict resolved (the same field changed on both sides, and the app's value was kept);
+- a sync that failed ("I couldn't bring my to-do list and Super Productivity in step: the bubble says why.");
 - a task deleted in the app: its question is said, in one sentence. Outside an exchange it gets no answer window:
   click, or hold the talk keys and answer.
 
 They wait for the same quiet moment as before. `"speakNotices": false` turns the voice off for them outside an
-exchange. Other lines (the offer of a block for an urgent and important to-do, a to-do taken off the list, a sync
-that failed) are said only inside an exchange, as before. Nothing is said when spoken replies are off.
+exchange. The offer of a block for an urgent and important to-do is a question, said the same way as the one
+about a deleted task. A to-do taken off the list is said only inside an exchange, as before. Nothing is said when spoken replies are off.
 
 **Answering its bubbles.** Every bubble this feature opens (the first time, an overlap, a day plan, a sorting
 proposal, a task deleted in the app) has two buttons and can also be answered by voice: hold the talk keys and say

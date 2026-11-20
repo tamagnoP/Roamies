@@ -756,6 +756,30 @@ const pendingNow = () => readState(dir).pending ?? [];
   await reset();
 }
 
+// ================= "<title> is urgent and important and has no block. Book one?" (2026-11-19; the app's own question,
+// in place of a line in a tool's result): said, answer window, yes or no by voice or button, kept unanswered, once
+// for a to-do, and without its title in the morning briefing's note
+{
+  const Q = 'Flow test is urgent and important and has no block. Book one?';
+  const askOffer = (always = false) => settled(answers.ask({ placeholder: Q, spoken: Q, choices: ['Yes', 'No'], always, pending: { kind: 'offer', brief: Q, data: { todo: 'c1' } } }));
+  await reset(); await exchange();
+  let p = askOffer(); await tick();
+  assert.equal(overlay.said.at(-1), Q); assert.deepEqual(bubble().opts.choices, ['Yes', 'No']);
+  await played(); assert.notEqual(flow.window(), null, 'the answer window');
+  assert.equal(await inWindow('Yes.'), 'heard'); assert.equal((await p).value, 'yes');
+  p = askOffer(); await tick(); await played(); assert.equal(await inWindow('No.'), 'heard'); assert.equal((await p).value, null);
+  p = askOffer(); await tick(); click(true); assert.equal((await p).value, 'yes');
+  assert.deepEqual(pendingNow(), []);
+  await reset(); await exchange();
+  p = askOffer(); await tick(); await played(); await advance(10_000);
+  assert.ok((await p).error instanceof Unanswered); assert.equal(bubble().takenDown, true);
+  assert.deepEqual(pendingNow().map((q) => [q.kind, q.brief]), [['offer', Q]]);
+  assert.deepEqual(SAME.offer({ todo: 'c1' }), ['c1']); assert.equal(sameKey({ kind: 'offer', data: { todo: 'c1' } }), sameKey(pendingNow()[0])); assert.notEqual(sameKey({ kind: 'offer', data: { todo: 'c2' } }), sameKey(pendingNow()[0]));
+  assert.match(flow.note(), /\n- whether to book a block for an urgent and important to-do$/); assert.ok(!flow.note().includes('Flow test'), 'the note for the model has it without the title');
+  assert.ok(codeReference().pendingQuestions.kinds.includes('offer')); assert.equal(codeReference().pendingQuestions.sameQuestion.offer, 'the same to-do');
+  await reset();
+}
+
 // ================= a notice's question (a task deleted in the app; 2026-11-19): outside an exchange it is said when
 // it asks for that (always), and gets no answer window: the microphone doesn't open by itself there
 {

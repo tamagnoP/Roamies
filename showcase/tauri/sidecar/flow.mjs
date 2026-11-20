@@ -42,6 +42,7 @@ export const SAME = {
   start: () => [], // there is one: putting the to-do list in Super Productivity
   adopt: () => [], // there is one: adding the app's open tasks to the to-do list
   deleted: (d) => [d.todo], // the same to-do
+  offer: (d) => [d.todo], // "<title> is urgent and important and has no block. Book one?": the same to-do
   overlap: (d) => [d.todo], // the same to-do: it has one block, so a newer time takes the older one's place
   plan: (d) => [d.date], // the same day
   sort: () => [], // there is one: the newest proposal takes the older one's place
@@ -53,6 +54,7 @@ export const SAME = {
 const UNNAMED = {
   overlap: 'whether to place a block that overlaps something',
   deleted: 'whether a to-do goes too, now that its task was deleted in Super Productivity',
+  offer: 'whether to book a block for an urgent and important to-do',
   day: 'which of two days a block is for',
   same: 'whether a to-do that is already booked moves, or a second one is made',
   near: 'whether a block is for a to-do already on the list, or for a new task',

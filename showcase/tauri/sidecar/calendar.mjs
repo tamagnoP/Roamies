@@ -236,7 +236,7 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
  *   update(id, { status, dueMs }), rename(id, text), add(text) → { id }  (a new to-do of kind commitment)
  * ask: the question bubble. now: the clock. port, tokenFile: only tests set these.
  */
-export function createCalendar({ home = os.homedir(), todos, ask = async () => null, log = () => {}, now = () => Date.now(), port, tokenFile } = {}) {
+export function createCalendar({ home = os.homedir(), todos, ask = async () => null, log = () => {}, now = () => Date.now(), port, tokenFile, book = null } = {}) { // book({ todo, title }): they said yes to the offer of a block
   const client = createClient({ home, port, tokenFile });
   const yesTo = byButton(ask); // its bubbles are answered by which button it was (a spoken answer arrives the same way)
   // Feature 22: what is kept of a question when its answer window runs out with no answer (answers.mjs, flow.mjs):
@@ -433,10 +433,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         if (Object.keys(toApp).length && !gone) {
           if (await writeTask(link, toApp, local)) { for (const f of Object.keys(toApp)) link.agreed[f] = toApp[f]; save(); log('calendar_to_app', { fields: Object.keys(toApp) }); }
         }
-        // Urgent and important, and not on the calendar: a block is offered, once for each to-do.
+        // Urgent and important, and not on the calendar: a block is offered, once for each to-do, as a question
+        // of the app's own (askOffer), never as a line for the model.
         if (!local.done && link.local.urgent && link.local.important && link.local.start === null && !link.offered && cal.links[id]) {
           link.offered = true; save();
-          lines.push(`${quote(link.title)} is urgent and important, and isn't on the calendar. Shall I put a block for it there?`);
+          asks.push({ todo: id, title: link.title, offer: true });
         }
         // Done on both sides: the link is retired and no longer synced.
         if (local.done && (gone || link.agreed.done)) { cal.retired[id] = link.task; delete cal.links[id]; save(); }
@@ -486,12 +487,17 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     } catch (e) {
       save();
       if (!(e instanceof Down)) throw e;
-      return { ok: false, reached: true, lines, asks, says, why: e.message };
+      // named: the reason has a to-do's title in it (the step that failed was about that to-do)
+      const names = [...list.map((t) => t.text), ...Object.values(cal.links).map((l) => l.title)].map((n) => String(n ?? '').trim()).filter(Boolean);
+      return { ok: false, reached: true, lines, asks, says, why: e.message, named: names.some((n) => e.message.includes(n)) };
     }
     return { ok: true, started: true, lines, asks, says };
   }
 
-  /** Runs a sync. From a tool, what it has to say comes back as text for the model; otherwise it is held for a bubble. */
+  /** Runs a sync. What it has to say is held for a bubble, whoever started it (2026-11-19): a conflict, a failed
+   *  step, a to-do taken off the list are shown, and said by the speakNotices rule, worded here; a deleted task and
+   *  the offer of a block are the app's own questions. Nothing of it goes into a tool's result: a tool is told only
+   *  whether the sync worked, without a title. (text is kept for the callers and is always empty.) */
   let lastOk = false; // whether the last run reached the app: what is known of its calendar is only good then
   let toldWhy = null; // the failure the owner was last told about, so the timer doesn't say the same thing every minute
   function sync(from = 'timer') {
@@ -511,13 +517,14 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       if (r.ok) toldWhy = null; else log('calendar_failed', { from, reached: !!r.reached }); // the reason names a to-do, so it isn't logged
       // A failure nobody asked about is said once, as what it is. The app simply being closed is not one: that is
       // said when something is asked of it. After the first yes it is said either way.
-      if (!r.ok && from !== 'tool' && (r.reached || from === 'start') && r.why !== toldWhy) { toldWhy = r.why; r.lines.push(`I couldn't bring my to-do list and Super Productivity in step. ${r.why}`); }
-      // A task deleted in the app: the question is the app's own bubble, whoever started the run.
-      hold(r.asks.map((a) => ({ ask: a })));
+      if (!r.ok && (from === 'tool' ? r.named : r.reached || from === 'start') && r.why !== toldWhy) { /* from a tool: only what the tool isn't given */ toldWhy = r.why; r.lines.push(`I couldn't bring my to-do list and Super Productivity in step. ${r.why}`); r.says[r.lines.at(-1)] = 'I couldn\'t bring my to-do list and Super Productivity in step: the bubble says why.'; }
+      // The reason of a failed step that names a to-do: the bubble has it, a tool is told only that there is one.
+      if (!r.ok && r.named && from === 'tool') r.why = 'Super Productivity answered, but a step of the sync failed. The app tells them which, in a bubble of its own.';
+      // A task deleted in the app, and a block offered for an urgent and important to-do: the app's own bubbles.
+      hold(r.asks.map((a) => (a.offer ? { offer: { todo: a.todo, title: a.title } } : { ask: a })));
       // A line that reports something done or lost on their behalf carries its short sentence: it is also said.
-      if (from !== 'tool') { hold(r.lines.map((text) => ({ text, ...(r.says[text] ? { say: r.says[text] } : {}) }))); return { ...r, text: '' }; }
-      const text = [...r.lines, ...r.asks.map(() => 'The task of a to-do was deleted in Super Productivity. The app asks them in a bubble, by its title, whether the to-do goes too: leave that to the bubble.')].join('\n');
-      return { ...r, text };
+      hold(r.lines.map((text) => ({ text, ...(r.says[text] ? { say: r.says[text] } : {}) })));
+      return { ...r, text: '' };
     });
   }
 
@@ -545,6 +552,25 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   /** The question about a to-do whose task was deleted in the app. → true when the to-do is to go too. */
   const askDeleted = (a, signal, kept = null) => yesTo({ placeholder: `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off my to-do list as well?`, choices: ['Take it off', 'Keep it'], spoken: `The task for ${quote(a.title)} was deleted in Super Productivity: take it off my to-do list as well?`, always: noticesOn(), pending: keep(kept, 'deleted', `The task for ${quote(a.title)} was deleted in Super Productivity. Take it off the to-do list as well?`, { todo: a.todo, title: a.title }) }, signal);
 
+  /** Whether a block is still to be offered for a to-do: it is open, urgent and important, and has neither a block
+   *  nor a slot kept for one. → its title, or null. */
+  async function offerStands(todo) {
+    const t = (await todos.all()).find((x) => x.id === todo), cal = get(), l = cal.links[todo]?.local;
+    return t && t.status === 'open' && l && l.urgent && l.important && l.start === null && !cal.actions.some((a) => a.todo === todo) ? t.text : null;
+  }
+  /** The offer of a block for an urgent and important to-do that has none (2026-11-19): a question from the app,
+   *  said, with an answer window, kept when unanswered. → true for yes (book() is then told, and the day and time
+   *  are asked for in the usual way), false for no, null when it no longer stands and nothing was asked. */
+  async function askOffer(o, signal, kept = null) {
+    const name = await offerStands(o.todo);
+    if (name === null) return null;
+    const question = `${name} is urgent and important and has no block. Book one?`;
+    const yes = await yesTo({ placeholder: question, choices: ['Yes', 'No'], spoken: question, always: noticesOn(), pending: keep(kept, 'offer', question, { todo: o.todo }) }, signal);
+    log('calendar_offer', { yes: !!yes });
+    if (yes) { try { book?.({ todo: o.todo, title: name }); } catch (e) { console.error('calendar', e); } }
+    return !!yes;
+  }
+
   /** At start-up: a create that was begun and never finished is said once. */
   function startup() {
     return inTurn(() => edit((cal) => {
@@ -556,7 +582,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   /** What is waiting to be shown, taken off the pile: { lines: [text], notices: [the short sentence of each line
    *  that is a notice], asks: [{ todo, title }], blocks }. */
   function takeHeld() {
-    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), notices: h.filter((x) => x.text && x.say).map((x) => x.say), asks: h.filter((x) => x.ask).map((x) => x.ask), blocks: h.filter((x) => x.block).map((x) => x.block) }; });
+    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), notices: h.filter((x) => x.text && x.say).map((x) => x.say), asks: h.filter((x) => x.ask).map((x) => x.ask), offers: h.filter((x) => x.offer).map((x) => x.offer), blocks: h.filter((x) => x.block).map((x) => x.block) }; });
   }
   const hasHeld = () => get().held.length > 0;
 
@@ -1141,7 +1167,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   /** Upstream's to-do tools, with a sync before each: what the app changed is in before the list is read or changed.
    *  list_commitments is replaced by the one above: the list itself is never handed over whole. */
   const TODO_TOOLS = new Set(['remember_commitment', 'update_commitment', 'list_commitments', 'show_list']);
-  const wrap = (tools) => tools.map((t) => (t.name === 'list_commitments' ? listTool : t)).map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { const pre = await sync('tool'); const out = await t.execute(...a); return pre.text ? `${out}\n\n${pre.text}` : out; } } : t));
+  const wrap = (tools) => tools.map((t) => (t.name === 'list_commitments' ? listTool : t)).map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { await sync('tool'); return t.execute(...a); } } : t)); // what the sync had to say is the app's to show, not part of the result
 
   const tools = [
     ...blockTools,
@@ -1184,6 +1210,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       await sync('adopt');
       if (!adoptable()) return lastOk ? DONE : { later: true }; // nothing left in the app to add
       return { ask: async () => { const n = await offerAdopt(undefined, q); return { say: n ? `${n} task${n === 1 ? '' : 's'} from Super Productivity ${n === 1 ? 'is' : 'are'} on my to-do list now.` : '' }; } };
+    },
+    async offer(q) {
+      const { todo } = q.data ?? {};
+      if ((await offerStands(todo)) === null) return DONE; // done, off the list, sorted elsewhere, or it has a block or a kept slot now
+      return { ask: async () => { await askOffer({ todo }, undefined, q); return { say: '' }; } };
     },
     async deleted(q) {
       const { todo } = q.data ?? {};
@@ -1311,5 +1342,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).${cal.adopt ? ' Every open task they have in the app is on the to-do list too, whoever made it; the app adds new ones itself.' : ''}` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, resume, dayNote, outline, startup, takeHeld, hasHeld, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, resume, dayNote, outline, startup, takeHeld, hasHeld, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
 }

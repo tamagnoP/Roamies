@@ -97,7 +97,7 @@ assert.equal(state().adopt, false);
 await cal.sync('timer'); assert.equal(cal.adoptable(), 13);
 assert.equal(list.length, n, 'no to-do is made before the yes'); assert.deepEqual(writes(mark), []); assert.equal(Object.keys(state().links).length, 2);
 assert.ok(cal.others().some((o) => o.title === 'Dentist') && cal.others().every((o) => Object.keys(o).join() === 'title,start,minutes,done'));
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] });
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] });
 
 // ---- 2. the first time: the count, the first ten titles, "and N more"; a yes before anything is linked
 answer = null;
@@ -131,13 +131,13 @@ assert.equal(linkOf(todoOf(standup)).repeats, true, 'a repeating task is adopted
 assert.equal(todoOf(child), null); assert.equal(todoOf(doneOne), null); assert.ok(!list.some((c) => /figures|Already done|Archived/.test(c.text) || !c.text.trim()));
 assert.deepEqual(cal.others().filter((o) => !o.done).map((o) => o.title), ['Thesis chapter: figures', ''], 'a sub-task still counts as taken time; an adopted task is no longer "another task"');
 assert.deepEqual(logged.filter((l) => l.kind === 'calendar_adopted').map((l) => l.data), [{ tasks: 13, byTitle: 0, repeating: 1 }], 'the log has how many, never a title');
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] }, 'no block is offered for an adopted task, and nothing else is said');
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] }, 'no block is offered for an adopted task, and nothing else is said');
 
 // ---- 3. afterwards: a task added in the app is adopted at the next sync, without a bubble or a line
 const later = hand('Added later', { dueWithTime: at(17, 14), timeEstimate: 45 * M });
 n = list.length; asked.length = 0; mark = app.log.length;
 await cal.sync('timer');
-assert.equal(list.length, n + 1); assert.equal(todoOf(later).text, 'Added later'); assert.equal(asked.length, 0); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], blocks: [] }); assert.deepEqual(writes(mark), []);
+assert.equal(list.length, n + 1); assert.equal(todoOf(later).text, 'Added later'); assert.equal(asked.length, 0); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] }); assert.deepEqual(writes(mark), []);
 await cal.sync('timer'); assert.equal(list.length, n + 1, 'once: a task is one to-do');
 
 // ---- 4. the pair is synced both ways like any other; only the seven fields are written, and only what changed here
@@ -254,7 +254,7 @@ assert.match(await T('show_matrix').execute({}), /^Urgent and important: \d+\nIm
 // a task of a to-do deleted in the app, seen while a tool runs: the model is told of it without the title
 const delTask = hand('Deleted soon'); await cal.sync('timer'); app.tasks.delete(delTask.id);
 const told = await L.execute({ due: 'overdue' });
-assert.match(told, /\n\nThe task of a to-do was deleted in Super Productivity\. The app asks them in a bubble, by its title, whether the to-do goes too: leave that to the bubble\.$/); assert.ok(!told.includes('Deleted soon'));
+assert.equal(told, 'No open to-do is overdue.', 'a task deleted in the app, seen while a tool runs: the result has nothing of it');
 assert.deepEqual(cal.takeHeld().asks.map((a) => a.title), ['Deleted soon'], 'the bubble has it');
 
 // ---- 9. the same in sidekick.mjs, tools.mjs and the briefing notes: no list is put together for the model
@@ -263,6 +263,9 @@ assert.ok(side.includes('const memory = `${cal.outline()}\n') && !side.includes(
 assert.ok(side.includes('commitmentsText: () => cal.outline(),'), 'and upstream\'s list_commitments, were it ever left in, has nothing else to give');
 assert.ok(side.includes("adopt: async (text, due) => { const c = await addCommitment(text, due, 'commitment', { reminded: due !== null && due <= Date.now() });"), 'a task adopted with a due time already past gets no nudge');
 assert.ok(side.includes('if (!adoptOffered && cal.adoptable()) {'), 'the first-time question waits for a quiet moment, once per start');
+// 2026-11-19: the offer of a block is the app's own bubble; only a yes hands that one to-do to the model, to ask for the day and time
+assert.ok(side.includes('for (const o of offers) {') && side.includes('await cal.askOffer(o)'));
+assert.ok(/book: \(\{ todo, title \}\) => enqueue\(`\(System, not \$\{userName\}: in a bubble of the app's own, \$\{userName\} has just said yes to booking a calendar block for the to-do "\$\{title\}" \[\$\{todo\}\]/.test(side));
 const pi = fs.readFileSync(new URL('../pi.mjs', import.meta.url), 'utf8');
 assert.ok(pi.includes('from the outline at the end of this note (its numbers and today\'s plan; call no tool, and name no to-do that isn\'t in it)') && pi.includes('call list_commitments with no filter first: it gives the outline'));
 

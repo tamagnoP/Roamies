@@ -425,6 +425,17 @@ the screen blocks clicks.
   of a nudge afterwards either; an answer in words is an ordinary request, and the model is told to look among the
   overdue to-dos when the answer doesn't name one. Lost with this: the nudge in the character's voice, and
   `[upset]` for one well overdue.
+- **2026-11-19.** What a sync has to say goes to a bubble, never into a tool's result (the owner's answer to
+  question 2 on feature 26). Until now a sync started by a to-do tool handed its lines to the model with the result:
+  a conflict, a to-do taken off the list, a kept block placed or dropped, the offer of a block. Now they are held
+  and shown at the next quiet moment, worded by the app, and said by the `speakNotices` rule (a failed sync is a
+  notice now too). A failed step whose reason names a to-do is told to the tool as "a step failed", and the bubble
+  has the reason; a reason without a title (the token, the task list) still goes to the tool. The offer of a block
+  is the app's own question: "<title> is urgent and important and has no block. Book one?", Yes and No, kind
+  `offer`, once per to-do, kept and asked again, cleared when it no longer stands. Decided while building: a yes
+  queues a note for the model naming that one to-do, so that it asks for the day and time and calls
+  `schedule_block`; outside a spoken exchange the question is said (with `speakNotices`) but gets no answer
+  window, as for a deleted task.
 - **2026-11-19.** The model is given the to-do list in outline, not the list (the owner's change c, with e).
   Until now every request carried the whole list when it had changed: each open to-do with its id, title and due
   time, and the titles of those done today. Now a request carries the number open, due today, due this week,
@@ -475,6 +486,10 @@ the screen blocks clicks.
   `parentId` and `repeatCfgId` are unconfirmed).
 - [ ] The nudge (2026-11-19) on the Mac: a to-do with a time comes due and "<title> is due at <time>." is shown and
   said, with no reply from the model before or after; "done" said after it ticks the right to-do.
+- [ ] Sync lines and the block offer (2026-11-19) on the Mac: "that one is urgent and important" is followed, after
+  the reply, by the bubble "<title> is urgent and important and has no block. Book one?"; yes leads to "which day
+  and what time?" and a block; no changes nothing; unanswered, it comes back. A conflict made on purpose (title
+  changed on both sides, then "what's due today?") shows its line in a bubble and not in the reply.
 - [ ] The outline (2026-11-19) on the Mac: "what's open?" is answered with numbers and today's plan and an offer of
   details; "what's due this week?" names at most ten and says how many more; the morning briefing names nothing
   outside today's plan. The log line `live` shows the smaller size.

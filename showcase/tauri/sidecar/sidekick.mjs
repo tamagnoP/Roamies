@@ -337,6 +337,9 @@ const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) }
 const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text }), heardChars: () => limitsFor(HOME).heardLineChars });
 const cal = createCalendar({
   ask: answers.ask, log: (kind, data) => logLine(kind, data),
+  // They said yes, in the app's own bubble, to a block for an urgent and important to-do: the day and time are asked
+  // for in the usual way, by the model, which is told of this one to-do because they said yes to it.
+  book: ({ todo, title }) => enqueue(`(System, not ${userName}: in a bubble of the app's own, ${userName} has just said yes to booking a calendar block for the to-do "${title}" [${todo}], which is urgent and important and has no block. Ask them which day and what time, in one short sentence, and nothing else. When they answer, call schedule_block with todo "${todo}".)`, { byVoice: flow.spoken() }),
   todos: {
     all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
@@ -359,7 +362,7 @@ async function calShow() {
   try {
     if (!calQuiet()) return;
     if (cal.hasHeld()) {
-      const { lines, notices, asks, blocks } = cal.takeHeld();
+      const { lines, notices, asks, offers, blocks } = cal.takeHeld();
       if (lines.length) {
         const voiced = noticeVoice({ lines, notices }, { exchange: flow.spoken(), speakNotices: noticesOn() });
         logLine('calendar_lines', { lines: lines.length, notices: notices.length, said: !!voiced });
@@ -373,6 +376,12 @@ async function calShow() {
         try { yes = await cal.askDeleted(a).finally(() => { calAsking = false; }); } catch (e) { if (e?.name === 'Unanswered') continue; throw e; }
         if (yes) { await updateCommitment(a.todo, { status: 'dropped' }); menu(); scheduleReminders(); }
         await cal.answered(a.todo); cal.sync('change'); // kept: it gets a new task
+      }
+      // A block offered for an urgent and important to-do that has none: the app's own question (2026-11-19), once
+      // per to-do. Unanswered, flow.mjs keeps it and asks again. A yes hands the to-do to the model (book, above).
+      for (const o of offers) {
+        calAsking = true;
+        try { await cal.askOffer(o).finally(() => { calAsking = false; }); } catch (e) { if (e?.name !== 'Unanswered') throw e; }
       }
       // A block kept while Super Productivity was closed, which overlaps something now that it is open: the usual
       // question. Unanswered, flow.mjs keeps it as a pending question.
