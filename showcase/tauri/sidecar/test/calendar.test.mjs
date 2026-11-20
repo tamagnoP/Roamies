@@ -447,10 +447,10 @@ assert.ok(!list.some((c) => c.text === 'No length'));
 
 // ---- a clash: the owner is shown what it overlaps and asked; without a yes nothing changes
 answer = null; asked.length = 0; mark = app.log.length;
-await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '10:30', minutes: 60 }), /It would overlap "Seminar" \(10:00 to 11:00\), and they didn't say to put it there anyway\. Nothing was changed\./);
+await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '10:30', minutes: 60 }), (e) => e.message === 'That time overlaps something on the calendar. The app\'s bubble showed them what, and they declined to put it there anyway. Nothing was changed. Ask what time suits instead.' && !e.message.includes('Seminar'), 'the tool is not told what was in the way (2026-11-19)');
 assert.deepEqual(asked, ['"Made while the app was slow", 10:30 to 11:30 on Monday 23 November, overlaps "Seminar" (10:00 to 11:00). Put it there anyway?']);
 assert.deepEqual(writes(mark), []); assert.equal(linkOf(slow).local.start, null);
-await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '16:30', minutes: 60 }), /overlap "Book room D" \(16:00 to 16:45\)/, 'a clash with one of Roamies\' own blocks too');
+await assert.rejects(T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '16:30', minutes: 60 }), (e) => /^That time overlaps something on the calendar\./.test(e.message) && !e.message.includes('Book room D'), 'a clash with one of Roamies\' own blocks too'); assert.match(asked.at(-1), /overlaps "Book room D" \(16:00 to 16:45\)\. Put it there anyway\?$/, 'the bubble says what');
 answer = 'yes';
 out = await T('schedule_block').execute({ todo: slow.id, date: '2026-11-23', start: '10:30', minutes: 60 });
 assert.match(out, /10:30 to 11:30/); assert.equal(app.tasks.get(linkOf(slow).task).dueWithTime, at(23, 10, 30));
@@ -1241,7 +1241,7 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   const wall = hand('Voice: in the way', { dueWithTime: at(20, 10), timeEstimate: 60 * 60_000 });
   await each('an overlap', () => V('schedule_block').execute({ todo: v1.id, date: '2026-11-20', start: '10:30', minutes: 30 }), /^"Voice: one", 10:30 to 11:00 on Friday 20 November, overlaps "Voice: in the way" \(10:00 to 11:00\)\. Put it there anyway\?\n/,
     async (out, before) => { assert.match(out.value, /is on the calendar Friday 20 November, 10:30 to 11:00/); assert.equal(linkV(v1).local.start, at(20, 10, 30)); await calV.setLocal(v1.id, { start: null }); await calV.sync('timer'); },
-    async (out, before) => { assert.match(out.error, /didn't say to put it there anyway\. Nothing was changed\./); assert.deepEqual(writes(before), []); assert.equal(linkV(v1).local.start, null); });
+    async (out, before) => { assert.match(out.error, /declined to put it there anyway\. Nothing was changed\./); assert.deepEqual(writes(before), []); assert.equal(linkV(v1).local.start, null); });
   wall.isDone = true;
 
   // 3. a day plan

@@ -681,7 +681,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       const what = hits.map((b) => `${quote(b.title)} (${span(b)})`).join(' and ');
       const pending = keep(kept, 'overlap', `Put ${quote(title_)} on ${dayName(day)}, ${span(block)}, although it overlaps something?`, { todo: id, title: title_, start, minutes: mins, was: cal.links[id]?.local.start ?? null });
       const a = await yesTo({ placeholder: hits.length ? `${quote(title_)}, ${span(block)} on ${dayName(day)}, overlaps ${what}. Put it there anyway?` : `${quote(title_)}, ${span(block)} on ${dayName(day)}: nothing is in the way any more. Put it there?`, choices: ['Put it there', 'Don\'t'], pending }, signal);
-      if (!a) throw Object.assign(new Error(`It would overlap ${what}, and they didn't say to put it there anyway. Nothing was changed. Ask what time suits instead.`), { declined: true });
+      if (!a) throw Object.assign(new Error(`${hits.length ? 'That time overlaps something on the calendar. The app\'s bubble showed them what, and they declined to put it there anyway' : 'The app asked them whether to put it there, and they declined'}. Nothing was changed. Ask what time suits instead.`), { declined: true });
     }
     await setLocal(id, { start, minutes: mins });
   }

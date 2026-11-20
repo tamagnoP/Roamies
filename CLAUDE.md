@@ -103,6 +103,10 @@ The reset is what makes macOS ask again.
 ## How to make a change
 
 - **Read first.** Read the code you are changing and the tests that cover it.
+- **Anything with a fixed shape lives in code, not in the model.** Dates and times, matching, counting, fixed
+  sentences, layouts and yes/no answers are worked out and worded by code. The model is used for judgment:
+  understanding a request, deciding, summarising, conversation. When a feature could do a step either way, choose
+  code, and say so in the plan.
 - **Mark edits to upstream files** with a comment starting `Local-only build:` saying what and why. Keep those diffs
   small; put new logic in our own modules.
 - **Leave `tools.mjs` as upstream wrote it**, apart from the removed `fetch_url`. Upstream's Mac-only tests

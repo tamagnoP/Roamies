@@ -649,7 +649,8 @@ block has a to-do behind it, and a to-do has one block at most.
 - Scheduling a to-do that already has a block moves the block. "Move it to Wednesday" and "take it off the calendar"
   do what they say; off the calendar, the to-do and its task stay and keep their length.
 - A block you dictate is placed at the time you said, also outside the working day. If it would overlap something
-  already there, a bubble shows what it overlaps, with the times, and asks; without your yes nothing changes. Blocks
+  already there, a bubble shows what it overlaps, with the times, and asks; without your yes nothing changes, and the model is
+  told only that the time overlaps something and that you declined, not what was in the way. Blocks
   that touch end to start don't overlap.
 - "Plan my day": Roamies gives the to-dos and how long each takes (asking you where it doesn't know), and the times
   are worked out by the app's code, not the model: in the order given, each at the first free stretch between

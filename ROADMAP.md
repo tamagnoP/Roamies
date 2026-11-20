@@ -436,6 +436,9 @@ the screen blocks clicks.
   queues a note for the model naming that one to-do, so that it asks for the day and time and calls
   `schedule_block`; outside a spoken exchange the question is said (with `speakNotices`) but gets no answer
   window, as for a deleted task.
+- **2026-11-19.** A declined overlap no longer names what was in the way in the tool's result: the tool is told
+  that the time overlaps something and that the owner declined; the bubble has shown what. And a rule for all
+  later work, in `CLAUDE.md` ("How to make a change"): anything with a fixed shape lives in code, not in the model.
 - **2026-11-19.** The model is given the to-do list in outline, not the list (the owner's change c, with e).
   Until now every request carried the whole list when it had changed: each open to-do with its id, title and due
   time, and the titles of those done today. Now a request carries the number open, due today, due this week,
