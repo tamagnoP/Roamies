@@ -27,22 +27,22 @@ Last updated: 2026-11-21.
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
-| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 24 | |
+| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 25 | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
 | 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
-| 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 16 | |
+| 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 24 | |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Agreed, not designed; after 25 | |
+| 24 | Lean running | Measured and planned on `lean-running`; waiting for the owner's go. Nothing built | `lean-running` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
 
-Build order: 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27.
+Build order: 24, 18, 25, 14, 19, 21, 23, 17, 15, 20, 27.
 
 ## 1. Done
 
@@ -359,7 +359,164 @@ while a sentence is made); no open connection at start, idle or while speaking.
 
 ## 2. In progress
 
-Nothing is in progress.
+### 24. Lean running (branch `lean-running`)
+
+Started on 2026-11-21 from the owner's prompt: measure first, plan second, then wait for "go". Nothing is built.
+The agreed text, copied on 2026-11-21 from the owner's checklist:
+
+Agreed 2026-11-18. Built before the new look (21). Measure first, then fix:
+
+- find and fix the growth of the overlay page;
+- keep the conversation history trimmed so requests don't slow down through the day;
+- confirm, with a test, that pi and every process it starts end after each hand-off, including after a stop or a
+  timeout;
+- set targets for memory at rest and activity while idle.
+
+One reading so far (MacBook Air, 2026-11-18 22:44, about one hour after Roamies was started): overlay page
+(`tauri://localhost`) 332 MB, sidecar (`node`) 72 MB, no swap in use, memory pressure normal. The earlier report
+was about 2 GB after a day. The `pi` process in that reading (178 MB) appears to be the owner's own pi in the
+terminal, not one started by Roamies; to be confirmed. A second reading after a full day of use is still to come.
+
+#### Measurements (2026-11-21, MacBook Air M3, 16 GB, macOS 26.6.2)
+
+*How.* Nothing of the owner's was read or used: every run had a throwaway home folder, and a stand-in for the AI
+provider on the loopback address that answers from a fixed script of ten replies (two sentences each, one of four)
+and records the size of each request. The real sidecar ran from source, with the real `say` and the real Kokoro
+helper under its sandbox. The overlay page ran in a small program of mine that stands in for the Rust shell: the same
+WebKit view, the page at `tauri://localhost`, each message handed over the way `main.rs` does it. Memory is the
+figure Activity Monitor shows (footprint), read after each reply had finished playing. The tools are in `measure/`,
+local and not committed. The sound output was muted during the spoken runs and put back.
+Checked against the real shell: a copy of the built `natural-voice` bundle, without its voice and hands helpers so
+that nothing could ask for a permission, gave the same figures over 8 spoken replies (page 86 → 97 MB).
+
+**1. The fixed script, four ways (40 exchanges each; page / WebKit's graphics process, in MB).**
+
+| Run | Start | After 10 | 20 | 30 | 40 | Audio played | After 5 quiet min | After release |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Spoken, Kokoro | 88 / 116 | 95 | 102 | 103 | 107 / 120 | 349 s | 103 | 91 |
+| Spoken, macOS voice | 86 / 116 | 95 | 95 | 95 | 95 / 100 | 241 s | 105 | 91 |
+| Text only | 86 / 115 | 94 | 94 | 94 | 94 / 112 | 0 | 94 | 86 |
+| Bubbles only (40 of the app's lines) | 89 / 117 | 92 | 92 | 92 | 93 / 112 | 0 | 86 | 86 |
+
+Against replies: flat after the first few. Against audio: nothing; 349 s of audio left the page 19 MB above its
+start. **The growth the owner saw is not reproduced by replies, speech or bubbles.** The pointer moving (the shell's
+120 reports a second), the listening messages of a held talk key, the Send bubble opened and closed, and the other
+looks changed nothing either.
+
+**2. Quiet and release.** Five quiet minutes return nothing by themselves. "Release" was WebKit's own low-memory
+signal (`notifyutil -p org.WebKit.lowMemory`, which every WebKit page on the Mac receives): it brought each run back
+to within 3 MB of its start. The page has no way to ask for this itself.
+
+**3. What does grow, and what holds it.** Found by showing one kind of thing at a time:
+
+- **A card of the drawing layer on screen while the character is being drawn.** With the to-do list card up (34
+  items) and the JARVIS look: 125 → 553 MB in 160 s, a steady 2.5 to 4 MB a second, with no sign of a ceiling in
+  that time. Shown and closed ten times (8 s each): 126 → 362 MB, then down to 131 by itself, once. One run stopped
+  growing after a minute for a reason I did not find.
+- What holds it: WebKit's own heap ("WebKit malloc" in `footprint`: 35 → 199 MB in a minute). Not the JavaScript
+  heap (5.8 MB throughout), not canvas pixels (99 MB throughout, of which the drawing layer's two full-screen
+  canvases are about 45), not audio buffers (collected; at most 9 s alive), not the count of canvases (7), page
+  elements (34) or timers (0 or 1). During the growth nothing was being drawn on the drawing layer: the only
+  drawing was the character's own picture, 30 times a second.
+- **The JARVIS look never comes to rest.** At home with nothing to do it draws 30 frames a second for good; the
+  classic and anime looks stop, as `home.test.mjs` expects. So with JARVIS the page is always drawing, and grows
+  for as long as any card, list or drawing is up. Cards left on screen stay until closed.
+- Not seen: the web inspector's heap snapshots and timelines. I could not drive Safari's inspector from here; the
+  categories above are from `footprint` and from counters put into the page (weak references only).
+
+**4. Upstream at `fa798b4`.** The Kokoro run's messages, recorded and played back into upstream's page: 71 → 107 MB
+over the 40 replies, the same as ours. The list card on upstream's page as it normally is (the character not on
+screen): flat, 133 MB, about 9 frames a second and no drawing. The list card with upstream's character called on
+screen: 98 → 321 MB in 80 s. So the mechanism is in upstream's page and WebKit; what makes it bite here is ours:
+the home position keeps the character on screen all the time, and with JARVIS it is always being drawn.
+
+**5. Outside the overlay.**
+
+- Sidecar: 95 MB at start, then between 72 and 114 MB in every run; no growth over 40 exchanges.
+- Kokoro helper: 656 MB at start, 678 MB after 40 replies and through the quiet minutes. One reading of 3.3 GB
+  while a long reply was being made, back at 677 MB thirty seconds later.
+- After the sidecar's input closes (what a quit does): the sidecar and the Kokoro helper were gone within 4 s in
+  every run.
+- pi, with a stand-in for pi that starts a process of its own (the real `createPi`, the real `sandbox-exec`; no
+  real pi): after a hand-off that finishes, after `stop_pi` and after the time limit, pi was gone and **the
+  process it had started was still running** each time. A pi that ignores the signal survives `stop_pi`: nothing
+  follows the first signal. And while a process pi started still holds its output pipe, the hand-off never counts
+  as finished.
+- The quit request: the real shell answered an Apple-event quit in 0.2 s, at rest, with nothing of ours left 5 s
+  later. Why it went unanswered on 21 November is **not established**: no hang report exists, and the logs are in
+  `~/.gg`, which I do not read. What the code shows: the quit is answered by the app's main thread, and the main
+  thread writes to the sidecar's and the voice helper's pipes directly, holding a lock, with no time limit
+  (`to_sidecar`, `to_voice`; one write to the voice helper for every piece of a reply shown). If either stops
+  reading, the main thread waits on a full pipe and nothing is answered. Not tested under load.
+- Not measured: the voice helper's memory over an hour. It was left out of the measured copy of the app (it needs
+  the microphone and the permissions), and I did not run it for an hour.
+
+**6. The conversation sent with each request** (the app's own estimate, characters / 3.6): 16,400 tokens for the
+first request (instructions 5,400, tools 10,200, the request and its live state 800), then **+581 for every
+exchange**: 39,000 after 40. About 1,900 of the 2,090 characters an exchange adds are the live state, which is
+kept on every earlier request so the provider's cache keeps matching. Folding starts at 90,000 (75 % of the 120,000
+budget), which this script would reach after about 127 exchanges. The real figures are higher: the to-do outline
+and remembered facts were empty here.
+
+**Not covered:** the owner's own session (look, size, settings and data are not known to me); replies from a real
+model with tools, screenshots and drawings; two displays; the Claude Code route and the process it keeps warm;
+whether the classic look grows with a card up while it is active.
+
+#### Plan (nothing built; waits for "go")
+
+Fixes, smallest first:
+
+1. **JARVIS at rest stops drawing** (`jarvis.js`, `agent.js`; ours to change, marked): at home with nothing to do
+   its picture is still, so the frame loop stops as it does for the other looks. Test in `home.test.mjs`: every
+   look comes to rest.
+2. **The drawing layer is taken down when it has nothing to animate, and sized to what is on it** (`ink.js`,
+   marked edit): today its two canvases cover the whole screen for as long as a card is up. First step of the
+   build: measure which of the two (size, or presence) stops the growth, and do only that.
+3. **pi's processes** (`pi.mjs`): pi is started as the leader of its own process group; finishing, `stop_pi`, the
+   time limit and quitting signal the whole group, and kill it after 2 s if anything is left; a hand-off is
+   finished when pi exits, not when its pipe closes. The sandbox profile and the Send approval are untouched. Test:
+   the stand-in above, in `test/pi.test.mjs`.
+4. **The quit** (`main.rs`, `voice.rs`, `sidecar.rs`, marked): writes to the two pipes go through a writer thread
+   each, so the main thread never waits on a helper. Test: a helper that never reads, 100 kB written, quit answered.
+   This removes the one cause the code shows; it is not proof of what happened on 21 November.
+5. **The conversation** (`sidekick.mjs`, `store.mjs`, marked): the live state is kept on the newest eight requests
+   and dropped from older ones, eight at a time, so the provider's cache is broken once in eight exchanges rather
+   than never or always; and the fold point becomes a setting, `limits.historyTokens`, default 40,000. With both,
+   this script would level off near 25,000 tokens. Code decides both; the model is not asked.
+6. **If 1 and 2 do not hold the targets:** after `limits.overlayRestMinutes` quiet minutes, with nothing on
+   screen, the shell rebuilds the overlay's page (it already does on a display change). Last, and only if needed.
+
+Targets, and how each is held:
+
+- Overlay under 300 MB after an hour of active use, and within 20 MB of its start after five quiet minutes: an
+  on-screen check with the run above extended to an hour with a card shown in every fifth exchange. Not in
+  `npm test`: it needs a screen and an hour.
+- No drawing at rest: `home.test.mjs`, every look, frames counted over 5 s at rest: none.
+- No process of ours after quit or after a hand-off: `test/pi.test.mjs` (the group), `test/kokorovoice.test.mjs`
+  (already there), and an on-screen check of the built app after Quit.
+- A quit request answered within two seconds: a Rust test for the writer threads; on screen, the Apple-event
+  quit timed during a spoken reply.
+
+Not fixed, and why:
+
+- WebKit holding memory until the system asks for it: not ours to change; the plan removes what feeds it.
+- The size of the instructions and tools (15,600 tokens in every request): upstream's, and cached by the provider.
+- The Kokoro helper's 3.3 GB moment: seen once, gone in 30 s; `limits.kokoroSentenceChars` already bounds a
+  sentence. To be watched in the hour-long check, not changed blind.
+- The shell's 120 pointer reports a second: measured, no growth.
+- The voice helper: not measured, so nothing is proposed.
+
+Guarantees: none is weakened. 1, 2 and 5 change what is drawn and what is sent, not what may be done; 3 only ends
+processes sooner, inside the same sandbox; 4 changes which thread writes. Nothing said or shown is logged: the
+measuring tools count and time, and the new log lines would carry sizes only.
+
+Questions for the owner:
+
+1. May the measuring tools (`measure/`) be committed under `showcase/tauri/sidecar/bench/`, so the hour-long
+   check can be repeated? They start the sidecar in a throwaway home folder and talk only to the loopback address.
+2. Fix 5: are eight requests and 40,000 tokens the right defaults, or should the live state stay on every request
+   and only the fold point move?
+3. Which look and size do you use? The measurements assume JARVIS at the default size.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -367,8 +524,9 @@ parent folders of research work and data; list the OrbStack app's project under 
 
 ## 3. Queued, in this order
 
-Build order: 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
-2026-11-21; the subsections below follow it.
+Build order: 24, 18, 25, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
+2026-11-21, with 24 moved ahead of 18 by the owner on 2026-11-21. 24 is in section 2; the subsections below follow
+the rest.
 
 ### 18. Daily note (Prompt E)
 
@@ -406,23 +564,6 @@ Agreed 2026-11-18. Roamies checks on progress without nagging.
 - A future task reported as finished frees its block.
 - The owner sets a maximum number of check-ins a day, and none happen in the middle of a block.
 - Mostly code, since comparing lists has a fixed shape. It uses the daily note (18) and the answer window (22).
-
-### 24. Lean running
-
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
-
-Agreed 2026-11-18. Built before the new look (21). Measure first, then fix:
-
-- find and fix the growth of the overlay page;
-- keep the conversation history trimmed so requests don't slow down through the day;
-- confirm, with a test, that pi and every process it starts end after each hand-off, including after a stop or a
-  timeout;
-- set targets for memory at rest and activity while idle.
-
-One reading so far (MacBook Air, 2026-11-18 22:44, about one hour after Roamies was started): overlay page
-(`tauri://localhost`) 332 MB, sidecar (`node`) 72 MB, no swap in use, memory pressure normal. The earlier report
-was about 2 GB after a day. The `pi` process in that reading (178 MB) appears to be the owner's own pi in the
-terminal, not one started by Roamies; to be confirmed. A second reading after a full day of use is still to come.
 
 ### 14. Roamies reads files at the owner's request, and edits a named note (Prompt B)
 
@@ -928,6 +1069,11 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   carry it. Following from "together", and not asked for in so many words: the beats are said without it unless the
   setting is 0, since a beat comes just before a reply. Two pinned lines in `persona.test.mjs` and one in
   `flow.test.mjs` were changed to the new wording. Committed on `local-only` directly.
+- **2026-11-21.** Feature 24, lean running, is next, ahead of the daily note (the owner). Build order: 24, 18,
+  25, 14, 19, 21, 23, 17, 15, 20, 27. Branch `lean-running`. Measured and planned the same day (section 2); the
+  growth of the overlay page was not reproduced by replies or speech, and was found with a card of the drawing
+  layer on screen while the character is drawn, which with the JARVIS look is always. Nothing is built until the
+  owner's go.
 
 ## 6. Still to test
 
@@ -1046,7 +1192,8 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   window the bubble waits as it used to, with no time limit. A pending hand-off's prompt is kept in `state.json` as
   plain text until it is answered or dropped. The voice helper on Windows and Linux doesn't know the window: there
   what is heard counts as said after a key press (this build is used on macOS).
-- Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Not yet known whether
+- Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Measured on 2026-11-21
+  (section 2, feature 24): it grows while a card of the drawing layer is up and the character is being drawn. Earlier note: not yet known whether
   upstream has the same growth. Quitting and reopening Roamies clears it. Needs a diagnosis.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange
   indicator throughout. Loud noises can set it off by mistake, which is why a clap only starts listening.
