@@ -27,22 +27,22 @@ Last updated: 2026-11-21.
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
-| 14 | Roamies reads files in permitted folders | Queued (Prompt B) | |
-| 15 | Search mode in a dedicated browser | In design (Prompt C, draft) | |
-| 16 | Natural local voice (Kokoro or Piper) | Later | |
-| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Later | |
-| 18 | Daily note (plan, log, review) | Queued (Prompt E), after 13 | |
-| 19 | Roles for pi: coder and reviewer | Queued (Prompt F, draft), after 14 | |
-| 20 | Literature toolbox and roles | Held, not designed | |
-| 21 | One orb as the only look | Idea, not designed | |
+| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 24 | |
+| 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
+| 16 | Natural local voice (Kokoro), built with the personality (21a) | Queued, next; voice chosen, not designed | |
+| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
+| 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 16 | |
+| 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
+| 20 | Literature toolbox and roles | Held, not designed; after 15 | |
+| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a designed, built with 16; the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
-| 23 | Offline mode with a local model | Agreed, not designed | |
-| 24 | Lean running | Agreed, not designed | |
-| 25 | Check-ins on progress | Agreed, not designed | |
+| 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
+| 24 | Lean running | Agreed, not designed; after 25 | |
+| 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
-| 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed | |
+| 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
 
-Build order: 18, 14, 19, 16, 17, 15, then 20 and 21.
+Build order: 16 with 21a, 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27.
 
 ## 1. Done
 
@@ -53,7 +53,7 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `8e968ae` | 2026-11-11 | No update checks, card image lookups, `fetch_url`, Fish Audio, or Claude Code telemetry. Spoken replies through `/usr/bin/say`. File and command tools removed from Roamies; work handed to pi (`pi --mode json`) after a Send bubble; background job; hand-off records in `~/Documents/roamies-pi/log`; project list in `settings.json`; `open` limited to apps by name; `act_in_app` limited to the front app. |
 | `98d5843` | 2026-11-11 | Saying "send" approves a hand-off: the bubble stays open while talking, and talking no longer cancels the request. |
 | `0c027a0` | 2026-11-11 | `voice` and `voices` settings; JARVIS speaks as `Daniel` by default; a missing voice falls back to the system voice. |
-| `0263f83` | 2026-11-11 | Notes vault (`~/Documents/roamies-vault`): create, append, search, read; never change or delete. pi's steps worded naturally; with spoken replies, Roamies gives the gist and pi's full reply then goes on screen. |
+| `0263f83` | 2026-11-11 | Notes vault (`~/Documents/roamies-vault`): create, append, search, read; never changed, except as feature 14 will allow; never deleted. pi's steps worded naturally; with spoken replies, Roamies gives the gist and pi's full reply then goes on screen. |
 | `feb212b` | 2026-11-12 | pi's default project moved to `roamies-pi/workspace`; the settings folder can't be a project. Git undo snapshot before every hand-off that can edit. Warnings in the Send bubble. Never-look list. Hand-off records deleted after 30 days. |
 | `dff3fe6` | 2026-11-12 | Read-only hand-offs send themselves after a countdown. Microphone opens for answers to pi's questions (with Auto Listen on). Spoken progress on long tasks. Routines. Morning and evening briefings. `CLAUDE.md` added. |
 | `2ac8919` | 2026-11-12 | `switch_project` stores its choice in `state.json`; a test fails on any write to `settings.json` after first-time creation. |
@@ -173,7 +173,56 @@ parent folders of research work and data; list the OrbStack app's project under 
 
 ## 3. Queued, in this order
 
-Build order: 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
+Build order: 16 with 21a, 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
+2026-11-21; the subsections below follow it.
+
+### 16. Natural local voice, with the personality (21a)
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+A more natural voice that runs on the Mac, using Kokoro, which the owner already has working. No cloud voices, no
+clones of real actors.
+
+Moved up on 2026-11-18 to follow the conversation flow (22).
+
+- **The voice (tested and chosen by the owner, 2026-11-17):** `bm_george`, one of Kokoro's own British voices, run
+  through `mlx_audio`:
+
+  ```bash
+  python -m mlx_audio.tts.generate --model mlx-community/Kokoro-82M-bf16 \
+    --text "Good evening. All systems are online and running locally on your MacBook Air." \
+    --voice bm_george --lang_code b --speed 1.05 --play
+  ```
+
+  For the build these become settings: model `mlx-community/Kokoro-82M-bf16`, voice `bm_george`, language `b`,
+  speed `1.05`. The command loads the model for every sentence, so the build keeps it loaded in a server.
+- **How 16 and 23 run (agreed 2026-11-17).** Kokoro and the offline model are installed in the owner's conda
+  environment `localai` (`/opt/homebrew/anaconda3/envs/localai`). Roamies does not run inside it. It starts each as
+  a small server with that environment's Python, by full path, and talks to it at an address that exists only on
+  the Mac, the way it talks to Super Productivity.
+  - The environment's path and the model's name are lines in `settings.json`.
+  - Kokoro stays running, as the everyday voice. The model (about 4 GB) is started when Roamies goes offline and
+    stopped when Claude is reachable again, and stays loaded between requests while it is in use.
+  - If a server will not start, for example after a package update breaks the environment, Roamies says so plainly
+    and falls back to the built-in macOS voice.
+
+**21a, personality (designed 2026-11-19; built together with the natural voice).**
+
+The manner of a calm, capable butler: composed, brief and exact, formally polite but warm, loyal, quietly a step
+ahead, with dry humour that is rare and never at a bad moment. It pushes back once, politely, then does as the
+owner decides. It calls the owner "sir". The lines are original; no dialogue from the films is reused.
+
+- Manner only, never behaviour: every safeguard holds, and it never claims to have done what it has not.
+- Humour starts low, since a model told to be witty overdoes it; the owner can turn it up.
+- Kept in `settings.json`, changed without a rebuild:
+
+  ```json
+  "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
+               "humour": "dry and rare", "maxSentences": 2 }
+  ```
+- The tone, by example: "Done, sir. The block is on Friday at ten." · "I'm afraid Super Productivity is closed,
+  sir. I'll book the slot when it's open." · "You have three blocks already this afternoon, sir. Shall I add a
+  fourth anyway?" · "Of course, sir."
 
 ### 18. Daily note (Prompt E)
 
@@ -184,17 +233,69 @@ still open, plus a two-sentence summary). In the evening Roamies asks, for each 
 it never picks a time itself. Reminders, timers and check-ins are not tasks. pi's activity is left out; it stays in
 the records folder. Replaces the "Daily log" note.
 
-### 14. Roamies reads files in permitted folders (Prompt B)
+**Task pages (agreed 2026-11-21),** so everything is connected and traceable.
 
-Read-only access for Roamies inside the folders listed under `projects` and `readOnly`: read, list, find by name,
-search text. Includes reading a project's `TODO.md` on request; only pi writes that file.
+- A task or reminder with at least one note gets a page at `Tasks/<title>.md` in the vault, created the first time
+  a note is linked to it. A task with no notes gets none.
+- The page holds the title, the due time if any, and a line per day it was planned, worked on or finished, each a
+  link to that daily note. Only ever added to.
+- A note linked to a task carries a link to the task's page and to its day. Obsidian's backlinks then list every
+  note for the task; Roamies keeps no list in the vault.
+- `write_note` takes an optional task; `link_note` links an existing note to a task or a reminder; `notes_for`
+  lists a task's notes by name, without reading them. The owner can ask "what notes do I have on X?", and hear at
+  a check-in how many notes a task has.
+- A task renamed keeps its page; one line is added with the new name, since Roamies never renames or deletes in
+  the vault.
+- Titles are made safe for a file name by code. Two tasks with the same title get distinct pages.
+- Nothing is written to Super Productivity for this.
 
+### 25. Check-ins on progress
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+Agreed 2026-11-18. Roamies checks on progress without nagging.
+
+- It asks when a calendar block ends ("is it done?"), and the answer marks the task done or reschedules it.
+- A task ticked in the daily note in Obsidian is marked done without asking.
+- A future task reported as finished frees its block.
+- The owner sets a maximum number of check-ins a day, and none happen in the middle of a block.
+- Mostly code, since comparing lists has a fixed shape. It uses the daily note (18) and the answer window (22).
+
+### 24. Lean running
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+Agreed 2026-11-18. Built before the new look (21). Measure first, then fix:
+
+- find and fix the growth of the overlay page;
+- keep the conversation history trimmed so requests don't slow down through the day;
+- confirm, with a test, that pi and every process it starts end after each hand-off, including after a stop or a
+  timeout;
+- set targets for memory at rest and activity while idle.
+
+One reading so far (MacBook Air, 2026-11-18 22:44, about one hour after Roamies was started): overlay page
+(`tauri://localhost`) 332 MB, sidecar (`node`) 72 MB, no swap in use, memory pressure normal. The earlier report
+was about 2 GB after a day. The `pi` process in that reading (178 MB) appears to be the owner's own pi in the
+terminal, not one started by Roamies; to be confirmed. A second reading after a full day of use is still to come.
+
+### 14. Roamies reads files at the owner's request, and edits a named note (Prompt B)
+
+Read-only tools for Roamies inside the folders listed under `projects` and `readOnly`: read, list, find by name,
+search text. Includes reading a project's `TODO.md`; only pi writes that file.
+
+- **Every use is at the owner's request in that turn.** Roamies never lists, searches or reads on its own
+  initiative.
 - Decided: same folder lists as the pi sandbox; blocked list and secret-file checks still apply; a bubble names each
-  file read; no tool writes anything.
+  file read; none of these tools writes anything.
+- **Editing a named note (agreed 2026-11-18): a narrow exception to "notes are never changed".** Roamies can
+  already search and read notes in the vault. New: it may edit a note, only one the owner names and only when
+  asked. The change is shown in a bubble first; hands-free, only an explicit word approves it; the previous version
+  is kept, so the edit can be undone. Notes are never deleted.
 - Changes guarantee 2 in `CLAUDE.md`: Roamies still never changes files, but can read in permitted folders.
-- Builder: Claude Code, branch `roamies-read`.
+- Builder: Claude Code, branch `roamies-read`. Prompt B in the appendix is older than the "in that turn" wording
+  and the note editing, and has neither.
 
-### 19. Roles for pi (Prompt F, draft)
+### 19. Roles and helpers (Prompt F, draft)
 
 A role is pi started with its own instructions and skills, its own permissions and its own thinking level. Roamies
 picks the role; the Send bubble names it. Two to start: coder (the owner's Python skills, can edit, high thinking)
@@ -217,59 +318,7 @@ Prompt F is a draft until the owner has shown the skills.
 - A doer that is unsure hands the task up to a thinker, or to Claude when online, instead of guessing.
 - Preferably one local model with its thinking switched on or off, not two models, so memory use does not double.
 
-### 15. Search mode (Prompt C, draft, still being discussed)
-
-Built after 16 and 17.
-
-Roamies researches on the web in a browser of its own, visibly, and saves findings as new notes in the vault.
-
-- Decided so far:
-  - Browser: Brave, used only by Roamies.
-  - Profile: keep cookies for the listed search sites only; wipe everything else when each session ends; renew the
-    whole profile every 7 days; warn if a sign-in is detected. Never sign in in that window.
-  - Search sites: Google, Google Scholar, PubMed, via a `searchEngines` setting.
-  - Isolation ("the wall"): separate conversation that starts empty; only search tools, new notes and ending the
-    mode; no pi, no file reads, no existing notes, no screen.
-  - Seed files: files the owner names can be read at the start to build queries; none after the first web page.
-  - Navigation: only by a query to a listed search site, or by clicking a numbered link on the current page. No
-    typed addresses, no forms, no downloads. Every query shown in a bubble.
-  - Only code-made facts return to the main conversation when the mode ends.
-- Changes guarantee 1 in `CLAUDE.md`: in search mode, queries and page visits leave the Mac.
-- Still to discuss: how a search is started and steered by voice; what a saved finding looks like in Obsidian;
-  which sites are allowed; whether to install Little Snitch rules for the browser first.
-- Builder: Claude Code, branch `search-mode`, after the natural voice (16) and the hands-free wake (17).
-
-## 4. Later and parked
-
-Features 16 and 17 are built before search mode (15); 20 and 21 come last.
-
-| Idea | State | Notes |
-| --- | --- | --- |
-| 16. Natural local voice | Later | Kokoro or Piper as a second voice engine; fits in 16 GB. Needs a tool install and a model download once. |
-| 17. Double clap, then "Jarvis", then speak | Later | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word. |
-| 23. Offline mode with a local model | Agreed, not designed | Agreed text and measurements below. |
-| 24. Lean running | Agreed, not designed | Agreed text and one reading below. |
-| 25. Check-ins on progress | Agreed, not designed | Agreed text below. |
-| 27. Better hearing | Agreed 2026-11-20, not designed | Agreed text below. |
-| Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
-| Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
-| Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
-| Never-look list by window title | Idea | Would cover a password manager or bank opened as a web page. Less reliable than app names. |
-| Write access to more than one project per task | Not needed | Writes stay in the current project and its subfolders. |
-| Local model for Roamies | Tested, set aside | See the decisions log, 2026-11-11. |
-| Hard lock on `settings.json` (`chflags uchg`) | Known, not used | Optional extra; the code change and sandbox are the real protection. |
-
-### 20. Literature toolbox and roles
-
-Held until everything else is done, then designed. The owner's scripts (GROBID in OrbStack for parsing PDFs,
-semantic database, RAG, knowledge graph, keyword search) become tools that one or more literature roles call. Open:
-how many roles, and which work is a tool and which is a role.
-
-### 21. One orb as the only look
-
-Replace the characters with a single ring of particles that responds to state (resting, listening, thinking,
-speaking, pi working), and rework the look of the app around it. An original design. Would also settle how much of
-the screen blocks clicks.
+### 21. The new look and manner
 
 **The new look and manner (agreed 2026-11-15).** Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
 
@@ -277,26 +326,13 @@ Roamies is redesigned as the owner's own assistant: one orb as the only look, th
 restyled to match, and a personality of its own. Upstream's characters are kept in the code and hidden, so
 upstream's fixes still merge. Four steps:
 
-- **21a, personality (designed 2026-11-19).** The manner of a calm, capable butler: composed, brief and exact,
-  formally polite but warm, loyal, quietly a step ahead, with dry humour that is rare and never at a bad moment. It
-  pushes back once, politely, then does as the owner decides. It calls the owner "sir". The lines are original; no
-  dialogue from the films is reused.
-  - Manner only, never behaviour: every safeguard holds, and it never claims to have done what it has not.
-  - Humour starts low, since a model told to be witty overdoes it; the owner can turn it up.
-  - Kept in `settings.json`, changed without a rebuild:
-
-    ```json
-    "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
-                 "humour": "dry and rare", "maxSentences": 2 }
-    ```
-  - The tone, by example: "Done, sir. The block is on Friday at ten." · "I'm afraid Super Productivity is closed,
-    sir. I'll book the slot when it's open." · "You have three blocks already this afternoon, sir. Shall I add a
-    fourth anyway?" · "Of course, sir."
+- **21a, personality:** built together with the natural voice and written out under 16.
 - **21b, the orb.** An original design (below). Five states: resting (one frame, then no drawing), listening,
   thinking, speaking, pi working. Only a small spot in the centre takes clicks. The memory growth is diagnosed
   first, since this rewrites the page that grows.
 - **21c, bubbles and text** restyled to match.
 - **21d, settings panel and setup guide.**
+- Feature 16 (natural voice) belongs with this group. Lean running (24) comes before it.
 
 **The orb's design (agreed 2026-11-17).** An instrument that is alive, where every line is a readout and nothing is
 decoration. It sits on its own dark disc, so it looks the same over any window. From the outside in:
@@ -323,34 +359,6 @@ countdown, monospaced labels, white and one ice blue, amber only for "can edit".
 Open: a 12-hour face puts 9 in the morning and 9 in the evening on the same spot, and the alternative is a dial of
 the working hours only; whether the day dial is always shown or only on request.
 
-### 16. Natural local voice
-
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
-
-A more natural voice that runs on the Mac, using Kokoro, which the owner already has working. No cloud voices, no
-clones of real actors.
-
-- **The voice (tested and chosen by the owner, 2026-11-17):** `bm_george`, one of Kokoro's own British voices, run
-  through `mlx_audio`:
-
-  ```bash
-  python -m mlx_audio.tts.generate --model mlx-community/Kokoro-82M-bf16 \
-    --text "Good evening. All systems are online and running locally on your MacBook Air." \
-    --voice bm_george --lang_code b --speed 1.05 --play
-  ```
-
-  For the build these become settings: model `mlx-community/Kokoro-82M-bf16`, voice `bm_george`, language `b`,
-  speed `1.05`. The command loads the model for every sentence, so the build keeps it loaded in a server.
-- **How 16 and 23 run (agreed 2026-11-17).** Kokoro and the offline model are installed in the owner's conda
-  environment `localai` (`/opt/homebrew/anaconda3/envs/localai`). Roamies does not run inside it. It starts each as
-  a small server with that environment's Python, by full path, and talks to it at an address that exists only on
-  the Mac, the way it talks to Super Productivity.
-  - The environment's path and the model's name are lines in `settings.json`.
-  - Kokoro stays running, as the everyday voice. The model (about 4 GB) is started when Roamies goes offline and
-    stopped when Claude is reachable again, and stays loaded between requests while it is in use.
-  - If a server will not start, for example after a package update breaks the environment, Roamies says so plainly
-    and falls back to the built-in macOS voice.
-
 ### 23. Offline mode with a local model
 
 Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
@@ -359,6 +367,9 @@ When there is no internet, Roamies uses a small model on the Mac for to-dos, rem
 pi and nothing complex; it says so plainly. It never switches silently. Fewer tools are offered, and dates are
 worked out by code, not by the model. How the model is started and stopped is under 16 above. Still to do before a
 design: test real function calling through a local server.
+
+It goes with the natural voice (16), whose conda setup it shares (Kokoro is already running on the Mac), but is
+built later, after the new look (21).
 
 - **First measurement (2026-11-16, MacBook Air, `gemma-4-e2b-it-4bit`):** a 4,745-token prompt read in 5.4 seconds,
   replies at 20 to 26 tokens a second, 4.4 GB peak memory, 5 of 6 tool calls right (it put "Friday" on the wrong
@@ -398,40 +409,43 @@ design: test real function calling through a local server.
   enough for the gist and not for names or positions, which is the case for taking those from macOS's accessibility
   information and using the picture only as a fallback.
 
-### 24. Lean running
+### 17. Double clap, then "Jarvis", then speak
 
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word.
 
-Agreed 2026-11-18. Measure first, then fix:
+### 15. Search mode (Prompt C, draft, still being discussed)
 
-- find and fix the growth of the overlay page;
-- keep the conversation history trimmed so requests don't slow down through the day;
-- confirm, with a test, that pi and every process it starts end after each hand-off, including after a stop or a
-  timeout;
-- set targets for memory at rest and activity while idle.
+Built after 16 and 17.
 
-One reading so far (MacBook Air, 2026-11-18 22:44, about one hour after Roamies was started): overlay page
-(`tauri://localhost`) 332 MB, sidecar (`node`) 72 MB, no swap in use, memory pressure normal. The earlier report
-was about 2 GB after a day. The `pi` process in that reading (178 MB) appears to be the owner's own pi in the
-terminal, not one started by Roamies; to be confirmed. A second reading after a full day of use is still to come.
+Roamies researches on the web in a browser of its own, visibly, and saves findings as new notes in the vault.
 
-### 25. Check-ins on progress
+- Decided so far:
+  - Browser: Brave, used only by Roamies.
+  - Profile: keep cookies for the listed search sites only; wipe everything else when each session ends; renew the
+    whole profile every 7 days; warn if a sign-in is detected. Never sign in in that window.
+  - Search sites: Google, Google Scholar, PubMed, via a `searchEngines` setting.
+  - Isolation ("the wall"): separate conversation that starts empty; only search tools, new notes and ending the
+    mode; no pi, no file reads, no existing notes, no screen.
+  - Seed files: files the owner names can be read at the start to build queries; none after the first web page.
+  - Navigation: only by a query to a listed search site, or by clicking a numbered link on the current page. No
+    typed addresses, no forms, no downloads. Every query shown in a bubble.
+  - Only code-made facts return to the main conversation when the mode ends.
+- Changes guarantee 1 in `CLAUDE.md`: in search mode, queries and page visits leave the Mac.
+- Still to discuss: how a search is started and steered by voice; what a saved finding looks like in Obsidian;
+  which sites are allowed; whether to install Little Snitch rules for the browser first.
+- Builder: Claude Code, branch `search-mode`, after the natural voice (16) and the hands-free wake (17).
 
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+### 20. Literature toolbox and roles
 
-Agreed 2026-11-18. Roamies checks on progress without nagging.
-
-- It asks when a calendar block ends ("is it done?"), and the answer marks the task done or reschedules it.
-- A task ticked in the daily note in Obsidian is marked done without asking.
-- A future task reported as finished frees its block.
-- The owner sets a maximum number of check-ins a day, and none happen in the middle of a block.
-- Mostly code, since comparing lists has a fixed shape. It uses the daily note (18) and the answer window (22).
+Held until everything else is done, then designed. The owner's scripts (GROBID in OrbStack for parsing PDFs,
+semantic database, RAG, knowledge graph, keyword search) become tools that one or more literature roles call. Open:
+how many roles, and which work is a tool and which is a role.
 
 ### 27. Better hearing
 
 Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
 
-Agreed 2026-11-20. Fewer mistakes when speech is turned into text, in this order:
+Agreed 2026-11-20; last in the list, since speech works well enough. Fewer mistakes when speech is turned into text, in this order:
 
 1. Give Apple's recogniser the owner's vocabulary (Jarvis, pi, Roamies, project names, task titles), supplied from
    the Mac.
@@ -440,6 +454,20 @@ Agreed 2026-11-20. Fewer mistakes when speech is turned into text, in this order
 4. Only if that is not enough: compare a large Whisper model with Apple's on ten of the owner's own recorded
    commands, and if it wins use it for requests only. Apple's stays for the answer window, because Whisper can
    invent words during silence, and an invented "yes" there could approve something.
+
+## 4. Later and parked
+
+Every numbered feature still to build is in section 3. What is left here is parked, or an idea without a number.
+
+| Idea | State | Notes |
+| --- | --- | --- |
+| Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
+| Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
+| Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
+| Never-look list by window title | Idea | Would cover a password manager or bank opened as a web page. Less reliable than app names. |
+| Write access to more than one project per task | Not needed | Writes stay in the current project and its subfolders. |
+| Local model for Roamies | Set aside as the everyday model; viable offline | The large model was too slow (decisions log, 2026-11-11), and Claude stays. A small model, Gemma 4 E2B, was measured from 2026-11-16 and is the choice for offline mode (23). |
+| Hard lock on `settings.json` (`chflags uchg`) | Known, not used | Optional extra; the code change and sandbox are the real protection. |
 
 ## 5. Decisions log
 
@@ -701,7 +729,7 @@ Recorded on 2026-11-21 from the owner's checklist, each under the date it was ag
   information first and a screenshot only as a fallback; it picks by name and never guesses coordinates; offline it
   points and explains, and clicking and typing stay with Claude until measured.
 - **2026-11-19.** One local model, Gemma 4 E2B, for everything offline, after comparing it with Qwen3.5 4B on tool
-  calls, speed, memory and two screen pictures (section 4, feature 23). Both put Friday on the wrong date: dates
+  calls, speed, memory and two screen pictures (section 3, feature 23). Both put Friday on the wrong date: dates
   are worked out by code.
 - **2026-11-20.** Better hearing (27) agreed: the owner's vocabulary for Apple's recogniser, known patterns read in
   code, the wake name matched loosely; Whisper only if that is not enough, for requests only, never for the answer
@@ -710,7 +738,26 @@ Recorded on 2026-11-21 from the owner's checklist, each under the date it was ag
   `Tasks/<title>` in the vault, made the first time a note is linked to it; every note about the task links to it,
   and the page links to the days the task was planned, worked on and finished. A task with no notes gets no page. A
   renamed task's page keeps its name and gains a line with the new one. Note contents are read only when asked;
-  nothing is written into Super Productivity for this. Recorded here only; section 3's text for 18 is unchanged.
+  nothing is written into Super Productivity for this.
+- **2026-11-18.** The natural voice (16) was moved up to follow the conversation flow (22).
+- **2026-11-18.** Feature 14 gains the editing of a named note, a narrow exception to "notes are never changed":
+  only a note the owner names, only when asked, the change shown in a bubble first, approved hands-free only by an
+  explicit word, the previous version kept. Notes are never deleted. Confirmed by the owner on 2026-11-21.
+
+Decided by the owner on 2026-11-21, after the differences between the checklist and this file were listed:
+
+- **2026-11-21.** Build order: 16 with 21a, 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27. 23 comes after 21: it
+  shares the conda setup with 16 but is built later. Sections 3 and 4 were reordered to match. Replaces the order of
+  2026-11-14 (18, 14, 19, 16, 17, 15, then 20 and 21).
+- **2026-11-21.** Feature 14, reading: the wider set of tools stands (read, list, find by name, search text, in
+  permitted folders, a project's `TODO.md` included), and every use is at the owner's request in that turn. Roamies
+  never lists, searches or reads on its own initiative. The checklist's "only when you name the file" is not the
+  rule.
+- **2026-11-21.** Wording brought to the checklist's: 16 is Kokoro (no longer "Kokoro or Piper"); 19 is roles and
+  helpers; 21 is the new look and manner, no longer "a single ring of particles" and no longer only an idea; the
+  local model is set aside as the everyday model and viable for offline mode. The notes vault's rule in the Done
+  table reads "never changed, except as feature 14 will allow".
+- **2026-11-21.** Task pages are part of feature 18's text (section 3) and of Prompt E (appendix).
 
 ## 6. Still to test
 
@@ -966,6 +1013,20 @@ RULES
 8. Old "Daily log …" notes are left alone.
 9. Spoken briefings stay short: morning reads the plan and what needs a new time;
    evening gives done and missed counts, then asks about each missed task.
+
+TASK PAGES
+- A task or reminder with at least one note gets a page at <vault>/Tasks/<title>.md,
+  created the first time a note is linked to it. A task with no notes gets none.
+- The page holds: the title, the due time if any, and a line per day it was planned,
+  worked on or finished, each a link to that daily note. Only ever added to.
+- A note linked to a task carries a link to the task's page and to its day. Obsidian's
+  backlinks then list every note for the task; Roamies keeps no list in the vault.
+- write_note takes an optional task; link_note links an existing note to a task or a
+  reminder; notes_for lists a task's notes by name, without reading them.
+- A task renamed keeps its page; one line is added with the new name.
+- Titles are made safe for a file name by code. Two tasks with the same title get
+  distinct pages.
+- Nothing is written to Super Productivity for this.
 
 GUARANTEES
 All seven in CLAUDE.md hold. Writes stay inside the vault. No network. tools.mjs
