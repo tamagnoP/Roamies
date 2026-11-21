@@ -89,6 +89,7 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `077f738` | 2026-11-21 | The word decides the kind: "to-do" or "task" makes a commitment, "remind me" a reminder; "make that a to-do" turns a reminder into a commitment (`update_commitment` with kind `commitment`). Committed on `local-only` directly. |
 | `1a6b92c` | 2026-11-21 | `ROADMAP.md` only: the plan for features 16 and 21a. |
 | `c857a0b` | 2026-11-21 | Features 16 and 21a: the natural voice (Kokoro, one helper kept loaded, no port, under `sandbox-exec` with network denied, the macOS voice as the fallback for the session) and the personality (a manner only, built by code from the `persona` setting; the form of address on the app's own lines). Settings `voiceEngine`, `kokoro`, `persona`, `limits.kokoroTimeoutSeconds`, `limits.kokoroSentenceChars`. |
+| `5fd2b53` | 2026-11-21 | The form of address is used at most once in `persona.addressEverySeconds` (180 by default, 0 meaning always), by the app's lines and the model's replies together; code decides and the model is told for each request. Committed on `local-only` directly. |
 
 Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
 `local-only` by fast-forward on 2026-11-13.
