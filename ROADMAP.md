@@ -29,12 +29,12 @@ Last updated: 2026-11-21.
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
 | 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 24 | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
-| 16 | Natural local voice (Kokoro), built with the personality (21a) | Planned on `natural-voice`, waiting for the owner's go | |
+| 16 | Natural local voice (Kokoro), built with the personality (21a) | Built on `natural-voice`, not merged; waiting for review | `natural-voice` |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
 | 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 16 | |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
-| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a designed, built with 16; the orb's design agreed; the rest not designed; after 19 | |
+| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a built with 16 on `natural-voice`, not merged; the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
 | 24 | Lean running | Agreed, not designed; after 25 | |
@@ -165,8 +165,25 @@ and was left alone, `LOCAL-ONLY.md` carries the change.
 
 ## 2. In progress
 
-Features 16 and 21a, the natural voice and the personality: planned on branch `natural-voice` (section 3,
-under 16). Nothing is built until the owner says go.
+Features 16 and 21a, the natural voice and the personality: built on branch `natural-voice` on 2026-11-21 after the
+owner's go, pushed, not merged, not in any installed build. The agreed text and the plan are in section 3, under 16.
+
+Where the build differs from the plan:
+
+- The helper's error stream is thrown away whole; a failure reaches Roamies as one word over the audio pipe (the
+  owner's addition a).
+- The script is copied into the helper's temporary folder and run from there, so the sandbox need not open the
+  app's own folder.
+- The beats are the `persona.beats` setting, picked by code; the model is told to say nothing before a slow step.
+- The form of address is added in `sidekick.mjs` only, at the places where the app's lines leave for the bubble and
+  the voice; `pi.mjs`, `calendar.mjs`, `flow.mjs` and `answers.mjs` did not need an edit for it.
+- The sandbox's denial log is not empty, as the plan expected: see known limits. MLX runs all the same.
+- Not done: the timing check of "finished speaking" on the Mac, which needs an installed build.
+
+Measured on this Mac on 2026-11-21, the helper run alone under its sandbox with the real model: 9.0 s from launch to
+ready; a sentence of 10 characters as audio after 0.24 s, 30 characters after 0.39 s, 77 after 0.97 s, 113 after
+1.17 s; resident memory 771 MB idle and up to 786 MB while speaking (footprint 0.7 to 0.9 GB idle, up to 2.0 GB
+while a sentence is made); no open connection at start, idle or while speaking.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -225,7 +242,8 @@ owner decides. It calls the owner "sir". The lines are original; no dialogue fro
   sir. I'll book the slot when it's open." · "You have three blocks already this afternoon, sir. Shall I add a
   fourth anyway?" · "Of course, sir."
 
-**Plan for 16 and 21a (2026-11-21, branch `natural-voice`). Nothing is built; it waits for the owner's "go".**
+**Plan for 16 and 21a (2026-11-21, branch `natural-voice`). Approved and built on 2026-11-21; the owner's answers
+are in the decisions log and the differences in section 2.**
 
 *How it is today.* A reply is cut into sentences and each goes to `speaker.mjs`, which hands it to a voice object
 (`LocalVoice` in `localvoice.mjs`): one `/usr/bin/say` run per sentence, the audio sent to the overlay as it is
@@ -883,9 +901,29 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - **2026-11-21.** Plan written for features 16 and 21a on `natural-voice`: Kokoro as one kept-loaded Python process
   spoken to over its own pipes with no port, offline by environment and, proposed, by sandbox; `say` as the fallback
   for the session; the persona built from `settings.json` by code, manner only. Five questions are with the owner.
+- **2026-11-21.** The owner's go for 16 and 21a, with the answers: (1) the helper runs under `sandbox-exec` with
+  network denied, writes only to a temporary folder, and in the home folder reads only the env and the model's
+  folder; (2) the persona's name is for the model and the code-worded lines only, menus and labels belong to
+  feature 21; (3) `maxSentences` wins unless the owner asks for an explanation, a list or a story; (4) upstream's
+  beats are replaced by the setting `persona.beats`, picked by code, with no model call for a beat; (5) guarantee 2
+  reads: Roamies runs no command on the owner's behalf; it starts only its own fixed helpers, the macOS voice and
+  the Python named in `settings.json` with the voice script shipped in the app, with text going in on a pipe only.
+- **2026-11-21.** Added by the owner with the go: the voice script never writes or logs the text it is given, and
+  its error stream stays out of Roamies' logs; `kokoro.python` is used only if it is an absolute path to an existing
+  executable, started directly with a fixed argument list, and otherwise a bubble says so and the macOS voice is
+  used; a sentence longer than `limits.kokoroSentenceChars` is split at a clause boundary before it is sent.
 
 ## 6. Still to test
 
+- [ ] Features 16 and 21a on the Mac, after an install (none of it has been heard in the app): a reply in
+  `bm_george`; the Mac's voice while the helper loads at start-up; a beat before a slow step, with no words from the
+  model before it; a long sentence cut at a clause without an audible seam; talking over a reply; the answer window
+  opening only after the natural voice has finished, and the timing check from the plan (the overlay's answer
+  against the audio's own length, ten lines); `"kokoro.python": "python"` giving the bubble and the Mac's voice;
+  `"voiceEngine": "system"` starting no Python; no Python left after Quit and after a forced kill of Roamies; the
+  manner in replies, "sir" once, two sentences at most; "sir" on a nudge, a notice and the Send question; a change
+  to `persona` applying to the next request. Add `voiceEngine`, `kokoro`, `persona` and the two new `limits` to
+  `settings.json` first, or the start-up bubble names them.
 - [ ] The start-up settings bubble on screen (a `settings.json` without `limits`), and that it waits for the setup
   guide to close.
 - [x] Feature 13, the requests, against the real Super Productivity 20.0.0 with the real code and one test task
@@ -953,6 +991,15 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 
 ## 7. Known limits
 
+- The natural voice's helper is refused these by its sandbox at every start, and runs all the same (seen
+  2026-11-21): writing Metal's shader cache in the user's cache folder (`…/C/com.apple.metal`), so shaders are
+  compiled again at each start; creating `/private/tmp/__KMP_REGISTERED_LIB_<pid>` (OpenMP); reading
+  `~/.CFUserTextEncoding`; and one bind of `::1` port 0, which is `urllib3` testing for IPv6 when it is imported.
+  None was opened.
+- A voice name in `kokoro.voice` that has the right shape but is not in the model takes the natural voice down for
+  the session, like any other failure of the helper.
+- The natural voice is macOS only, and needs the owner's own Python environment with `mlx_audio` and the model
+  already downloaded; nothing is installed or downloaded by Roamies.
 - "Only when asked" (looking at the screen, opening an app, reading a file) is an instruction the model follows;
   the code enforces where and what, not whether the owner asked.
 - Undo snapshots need a git repository, and skip files over 2 MB and anything in `.gitignore`.

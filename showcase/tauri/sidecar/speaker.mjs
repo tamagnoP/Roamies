@@ -44,7 +44,11 @@ export function bundledBeats(dir = path.join(path.dirname(fileURLToPath(import.m
   };
 }
 
-export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl = LocalVoice, account = localAccount, beatPhrases = BEATS, bundled = () => null }) {
+export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl: FixedVoice = LocalVoice, pickVoice = null, account = localAccount, beatPhrases = BEATS, bundled = () => null }) {
+  // Local-only build (feature 16): which voice a reply uses is asked when it is made (pickVoice: the natural voice
+  // while its helper is up, else nothing, which means the macOS voice), and the audio's rate comes from the voice.
+  const voiceImpl = () => pickVoice?.() ?? FixedVoice;
+  const beatRate = new Map(); // phrase → the rate its kept audio was made at
   let key = null, voice = DEFAULT_VOICE, pref = FISH_MODELS[0], model = pref, seq = 0, current = null, checking = null;
   // The pick and the cheaper ones after it (FISH_MODELS runs from priciest to free).
   const chain = () => FISH_MODELS.slice(Math.max(0, FISH_MODELS.indexOf(pref)));
@@ -63,17 +67,17 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
   // Make the beats once, one at a time (well under Fish's concurrency limit). Failures just leave a gap:
   // that beat is then spoken live instead.
   function warm() {
-    const k = key, vo = voice;
+    const k = key, vo = voice, list = beatPhrases; // local-only build: a list that was replaced (setBeats) is no longer made
     warming ??= (async () => {
-      for (const phrase of beatPhrases) {
-        if (key !== k || voice !== vo) break;
+      for (const phrase of list) {
+        if (key !== k || voice !== vo || beatPhrases !== list) break;
         if (beats.has(phrase) || bundled(vo, model)?.has(phrase)) continue; // shipped with the app
         const chunks = await new Promise((done) => {
           const got = [];
-          const v = new FishVoiceImpl({ key: k, voice: vo, model, onAudio: (pcm) => got.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')), onEnd: () => done(got), onError: () => done(null) }).open();
+          const v = new (voiceImpl())({ key: k, voice: vo, model, onAudio: (pcm) => { beatRate.set(phrase, v.rate ?? RATE); got.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')); }, onEnd: () => done(got), onError: () => done(null) }).open();
           v.say(phrase); v.end();
         });
-        if (chunks?.length && key === k && voice === vo) beats.set(phrase, chunks);
+        if (chunks?.length && key === k && voice === vo && beatPhrases === list) beats.set(phrase, chunks);
       }
     })().finally(() => { warming = null; });
     return warming;
@@ -124,7 +128,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         if (!shippedBeat && !chunks) { me.say(phrase); return true; }
         log('speech_beat', { id, ms: Date.now() - t0 });
         if (shippedBeat) emit({ kind: 'speech', id, rate: shippedBeat.rate, pcm: shippedBeat.pcm });
-        else for (const pcm of chunks) emit({ kind: 'speech', id, rate: RATE, pcm });
+        else for (const pcm of chunks) emit({ kind: 'speech', id, rate: beatRate.get(phrase) ?? RATE, pcm });
         return true;
       },
       end() { if (done || ended) return; ended = true; v.end(); },
@@ -145,12 +149,12 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     };
     const connect = (m) => {
       tries++;
-      v = new FishVoiceImpl({
+      v = new (voiceImpl())({
         key, voice, model: m,
         onAudio: (pcm) => {
           if (done) return;
           if (!heard) { heard = true; if (m !== model) model = m; log('speech_first_audio', { id, model: m, ms: Date.now() - t0 }); }
-          emit({ kind: 'speech', id, rate: RATE, pcm: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64') });
+          emit({ kind: 'speech', id, rate: v.rate ?? RATE, pcm: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64') });
         },
         onEnd: () => finish(true),
         onError: async (err) => {
@@ -197,5 +201,13 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     start,
     stop: stopAll,
     mark, hush,
+    // Local-only build (features 16 and 21a): the beats are the persona's, and are made again when they change or
+    // when the voice that speaks them does (again = true).
+    setBeats(list, again = false) {
+      const same = Array.isArray(list) && list.length === beatPhrases.length && list.every((p, i) => p === beatPhrases[i]);
+      if (!Array.isArray(list) || !list.length || (same && !again)) return;
+      beatPhrases = [...list]; beats = new Map(); recent = [];
+      if (key) (warming ?? Promise.resolve()).then(() => warm());
+    },
   };
 }

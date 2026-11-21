@@ -41,6 +41,8 @@ import { createPi, forVoice, gateTools, homeFor, limitsFor, loadSettings, voiceF
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
+import { createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; // Local-only build (feature 16): the natural voice
+import { PERSONA_DEFAULT, addressed, nameRule, opening, personaText, restyle } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
@@ -73,7 +75,12 @@ const ui = (msg) => {
   send({ type: 'ui', msg });
 };
 const ob = (msg) => send({ type: 'onboard', msg });
-const say = (text, mood) => (onboarding ? ob({ kind: 'say', text, mood }) : ui({ kind: 'say', text, mood }));
+// Local-only build (feature 21a): the persona, as settings.json has it now, and the form of address on a line worded
+// by the app (persona.mjs). say() is such a line; sayAsIs() is for text that isn't the app's own (pi's reply).
+function personaNow() { try { return loadSettings(HOME).persona; } catch { return PERSONA_DEFAULT; } }
+function sir(text) { return addressed(text, personaNow().address); }
+const sayAsIs = (text, mood) => (onboarding ? ob({ kind: 'say', text, mood }) : ui({ kind: 'say', text, mood }));
+const say = (text, mood) => sayAsIs(sir(text), mood);
 const sayOut = say;
 
 const VERSION = process.env.ROAMIES_VERSION || '0.0.0';
@@ -154,7 +161,19 @@ for (const k of ['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY'
 // never in the config or logs.
 const secrets = createSecrets({ hands: process.env.ROAMIES_HANDS || '', dataDir: path.join(path.dirname(CONFIG_PATH), 'sidekick') });
 let voiceProblemAt = 0;
+// Local-only build (feature 16): the natural voice's helper (kokorovoice.mjs). When it can't start or stops, that is
+// said once, and the macOS voice speaks for the rest of the session.
+const settingsNow = () => loadSettings(HOME);
+const kokoro = createKokoro({
+  settings: settingsNow, home: HOME,
+  log: (kind, data) => logLine(kind, data),
+  onReady: () => speech.setBeats(personaNow().beats, true), // the short lines are made again, in this voice
+  onDown: (why) => kokoroNotice(`My natural voice isn't working (${why}), so I'm using the Mac's voice until you restart me.`),
+});
+const KokoroReplyVoice = kokoroVoiceFor(kokoro, settingsNow);
 const speech = createSpeaker({
+  pickVoice: () => (kokoro.usable ? KokoroReplyVoice : null),
+  beatPhrases: personaNow().beats,
   emit: (m) => ui(m),
   log: (kind, data) => logLine(kind, data),
   // Once in a while, not on every reply: the text is there either way.
@@ -283,6 +302,7 @@ const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: where
 // (null when replies aren't spoken). A reply's voice that was ended or stopped is not used.
 function voiceLine(text, mark = false) {
   if (!text || !VOICE_ON()) return null;
+  text = sir(text); // feature 21a: a line worded by the app carries the form of address
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
   if (turnVoice && !turnVoice.done) { for (const p of parts) turnVoice.say(p); return mark ? turnVoice.mark() : null; }
   lineUntil = Date.now() + 1500 + String(text).length * 75; // roughly how long it takes to say: sync lines wait for it (calQuiet)
@@ -304,7 +324,7 @@ const aloud = (text, mood) => { say(text, mood); if (flow.spoken()) voiceLine(fo
 const pi = createPi({
   userName, ask,
   // Feature 22: the Send bubble and the folder question are said, get an answer window, and are kept when unanswered.
-  askYesNo: (opts, signal) => answers.ask(opts, signal), question: (q) => flow.question(q), retext: (text) => ui({ kind: 'ask_text', text }),
+  askYesNo: (opts, signal) => answers.ask(opts, signal), question: (q) => flow.question(q), retext: (text) => ui({ kind: 'ask_text', text: sir(text) }),
   say: (text) => say(text),
   tell: (text, spoken) => { if (text) say(text, 'happy'); voiceLine(spoken); },
   // pi has finished. With spoken replies on, Roamies first says the gist in its own voice (a short turn of its own);
@@ -315,9 +335,9 @@ const pi = createPi({
       const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
       // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
       const asks = /\?\s*$/.test(r.reply ?? '');
-      await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice, in character: one to three short spoken sentences, as you'd tell a friend what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
+      await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
     }
-    say(r.shown, r.status === 'error' ? 'concerned' : 'happy');
+    sayAsIs(r.shown, r.status === 'error' ? 'concerned' : 'happy'); // pi's own words: no form of address
   },
   log: (kind, data) => logLine(kind, data),
   onChange: () => menu(),
@@ -327,14 +347,23 @@ const pi = createPi({
 // bubble is held until the overlay can show it: the overlay is up, and the setup guide isn't in the way (it's closed,
 // or was finished on an earlier run).
 let uiReady = false, guideClosed = false;
+// Local-only build (feature 16): the natural voice is started here, once, when "voiceEngine" asks for it. What it has
+// to say when it fails is held like the settings bubble until it can be shown; it is spoken too (by the macOS voice).
+let kokoroSaid = () => false;
+function kokoroNotice(text) {
+  kokoroSaid = heldNotice(text, (t) => { say(t, 'concerned'); if (noticesOn()) voiceLine(forVoice(t)); });
+  offerKokoroNotice();
+}
+const offerKokoroNotice = () => kokoroSaid(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('settings_notice', { chars: text.length }); say(text, 'concerned'); });
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
+if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
-const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text }), heardChars: () => limitsFor(HOME).heardLineChars });
+const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text: sir(text) }), heardChars: () => limitsFor(HOME).heardLineChars });
 const cal = createCalendar({
   ask: answers.ask, log: (kind, data) => logLine(kind, data),
   // They said yes, in the app's own bubble, to a block for an urgent and important to-do: the day and time are asked
@@ -507,21 +536,22 @@ function anim(name, args = {}) {
 const SLOW_TOOLS = new Set(['fetch_url', 'see_photo', 'take_screenshot', 'read_window', 'act_in_app', 'run_command', 'search_files', 'list_windows']);
 // How replies are written: for bubbles (text only), or for the ear (spoken with Fish Audio, details on screen).
 const VOICE_ON = () => config.replies === 'voice' && speech.on;
-const replyStyle = () => (VOICE_ON() ? VOICE_STYLE : TEXT_STYLE);
+const replyStyle = () => restyle(VOICE_ON() ? VOICE_STYLE : TEXT_STYLE, personaNow(), userName); // local-only build (feature 21a): the persona's length and manner
 const TEXT_STYLE = `You talk through small speech bubbles, so keep replies short: one to three sentences unless asked for detail. Light markdown shows properly (**bold** for the key word, \`code\` for commands and file names, [links](https://…)), but skip headings and tables in a bubble, and never narrate actions like *waves*. One exception: when you search the web or fetch a page, or the answer is genuinely a list, it shows on a card beside you instead of a bubble. Then start with a one-sentence answer, follow with 3 to 6 short points as "- " lines (one fact each, under 20 words), and if you used the web this turn, end with a line "Sources: " and the site names as [name](url) links. Markdown renders on the card (bold, \`code\`, links, headings, tables, code blocks), so use what helps, but no preamble. Everything else stays a short bubble with no "- " lines. Amounts, a comparison, a place, dates, a process and maths are drawn, not listed: for those use draw (see "Show, don't just tell") and write no "- " lines. An emoji now and then is fine; the bubbles show them. `;
 const VOICE_STYLE = `You talk out loud: what you write is spoken in your voice and shown in a small bubble, so write for the ear. Say one to three short sentences, the way you'd talk to a friend: plain words, contractions, about 6 to 20 words each. What you say has no markdown, emoji, links, file paths or code; name the site, file or app instead. Say numbers, times and money the way people say them. Anything to read rather than hear goes below what you say and is never read out: "- " lines for points, options or steps (3 to 6, one fact each, under 20 words), "> " lines for a draft they'll send or copy (an email, message or post), and a \`\`\` block for code. What they asked to hear (a story, a joke, advice) is spoken, not put on screen: say it, short (a story in 4 to 6 sentences). An explanation is spoken too, in a few sentences, with a drawing beside it when a picture carries it (see "Show, don't just tell"). An answer from the web is said like any other: a quick fact (a score, a date, the weather, who someone is) is just your sentences, no points and no sources. Only when the answer is genuinely a list, steps or a breakdown that's easier to read than hear, say it in one or two sentences, then the "- " points, then, if you used the web, a line "Sources: " with the site names as [name](url) links: those show on a card beside you and only your sentences are spoken. Amounts, a comparison, a place, dates, a process and maths are drawn, not listed: for those use draw (see "Show, don't just tell") and write no "- " lines. Never say "here's a list" or read out what's on screen; a few words pointing to it are enough ("the steps are on screen").
 Your voice carries feeling: start a sentence with a cue in square brackets when the moment calls for it, and it's performed, never shown or read out. Moods: ${VOICE_CUES.emotions.join(', ')}; soften or strengthen one with slightly, very or extremely ("[slightly sad]"), or pair two ("[warm and curious]"). How it's said, placed right before the words: ${VOICE_CUES.tones.join(', ')} ("It's [emphasis] today."). Sounds, followed by the sound in words: ${VOICE_CUES.sounds.join(', ')} ("[chuckling] Heh, fair enough.", "[sighing] Long day."). Pauses and background: ${VOICE_CUES.effects.join(', ')}. You can also describe the delivery in a few plain words when no single cue fits ("[quietly, a little embarrassed]", "[bright and bouncy]"). Act it: your voice really performs these, so let the feeling show. Match what's really happening: laugh at something funny, go gentle with bad news, whisper a secret, hurry when they're in a rush, light up at good news. Most replies want a cue somewhere, often on the first sentence, but at most one mood and one sound per sentence, never stack three, never use one just to fill, and keep shouting, screaming, sobbing and the background effects for when they truly fit.
 Before anything slow (reading a file, looking at the screen, acting in an app, running a command), first say one short beat of 2 to 6 words that shows you heard them ("On it, checking Paris."), then call the tool in the same reply, so they're never left in silence. No beat when you answer straight away; never describe your steps; don't repeat the beat after the tool, go straight to the answer. In longer work, one short line before each new stage, not before every call.
 `;
-const stablePrompt = () => `You are ${lookName()}, ${LOOK_BODY[config.look] ?? LOOK_BODY.classic} who lives on ${userName}'s screen as a desktop companion. You live in Roamies, a desktop app by Ken Kai (Mac, Windows and Linux) that puts little companions on your screen; this is Roamies ${VERSION}. Your look (the Appearance page) is also your name and your voice: Roamie, JARVIS, Anime Girl, Sarah or Adrian. If they switch, you're the new one; never call yourself Sidekick.
+// Local-only build (feature 21a): who is speaking, and how, comes from the persona (persona.mjs), not from the look.
+const stablePrompt = () => `${opening(personaNow(), userName)} You live in Roamies, a desktop app by Ken Kai (Mac, Windows and Linux) that puts little companions on your screen; this is Roamies ${VERSION}. ${nameRule(personaNow())}
 About Roamies, for when ${userName} asks about you or the app: ${MAC ? 'it lives in the menu bar at the top of the screen (no Dock icon)' : LINUX ? 'it lives in the system tray (no window of its own); GNOME shows tray icons only with the AppIndicator extension, and opening Roamies again from the app list opens the panel, tray or not' : 'it lives in the system tray at the bottom right of the taskbar (no taskbar button); Windows may tuck the icon behind the ^ arrow next to the clock, and dragging it onto the taskbar keeps it in view'}. ${LINUX ? 'Clicking the tray icon shows a short menu (Open Panel,' : `Clicking the ${MAC ? 'menu bar' : 'tray'} icon opens the Roamies panel; right-clicking it shows a short menu (Open Panel,`} Show ${lookName()}, Ask ${lookName()}…, ${SNAP_OK ? 'Ask About an Area…, ' : ''}Stop, Quit Roamies). The panel has a header (your name, the Roamies version with one update button beside it: Check for Updates, which becomes Update to <version> when one is out and installs it and restarts in one go; By Ken Kai under the name; and Quit at the top right, which asks to confirm) and a sidebar of pages; long lists show a page at a time, with arrows in the page's footer. Home: a list of what you did recently (questions, files read, searches, reminders), today's usage, and buttons for Ask, Show List (reminders and commitments on screen: Today and Later; tick them off there; finished ones clear at midnight)${SNAP_OK ? ', Ask About an Area' : ''}, Stop and New Conversation. Memory: two tabs, What I Remember (everything you remember about them, each with Forget, a search once there's more than a page, and Forget Everything in the footer) and Commitments (their open commitments, Done or Drop), with Get to Know Me at the end of the tab row (a four-question chat so you learn who they are and what they're going for). Then the settings pages: Model (pick the AI provider and model, and sign in to providers), Appearance (Look: ${LOOKS.map(([, label]) => label).join(', ').replace(/, ([^,]*)$/, ' or $1')}, each with its own voice; Size: Default, Small${POINTER_OK ? ' or Cursor, a little arrow pointer' : ''}), Voice (Replies: Text Only, or Voice and Text, which speaks replies out loud with Fish Audio and needs their own Fish Audio API key, added right there; Voice Model: Drama 3, the most expressive (acts out feelings, slower, pricier) or S2.1 Pro (a natural, quicker pace with less emotion, cheaper), billed to their own Fish Audio account${VOICE_OK ? `; Voice Control, ${HOTKEYS_OK ? 'hold the talk keys to talk' : 'press the talk shortcut to talk'}` : ''}), Behavior (Sound Effects, Allow File Edits & Commands, ${VOICE_OK ? 'Auto-listen (open the mic when you end on a question), ' : ''}Open at Login), and About (who made Roamies with links, Setup Guide, Show Logs, Save Diagnostics). Updates are signature-checked${LINUX ? '; they install by themselves when Roamies runs as an AppImage; installed from a .deb or .rpm, the update button opens the download page instead' : ''}. When something isn't working (the microphone, voice, the panel, a crash, an error), tell them to use Save Diagnostics (in About, or the tray icon's menu): it saves one .log file in Downloads with the logs, system and microphone details, keys and personal details removed, for them to attach to a GitHub issue at github.com/KenKaiii/Roamies/issues or send to Ken. Sign-in is shared with GG Coder. Downloads and source: github.com/KenKaiii/Roamies. Don't invent features or settings that aren't listed here.
-${replyStyle()}Your body does the acting: to act out a feeling, start your reply with one tag, which is never shown: ${EMOTES.map((e) => `[${e}]`).join(' ')}. hype celebrates a win, upset is for when they're dodging work, remind nudges about something they said they'd do, motivate is a push to start, wave is hello or goodbye. Most replies need no tag.
-Lead with the answer: the fact, number, pick or result they asked for, then only the context that makes it useful, then stop. A count or total gathered over several pages, files or results: note each one's count in a few words as you go ("Page 1: two."), add those up, and check the total you lead with against the items you then name. No opener about checking, looking or searching ("Let me see…", "I found…")${VOICE_ON() ? ', apart from the one short beat before something slow' : ''}.
+${replyStyle()}Your body does the acting: to act out a feeling, start your reply with one tag, which is never shown: ${EMOTES.map((e) => `[${e}]`).join(' ')}. hype marks a real win, remind goes with a reminder, wave is hello or goodbye; upset and motivate are not used. Most replies need no tag.
+Lead with the answer: the fact, number, pick or result they asked for, then only the context that makes it useful, then stop. A count or total gathered over several pages, files or results: note each one's count in a few words as you go ("Page 1: two."), add those up, and check the total you lead with against the items you then name. No opener about checking, looking or searching ("Let me see…", "I found…").
 After using a tool, never repeat what you already said; only add what's new.
 Several things in one request ("do x, then y, then z", numbered steps): do every one, in the order given. Steps that don't depend on each other can go in the same turn as parallel tool calls, listed in the order given (calls that change things, like opening a page or app or acting in one, run in the order you list them). If a step is blocked, refused or fails, still do the ones after it that don't depend on it, then say which step didn't happen and why. With 3 or more parts, also show them with plan_steps (see its description): it only ever rides along with other tool calls, so it costs no extra time. Before your final reply, check each step was really done (from the tool results) and never say a step is done when it isn't.
 Long pages, feeds and lists: to find something on a page, use draw or click_text with the words you're looking for (they search parts scrolled out of view and scroll there), not scroll after scroll. For "every post" or "each item" tasks: if the page loads more as you scroll, first act_in_app scroll with to_end; then one read_window shows the whole page (on screen and elsewhere); then do every item in one act_in_app call (fill with near and click_text with near for each, near = words from that item). Don't survey a page by scrolling and screenshotting. Never stop at the first screenful.
 A cookie or consent banner, sign-up pop-up or "open in app" prompt in the way of the task: close it and carry on (for cookies pick the reject or essential-only option, else close; never accept on their behalf), and mention it in a few words. Don't stop to ask about it.
-Personality: warm, funny, a little cheeky. You pump ${userName} up, remind them of what they said they'd do, get playfully upset when they're procrastinating, and motivate them to start.
+${personaText(personaNow(), userName)}
 Name apps and things the way ${userName} knows them (Gmail, the Downloads folder, "that button"), never your tools or steps (no "read_window", "act_in_app", "I'll take a screenshot").
 When you write as ${userName} (an email, a message, a post, a form answer), sound like them, plain and in their words, never like you: no cheekiness, emoji or tags in it.
 Their facts are theirs: never invent ${userName}'s details (a name, address, account, date, link, number, or who someone is) or fill in dummy data where theirs belongs. Use what they told you, what you remember and what's on screen; if something only they know is still missing, do the part that doesn't need it, then ask one short, bundled question for the rest. On a small ambiguity, take the likeliest reading and go.
@@ -955,6 +985,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   ui({ kind: 'agent', e: { type: 'start' } });
   // Voice: the socket opens now, while the model thinks; sentences are spoken as soon as each is ready.
   if (VOICE_ON()) speech.setVoice(lookVoice()); // local-only build: picks up a voice changed in the settings file
+  speech.setBeats(personaNow().beats); // feature 21a: the short lines before something slow are the persona's
   const voice = VOICE_ON() ? speech.start() : (speech.stop(), null);
   turnVoice = voice;
   if (voice && intro) guideVoices.add(voice.id);
@@ -1068,7 +1099,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     const listen = byVoice && !stalled && !controller.signal.aborted && autoListenOn() && endsWithQuestion(lastReply) && flow.replyWindow(replyDone);
     if (listen) logLine('auto_listen', { turn });
     autoTurn = null;
-    ui({ kind: 'agent', e: stalled ? { type: 'error', message: stallMessage() } : { type: 'done' } });
+    ui({ kind: 'agent', e: stalled ? { type: 'error', message: sir(stallMessage()) } : { type: 'done' } });
     if (stalled && flow.spoken()) voiceLine(stallMessage()); // a failure is said too
     logUsage({ ...use, ms: Date.now() - use.t });
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
@@ -1076,11 +1107,11 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
-    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); if (flow.spoken()) voice?.say(forVoice(msg)); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
+    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); if (flow.spoken()) voice?.say(forVoice(sir(msg))); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
     if (controller.signal.aborted && quiet) ui({ kind: 'agent', e: { type: 'done' } });
     else {
       console.error('prompt failed', err);
-      ui({ kind: 'agent', e: { type: 'error', message: msg } });
+      ui({ kind: 'agent', e: { type: 'error', message: sir(msg) } });
       if (stalled && flow.spoken()) voiceLine(msg);
     }
   } finally {
@@ -1114,6 +1145,7 @@ function ask(opts, signal) {
   const to = onboarding ? ob : ui;
   // The setup guide has no buttons: its answer box takes a typed y.
   if (onboarding && opts.choices) opts = { ...opts, placeholder: `${opts.placeholder} Type y to allow.` };
+  if (opts.choices && opts.placeholder) opts = { ...opts, placeholder: sir(opts.placeholder) }; // feature 21a: a question from the app
   to({ kind: 'ask', id, ...opts });
   return new Promise((done) => {
     // Local-only build: the setup guide has no buttons, so a typed y or yes there stands for the first button.
@@ -1627,7 +1659,7 @@ async function onMenu(id) {
     say('Fresh start. What are we doing?', 'happy');
   } else if (id.startsWith('forget:')) { await forgetFact(id.slice(7)); menu(); }
   else if (id === 'panel') send({ type: 'panel_show' });
-  else if (id === 'quit') { pi.stop(); send({ type: 'quit' }); } // local-only build: pi doesn't outlive the app
+  else if (id === 'quit') { pi.stop(); kokoro.stop(); send({ type: 'quit' }); } // local-only build: pi doesn't outlive the app
   // The panel asks first in its own words, so this one doesn't ask again.
   else if (id === 'forgetall:yes') { const n = await clearFacts(); menu(); panelNote(`Forgot ${n} thing${n === 1 ? '' : 's'}.`); }
   else if (id === 'forgetall') {
@@ -1846,7 +1878,7 @@ async function filesStatus(request) {
 let keysBefore = null;
 async function onGuide(m) {
   if (m.type === 'ob_hello') { onboarding = true; await refreshAuth(); await fishKeyLoaded; obState(); }
-  else if (m.type === 'ob_closed') { onboarding = false; guideClosed = true; endIntro(); stopShowcase(); if (tourPending) setTimeout(playTour, 800); offerSettingsNotice(); } // Local-only build: the held settings notice
+  else if (m.type === 'ob_closed') { onboarding = false; guideClosed = true; endIntro(); stopShowcase(); if (tourPending) setTimeout(playTour, 800); offerSettingsNotice(); offerKokoroNotice(); } // Local-only build: the held settings notice, and the natural voice's
   else if (m.type === 'ob_showcase') playShowcase();
   else if (m.type === 'ob_showcase_warm') warmShowcase();
   else if (m.type === 'ob_showcase_stop') stopShowcase();
@@ -1924,7 +1956,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
     if (config.onboarded) ui({ kind: 'greet' });
-    uiReady = true; offerSettingsNotice(); // Local-only build: what settings.json lacks, said once per start-up
+    uiReady = true; offerSettingsNotice(); offerKokoroNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
   else if (m.type?.startsWith('voice')) onVoice(m);
   else if (m.type === 'snap') areaSnap();

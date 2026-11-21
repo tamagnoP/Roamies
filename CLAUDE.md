@@ -23,7 +23,12 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    spoken, and makes no request. What a sync has to say goes to a bubble, never into a tool's result. From a task in the app only title, done,
    start, length, deadline and the two matrix tags are read (and whether it repeats); only linked tasks are
    written to, only those fields; none is ever deleted.
-2. **Roamies does not touch files or run commands itself.** File work is handed to pi (`pi.mjs`). The only files it
+2. **Roamies does not touch files itself, and runs no command on the owner's behalf.** It starts only its own fixed
+   helpers: the macOS voice, and the Python named in `settings.json` with the voice script shipped in the app, with
+   text going in on a pipe only. That Python is used only if `kokoro.python` is an absolute path to an existing
+   executable; it is started directly, never through a shell, with a fixed argument list, under `sandbox-exec` with
+   network denied (`kokorovoice.mjs`). The voice script never writes or logs the text it is given, and its error
+   stream never reaches Roamies' logs. File work is handed to pi (`pi.mjs`). The only files it
    writes are notes inside the Obsidian vault (`notes.mjs`), where it can create and append but never change or delete,
    and its own files in `~/Documents/roamies-pi` (`state.json`, the records in `log`, `pending.txt`, and
    `settings.default.json`). Questions nobody answered are kept in `state.json` under `pending`, never in the vault. It never writes `settings.json` after making it, and never reads `settings.default.json`.
@@ -57,6 +62,9 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, `makeCommitment`, and `reminded` in `addCommitment`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |
+| `showcase/tauri/sidecar/kokorovoice.mjs` | Ours. The natural voice: the Kokoro helper, its sandbox profile, the fallback to `say`. |
+| `showcase/tauri/sidecar/kokoro_server.py` | Ours. The helper's script, run with the Python named in `settings.json`. |
+| `showcase/tauri/sidecar/persona.mjs` | Ours. The personality: a manner only, built by code from the `persona` setting. |
 | `showcase/tauri/sidecar/test/` | One test file per module, plain `node:assert`, no framework. |
 | `showcase/roamies/` | The overlay (character, bubbles), browser JavaScript drawn on a canvas. |
 | `showcase/panel/`, `showcase/onboarding/` | Settings panel and setup guide. |

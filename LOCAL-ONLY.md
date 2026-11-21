@@ -210,6 +210,12 @@ setup guide is open, the bubble waits until it closes.
   "autoListenQuestions": true,
   "closingReply": "Any time.",
   "speakNotices": true,
+  "voiceEngine": "kokoro",
+  "kokoro": { "python": "/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "mlx-community/Kokoro-82M-bf16",
+              "voice": "bm_george", "lang": "b", "speed": 1.05 },
+  "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
+               "humour": "dry and rare", "maxSentences": 2,
+               "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."] },
   "limits": {
     "approvalBubbleChars": 600,
     "promptChars": 8000,
@@ -231,7 +237,9 @@ setup guide is open, the bubble waits until it closes.
     "exchangeEndSeconds": 20,
     "pendingKeepHours": 24,
     "spokenQuestionChars": 200,
-    "heardLineChars": 80
+    "heardLineChars": 80,
+    "kokoroTimeoutSeconds": 20,
+    "kokoroSentenceChars": 120
   },
   "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60 }
 }
@@ -284,6 +292,30 @@ setup guide is open, the bubble waits until it closes.
   block placed or dropped, a conflict resolved, a task deleted in the app) is said as well as shown when you are
   not in a spoken exchange. `false` leaves those bubbles silent there. Inside an exchange everything shown is said
   either way.
+- `voiceEngine`: `"kokoro"` (the natural voice, see "The voice") or `"system"` (the Mac's own voice; no Python is
+  started). Read when Roamies starts.
+- `kokoro`: for the natural voice. Each part that is missing or can't be used takes its default and is named in the
+  start-up bubble.
+
+  | Part | Default | Allowed | What it is |
+  | --- | --- | --- | --- |
+  | `python` | `/opt/homebrew/anaconda3/envs/localai/bin/python` | a full path to a program that exists | The Python that has `mlx_audio`. Anything else (a bare name, a path with `~`, a folder, a file that can't be run): a bubble says so and the Mac's voice speaks. Read at start. |
+  | `model` | `mlx-community/Kokoro-82M-bf16` | a name as downloaded (`owner/name`), or a folder | The model, which must already be on the Mac. Read at start. |
+  | `voice` | `bm_george` | a voice that ships with the model | Read for each reply. |
+  | `lang` | `b` | one letter | The model's language letter. Read at start. |
+  | `speed` | 1.05 | 0.5 to 2 | 1 is the voice's own pace. Read for each reply. |
+- `persona`: how Roamies speaks (see "The manner"). It changes nothing about what Roamies may do. Read for each
+  request, so an edit counts from the next one. Each part that is missing or can't be used takes its default and is
+  named in the start-up bubble.
+
+  | Part | Default | Allowed | What it is |
+  | --- | --- | --- | --- |
+  | `name` | `Jarvis` | up to 40 characters | The name the model is given for itself. Menus and labels still say the look's name. |
+  | `address` | `sir` | up to 30 letters, or `""` for none | How you are addressed. |
+  | `manner` | `calm, precise, formally polite, loyal` | up to 200 characters | A description of the tone, given to the model in quotation marks. |
+  | `humour` | `dry and rare` | up to 100 characters | The same, for humour. |
+  | `maxSentences` | 2 | 1 to 5, whole | The longest reply, unless you ask for an explanation, a list or a story. |
+  | `beats` | `["One moment, sir.", "Checking now, sir.", "Right away, sir."]` | 1 to 40 lines of up to 60 characters | The short lines said before something slow. One is picked by code; no request is made for it. |
 - `limits`: the sizes, times and counts. Each is a number in the range below; one that is missing or outside its
   range uses its default and is named in the start-up bubble. Leaving `limits` out altogether counts as one missing
   setting. An edit counts from the next request, except `answerWaitMinutes`, which is read when Roamies starts.
@@ -311,6 +343,8 @@ setup guide is open, the bubble waits until it closes.
   | `pendingKeepHours` | 24 | 1 to 720 | Hours a question nobody answered is kept before it is dropped. |
   | `spokenQuestionChars` | 200 | 40 to 1000, whole | Characters of a question, or of a hand-off's first sentence, that are said aloud. |
   | `heardLineChars` | 80 | 20 to 300, whole | Characters of a phrase that wasn't taken, as shown in the bubble's last line. |
+  | `kokoroTimeoutSeconds` | 20 | 2 to 120 | Seconds the natural voice may take over one sentence (six times that to start) before the Mac's voice takes over for the session. |
+  | `kokoroSentenceChars` | 120 | 40 to 1000, whole | A sentence longer than this is split at a clause before the natural voice makes it. |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
   missing setting.
@@ -785,7 +819,8 @@ The logs record what kind of change a sync made (which fields), never a title.
 | --- | --- | --- |
 | Update checks | GitHub, 20 s after launch and every 6 hours | Never |
 | Photo and source cards | Wikipedia thumbnails, picture URLs, site favicons | No lookups (map cards use outlines shipped in the app) |
-| Spoken replies | Fish Audio (cloud), with your key | The Mac's own voice through `/usr/bin/say` |
+| Spoken replies | Fish Audio (cloud), with your key | Kokoro, running on the Mac with no network; the Mac's own voice through `/usr/bin/say` as the fallback |
+| Personality | Set by the look ("warm, funny, a little cheeky") | The `persona` setting: a manner only |
 | Claude Code (Anthropic sign-in) | Usage metrics and error reports on | Switched off by environment variables |
 
 Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition.
@@ -816,13 +851,21 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   the list, and `makeCommitment`, which turns a reminder into a to-do.
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
+- `showcase/tauri/sidecar/kokorovoice.mjs` (new): the natural voice: starts and watches the helper, its sandbox
+  profile, the fallback, the splitting of long sentences.
+- `showcase/tauri/sidecar/kokoro_server.py` (new): the helper's script, copied into the app by `bundle.sh`.
+- `showcase/tauri/sidecar/persona.mjs` (new): the manner: the model's instructions, the form of address on lines
+  worded by the app, and the parts of upstream's reply style it replaces.
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches;
   its own look-up of what is in front (`whereFront`), giving the never-look list the app's name; the start-up
-  settings bubble.
+  settings bubble; starts and stops the natural voice and shows its failure bubble; the persona in the model's
+  instructions in place of upstream's opening, personality line, voice cues and beats; the form of address on the
+  app's own lines.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
 - `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging.
   `speaker.mjs` also has marks (the overlay reports when a line has finished playing) and `hush` (stops what is
-  playing without ending the reply's voice).
+  playing without ending the reply's voice). Which voice a reply uses is asked at each reply, the audio's rate
+  comes from the voice, and the beats can be replaced (`setBeats`).
 - `showcase/roamies/voice-out.js`: answers a mark when what was handed over has finished playing.
 - `showcase/tauri/src-tauri/voice/main.swift`: an answer window (`listen` with `seconds`): the helper closes the
   microphone at its end itself, and marks what it heard with the window's id. `--test-window` checks it.
@@ -837,7 +880,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs` (new),
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
   `package.json`: tests.
 
 ## Build (macOS)
@@ -865,11 +908,57 @@ and reopen Roamies.
 
 ## The voice
 
-Replies are spoken by the Mac's own voices. Which one is set in `~/Documents/roamies-pi/settings.json` (`voice` and
+**The natural voice.** With `"voiceEngine": "kokoro"` replies are spoken by Kokoro (`bm_george` by default), which
+runs on the Mac. No cloud voice is used and no voice is cloned: a voice is used only if its file is in the model's
+own `voices` folder.
+
+- Roamies starts one helper at start-up and keeps it loaded: the Python at `kokoro.python`, running
+  `kokoro_server.py`, a script shipped in the app. It is started directly, never through a shell, with a fixed list
+  of arguments. `kokoro.python` is used only if it is a full path to a program that exists.
+- There is no port. Each sentence goes in on the helper's input pipe and the audio comes back on its output pipe.
+  What is to be said is never on a command line.
+- The script never writes or logs the text it is given. Everything the helper prints on its error stream is thrown
+  away, so none of it reaches Roamies' logs. A failure reaches Roamies only as the kind of error (one word), without
+  the sentence.
+- It runs under `sandbox-exec`: every kind of network is denied; it may write only in its own temporary folder (made
+  at start, owner-only, removed at quit; Roamies puts a copy of the script there and runs it from there); in your
+  home folder it may read only the model's own files (and its Python's folder, if that is in the home folder); it
+  may start no other program. Its environment is a fixed list with the libraries' offline switches
+  (`HF_HUB_OFFLINE` and the like) and nothing of Roamies' own: no proxy settings, no tokens.
+- A sentence longer than `limits.kokoroSentenceChars` is split at a clause (a comma, semicolon, colon or dash), else
+  between words, so each piece is made quickly. A piece being made when you start talking is finished and thrown
+  away; what you say next waits for it.
+- If the helper can't start, stops, answers wrongly or takes longer than `limits.kokoroTimeoutSeconds` over a
+  sentence, one bubble says so ("My natural voice isn't working (…), so I'm using the Mac's voice until you restart
+  me.") and the Mac's voice speaks from that sentence on, until Roamies is restarted. While the helper is still
+  loading at start-up, the Mac's voice speaks.
+- It ends when Roamies does: its input closes, it checks every 3 seconds that Roamies is still its parent, and at
+  Quit it is killed after 2 seconds if it is still there.
+
+**The Mac's own voices** speak with `"voiceEngine": "system"`, and whenever the natural voice can't. Which one is set in `~/Documents/roamies-pi/settings.json` (`voice` and
 `voices`, above), using names exactly as `say -v '?'` lists them in Terminal, for example `Daniel (Enhanced)`.
 Download better voices in System Settings > Accessibility > Spoken Content > System voice > Manage Voices. A change
 to the file is picked up the next time Roamies speaks. A voice that isn't installed is skipped and the system voice
 speaks instead.
+
+## The manner
+
+How Roamies speaks is the `persona` setting: a calm, capable butler by default, brief and exact, who addresses you
+as "sir". It is a manner only.
+
+- The model's instructions are built from it by code (`persona.mjs`). `manner` and `humour` go in as quoted
+  descriptions of a tone. The text always ends with a fixed paragraph that no setting can change: the manner grants
+  no permission and lifts no limit, every rule of this build comes first, and nothing is said to be done that was
+  not. "Rules of this build" still follows it.
+- It replaces upstream's opening ("a tiny glowing pixel creature"), its personality line, "the way you'd talk to a
+  friend", the emoji, and the voice cues in square brackets, which only Fish Audio performed.
+- A reply is at most `maxSentences` sentences unless you ask for an explanation, a list or a story.
+- Lines worded by the app (nudges, notices, failures, the closing reply, the app's questions) get the form of
+  address once, by code, closing their first sentence: "Nudge test is due at 14:05, sir.". Button labels, pi's own
+  reply, quoted text and anything the model wrote are left as they are. With `"address": ""` nothing is added.
+- The short line before something slow is one of `beats`, picked by code and spoken from audio made beforehand. The
+  model is told to say nothing first; no request is made for a beat.
+- The name is for the model only. Menus and labels keep the look's name.
 
 ## Updating
 

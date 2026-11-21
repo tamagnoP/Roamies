@@ -140,6 +140,7 @@ export class LocalVoice {
 
   /** One sentence as PCM, in the look's voice, or in the system voice if that one isn't installed. */
   async make(text) {
+    this.rate = RATE; // what speaker.mjs sends with the audio (kokorovoice.mjs makes audio at another rate)
     const name = this.voiceName && !missing.has(this.voiceName) ? this.voiceName : null;
     try { return await this.synth(text, name); } catch (e) {
       if (!name || this.state === 'done' || this.platform !== 'darwin') throw e;

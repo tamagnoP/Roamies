@@ -286,12 +286,37 @@ export const LIMITS = {
   pendingKeepHours: { default: 24, min: 1, max: 720 }, // a question nobody answered is dropped when it is older than this
   spokenQuestionChars: { default: 200, min: 40, max: 1000, whole: true }, // characters of a question (or of a hand-off's first sentence) that are said aloud
   heardLineChars: { default: 80, min: 20, max: 300, whole: true }, // characters of a phrase that wasn't taken, as shown in the bubble's last line
+  kokoroTimeoutSeconds: { default: 20, min: 2, max: 120 }, // how long the natural voice may take over one sentence (and, six times that, to start) before the macOS voice takes over
+  kokoroSentenceChars: { default: 120, min: 40, max: 1000, whole: true }, // a sentence longer than this is split at a clause before the natural voice makes it
 };
+// The voice that speaks ("voiceEngine"): Kokoro, kept loaded in a helper process (kokorovoice.mjs), or the macOS voice.
+export const VOICE_ENGINES = ['kokoro', 'system'];
+const text = (max) => (v) => typeof v === 'string' && !!v.trim() && v.length <= max && !/[\0\n\r]/.test(v);
+/** The parts of "kokoro". python: the Python that has mlx_audio (used only if it is a full path to a program that
+ *  exists); model: its name as downloaded, or a folder; voice: one that ships with the model; lang: the model's
+ *  language letter; speed: 1 is the voice's own pace. */
+export const KOKORO = {
+  python: { default: '/opt/homebrew/anaconda3/envs/localai/bin/python', ok: text(1000) },
+  model: { default: 'mlx-community/Kokoro-82M-bf16', ok: (v) => text(300)(v) && (/^[\w.-]+\/[\w.-]+$/.test(v) || v.startsWith('/') || v.startsWith('~/')) },
+  voice: { default: 'bm_george', ok: (v) => typeof v === 'string' && /^[a-z]{2}_[a-z0-9]{1,32}$/.test(v) },
+  lang: { default: 'b', ok: (v) => typeof v === 'string' && /^[a-z]$/.test(v) },
+  speed: { default: 1.05, min: 0.5, max: 2, ok: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0.5 && v <= 2 },
+};
+/** The parts of "persona": how Roamies speaks, and nothing about what it may do (persona.mjs). address may be "". */
+export const PERSONA = {
+  name: { default: 'Jarvis', ok: text(40) },
+  address: { default: 'sir', ok: (v) => v === '' || (text(30)(v) && /^[\p{L}\p{M}' .-]+$/u.test(v)) },
+  manner: { default: 'calm, precise, formally polite, loyal', ok: text(200) },
+  humour: { default: 'dry and rare', ok: text(100) },
+  maxSentences: { default: 2, min: 1, max: 5, ok: (v) => Number.isInteger(v) && v >= 1 && v <= 5 },
+  beats: { default: ['One moment, sir.', 'Checking now, sir.', 'Right away, sir.'], ok: (v) => Array.isArray(v) && v.length >= 1 && v.length <= 40 && v.every(text(60)) },
+};
+function partDefaults(table) { return Object.fromEntries(Object.entries(table).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : v.default])); }
 const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -342,6 +367,9 @@ const CLEAN = {
   autoListenQuestions: when((v) => typeof v === 'boolean'),
   closingReply: when(full),
   speakNotices: when((v) => typeof v === 'boolean'),
+  voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
+  kokoro: when(isObj),
+  persona: when(isObj),
   limits: when(isObj),
   calendar: when(isObj),
 };
@@ -408,6 +436,18 @@ export function loadSettings(home) {
       for (const name of ['dayStart', 'dayEnd']) { cal[name] = CALENDAR[name].default; if (!invalid.some((i) => i.name === `calendar.${name}`)) invalid.push({ name: `calendar.${name}`, using: cal[name] }); }
     }
   }
+  // kokoro and persona: part by part, the same way.
+  const parts = {};
+  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['persona', set.persona, PERSONA]]) {
+    parts[group] = partDefaults(table);
+    if (given === defaults[group]) continue;
+    for (const name of Object.keys(table)) {
+      if (!Object.hasOwn(given, name)) missing.push(`${group}.${name}`);
+      else if (!table[name].ok(given[name])) invalid.push({ name: `${group}.${name}`, using: table[name].default });
+      else parts[group][name] = Array.isArray(given[name]) ? [...given[name]] : given[name];
+    }
+  }
+  parts.kokoro.python = parts.kokoro.python.trim(); // as written: it is used only if it is a full path (kokorovoice.mjs)
   const calendar = { dayStart: clock(cal.dayStart), dayEnd: clock(cal.dayEnd), lunch: cal.lunch?.length ? cal.lunch.map(clock) : null, gapMinutes: cal.gapMinutes, syncSeconds: cal.syncSeconds };
   // projects: a list of folders (named by their last part), or { name: folder }.
   const listed = Array.isArray(set.projects) ? set.projects.map((p) => [base(expand(p, home)), p]) : Object.entries(set.projects);
@@ -438,7 +478,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -887,6 +927,9 @@ export function codeReference() {
   const blocked = BLOCKED(h, dir);
   return {
     limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}) }])),
+    kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max } },
+    personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
+    voiceEngines: [...VOICE_ENGINES],
     calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max } },
     superProductivity: {
       address: `http://${SP.host}:${SP.port}`, tokenFile: `${h}/${SP.tokenFile}`, tokenKept: 'read from that file for each request; never stored, logged or shown',
