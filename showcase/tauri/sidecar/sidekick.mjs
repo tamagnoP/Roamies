@@ -42,7 +42,7 @@ import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the e
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; // Local-only build (feature 16): the natural voice
-import { PERSONA_DEFAULT, addressed, nameRule, opening, personaText, restyle } from './persona.mjs'; // Local-only build (feature 21a): the personality
+import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
@@ -78,7 +78,11 @@ const ob = (msg) => send({ type: 'onboard', msg });
 // Local-only build (feature 21a): the persona, as settings.json has it now, and the form of address on a line worded
 // by the app (persona.mjs). say() is such a line; sayAsIs() is for text that isn't the app's own (pi's reply).
 function personaNow() { try { return loadSettings(HOME).persona; } catch { return PERSONA_DEFAULT; } }
-function sir(text) { return addressed(text, personaNow().address); }
+// When the form of address is used is decided by one clock, for these lines and the model's replies together
+// (persona.addressEverySeconds). The beats are said just before a reply, so they carry it only when the setting is 0.
+const addressClock = createAddressClock({ seconds: () => personaNow().addressEverySeconds });
+function sir(text, how) { return addressClock.line(text, personaNow().address, how); }
+function beatsNow() { const p = personaNow(); return addressClock.always() ? p.beats : [...new Set(p.beats.map((b) => unaddressed(b, p.address)))]; }
 const sayAsIs = (text, mood) => (onboarding ? ob({ kind: 'say', text, mood }) : ui({ kind: 'say', text, mood }));
 const say = (text, mood) => sayAsIs(sir(text), mood);
 const sayOut = say;
@@ -167,13 +171,13 @@ const settingsNow = () => loadSettings(HOME);
 const kokoro = createKokoro({
   settings: settingsNow, home: HOME,
   log: (kind, data) => logLine(kind, data),
-  onReady: () => speech.setBeats(personaNow().beats, true), // the short lines are made again, in this voice
+  onReady: () => speech.setBeats(beatsNow(), true), // the short lines are made again, in this voice
   onDown: (why) => kokoroNotice(`My natural voice isn't working (${why}), so I'm using the Mac's voice until you restart me.`),
 });
 const KokoroReplyVoice = kokoroVoiceFor(kokoro, settingsNow);
 const speech = createSpeaker({
   pickVoice: () => (kokoro.usable ? KokoroReplyVoice : null),
-  beatPhrases: personaNow().beats,
+  beatPhrases: beatsNow(),
   emit: (m) => ui(m),
   log: (kind, data) => logLine(kind, data),
   // Once in a while, not on every reply: the text is there either way.
@@ -302,7 +306,7 @@ const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: where
 // (null when replies aren't spoken). A reply's voice that was ended or stopped is not used.
 function voiceLine(text, mark = false) {
   if (!text || !VOICE_ON()) return null;
-  text = sir(text); // feature 21a: a line worded by the app carries the form of address
+  text = sir(text, { said: true }); // feature 21a: a line worded by the app carries the form of address, when the clock allows
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
   if (turnVoice && !turnVoice.done) { for (const p of parts) turnVoice.say(p); return mark ? turnVoice.mark() : null; }
   lineUntil = Date.now() + 1500 + String(text).length * 75; // roughly how long it takes to say: sync lines wait for it (calQuiet)
@@ -324,7 +328,7 @@ const aloud = (text, mood) => { say(text, mood); if (flow.spoken()) voiceLine(fo
 const pi = createPi({
   userName, ask,
   // Feature 22: the Send bubble and the folder question are said, get an answer window, and are kept when unanswered.
-  askYesNo: (opts, signal) => answers.ask(opts, signal), question: (q) => flow.question(q), retext: (text) => ui({ kind: 'ask_text', text: sir(text) }),
+  askYesNo: (opts, signal) => answers.ask(opts, signal), question: (q) => flow.question(q), retext: (text) => ui({ kind: 'ask_text', text: sir(text, { again: true }) }),
   say: (text) => say(text),
   tell: (text, spoken) => { if (text) say(text, 'happy'); voiceLine(spoken); },
   // pi has finished. With spoken replies on, Roamies first says the gist in its own voice (a short turn of its own);
@@ -363,7 +367,7 @@ const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) }
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
-const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text: sir(text) }), heardChars: () => limitsFor(HOME).heardLineChars });
+const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text: sir(text, { again: true }) }), heardChars: () => limitsFor(HOME).heardLineChars });
 const cal = createCalendar({
   ask: answers.ask, log: (kind, data) => logLine(kind, data),
   // They said yes, in the app's own bubble, to a block for an urgent and important to-do: the day and time are asked
@@ -443,7 +447,8 @@ const guard = createGuard({ windows: async () => (await hands('windows')).window
 const flow = createFlow({
   home: HOME,
   speak: (text) => lineDone(text),
-  announce: (text) => { say(text, 'happy'); return lineDone(forVoice(text)); },
+  // closing: the reply to "thanks" carries the form of address whatever the clock says
+  announce: (text, { closing = false } = {}) => { addressClock.allow(closing); try { say(text, 'happy'); return lineDone(forVoice(text)); } finally { addressClock.allow(false); } },
   listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding) send({ type: 'listen', seconds, window, again }); },
   cancel: () => send({ type: 'listen_cancel' }),
   bubbles: () => [pi, answers],
@@ -580,11 +585,13 @@ The <live-state> block at the top of the user's newest message is the current st
 // Made once per request. `context` (the latest user message) picks which facts are relevant. → { turn, memory }
 let lastFactIds = [];
 let frontNow = ''; // set just before each request (whereFront)
+let addressNow = false; // set just before each request: whether this reply carries the form of address (addressClock)
+const addressLine = () => { const line = addressRule(personaNow(), userName, addressNow); return line ? `${line}\n` : ''; }; // local-only build
 const livePrompt = (context = '') => {
   const facts = pickFacts(context, 40), total = listFacts().length;
   lastFactIds = facts.map((f) => f.id);
   const turn = `Live state (current as of this moment):
-${frontNow ? `${frontNow}\n` : ''}${pi.live()}
+${frontNow ? `${frontNow}\n` : ''}${addressLine()}${pi.live()}
 ${notes.live()}
 ${cal.live()}
 - Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
@@ -985,7 +992,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   ui({ kind: 'agent', e: { type: 'start' } });
   // Voice: the socket opens now, while the model thinks; sentences are spoken as soon as each is ready.
   if (VOICE_ON()) speech.setVoice(lookVoice()); // local-only build: picks up a voice changed in the settings file
-  speech.setBeats(personaNow().beats); // feature 21a: the short lines before something slow are the persona's
+  speech.setBeats(beatsNow()); // feature 21a: the short lines before something slow are the persona's
   const voice = VOICE_ON() ? speech.start() : (speech.stop(), null);
   turnVoice = voice;
   if (voice && intro) guideVoices.add(voice.id);
@@ -1021,6 +1028,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     const soon = frontSoon; frontSoon = null;
     const where = soon && Date.now() - soon.at < limitsFor(HOME).frontReuseSeconds * 1000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
     frontNow = guard.front(where.line, where.app); // Local-only build: an app on the never-look list isn't named; its name decides
+    addressNow = addressClock.reply(); // Local-only build: code decides whether this reply carries the form of address
     const quiz = takeQuizNote();
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
     // An area snap rides along as an image in the same message.
@@ -1107,7 +1115,7 @@ async function prompt(text, image = null, note = '', byVoice = false) {
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
-    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); if (flow.spoken()) voice?.say(forVoice(sir(msg))); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
+    if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); if (flow.spoken()) voice?.say(forVoice(sir(msg, { said: true }))); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
     if (controller.signal.aborted && quiet) ui({ kind: 'agent', e: { type: 'done' } });
     else {
       console.error('prompt failed', err);

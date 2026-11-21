@@ -189,7 +189,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   await until(() => order.includes('end'), 'the end');
   assert.deepEqual(order, ['audio', 'mark 1', 'mark 2', 'audio', 'end'], 'what was cut is never said; what comes after is');
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
-  assert.match(side, /if \(problem\) return aloud\(problem, 'concerned'\)/); assert.match(side, /if \(flow\.spoken\(\)\) voice\?\.say\(forVoice\(sir\(msg\)\)\)/, 'a failed request is said as well as shown');
+  assert.match(side, /if \(problem\) return aloud\(problem, 'concerned'\)/); assert.match(side, /if \(flow\.spoken\(\)\) voice\?\.say\(forVoice\(sir\(msg, \{ said: true \}\)\)\)/, 'a failed request is said as well as shown');
   assert.match(side, /const aloud = \(text, mood\) => \{ say\(text, mood\); if \(flow\.spoken\(\)\) voiceLine\(forVoice\(text\)\); \};/);
   assert.match(side, /const voiced = noticeVoice\(\{ lines, notices \}, \{ exchange: flow\.spoken\(\), speakNotices: noticesOn\(\) \}\);\n[^\n]*\n\s*say\(lines\.join\('\\n'\), 'concerned'\);\n\s*if \(voiced\) await lineDone\(/, 'what a sync has to say is said too, inside an exchange (and a notice outside one: calendar.test.mjs)');
 }

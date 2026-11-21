@@ -310,6 +310,8 @@ export const PERSONA = {
   humour: { default: 'dry and rare', ok: text(100) },
   maxSentences: { default: 2, min: 1, max: 5, ok: (v) => Number.isInteger(v) && v >= 1 && v <= 5 },
   beats: { default: ['One moment, sir.', 'Checking now, sir.', 'Right away, sir.'], ok: (v) => Array.isArray(v) && v.length >= 1 && v.length <= 40 && v.every(text(60)) },
+  // How often the form of address is used, by the app's lines and the model's replies together; 0: always.
+  addressEverySeconds: { default: 180, min: 0, max: 86400, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 86400 },
 };
 function partDefaults(table) { return Object.fromEntries(Object.entries(table).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : v.default])); }
 const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
@@ -928,7 +930,7 @@ export function codeReference() {
   return {
     limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}) }])),
     kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max } },
-    personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
+    personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],
     calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max } },
     superProductivity: {

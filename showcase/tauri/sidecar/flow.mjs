@@ -220,7 +220,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     const skip = end('phrase');
     let reply = '';
     try { reply = settings().closingReply; } catch { /* nothing is said */ }
-    Promise.resolve(reply ? announce(reply) : null).then(() => raiseSoon(skip), () => {}).catch((e) => console.error('pending question', e));
+    Promise.resolve(reply ? announce(reply, { closing: true }) : null).then(() => raiseSoon(skip), () => {}).catch((e) => console.error('pending question', e));
     return true;
   }
 

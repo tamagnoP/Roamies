@@ -919,6 +919,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   used; a sentence longer than `limits.kokoroSentenceChars` is split at a clause boundary before it is sent.
 - **2026-11-21.** Features 16 and 21a approved by the owner and merged into `local-only` by fast-forward
   (`c857a0b`). Not rebuilt.
+- **2026-11-21.** The form of address was used nearly every time Roamies spoke. The owner's decision: code decides
+  when, not the model. It is used at most once in `persona.addressEverySeconds` (new setting, 180 by default, 0
+  meaning always), counting the model's replies and the app's own lines together; for each request the live state
+  tells the model to use it in this reply or not at all, and "once in a reply" is gone from its instructions; the
+  app's lines follow the same clock; the first thing said after start-up and the closing reply to "thanks" always
+  carry it. Following from "together", and not asked for in so many words: the beats are said without it unless the
+  setting is 0, since a beat comes just before a reply. Two pinned lines in `persona.test.mjs` and one in
+  `flow.test.mjs` were changed to the new wording. Committed on `local-only` directly.
 
 ## 6. Still to test
 
@@ -931,6 +939,11 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   manner in replies, "sir" once, two sentences at most; "sir" on a nudge, a notice and the Send question; a change
   to `persona` applying to the next request. Add `voiceEngine`, `kokoro`, `persona` and the two new `limits` to
   `settings.json` first, or the start-up bubble names them.
+- [ ] The form of address (2026-11-21) on the Mac, after an install: "sir" in the first reply after start-up and not
+  in the replies of the next three minutes; not on a nudge or a question in that time; on "Any time, sir." after
+  "thanks" every time; the beats said as "One moment."; `"addressEverySeconds": 0` bringing it back everywhere.
+  Whether the model keeps to "not at all" has not been tried with a real model. Add `persona.addressEverySeconds`
+  to `settings.json` first, or the start-up bubble names it.
 - [ ] The start-up settings bubble on screen (a `settings.json` without `limits`), and that it waits for the setup
   guide to close.
 - [x] Feature 13, the requests, against the real Super Productivity 20.0.0 with the real code and one test task

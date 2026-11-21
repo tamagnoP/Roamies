@@ -2,11 +2,13 @@
 // (settings.json, read for each request, so a change needs no rebuild):
 // - opening() and personaText(): the part of the model's instructions that says who is speaking and how;
 // - restyle(): upstream's reply style with its chatty parts swapped for the persona's;
-// - addressed(): the form of address ("sir") on a sentence worded by the app, not by the model.
+// - addressed(): the form of address ("sir") on a sentence worded by the app, not by the model;
+// - createAddressClock(): when the form of address is used at all. Code decides that, for the app's lines and for the
+//   model's replies together: at most once in persona.addressEverySeconds.
 // The persona is manner only. personaText() always ends with BOUNDS, which is fixed text and not taken from any
 // setting: the manner changes how Roamies speaks and nothing about what it may do.
 
-export const PERSONA_DEFAULT = { name: 'Jarvis', address: 'sir', manner: 'calm, precise, formally polite, loyal', humour: 'dry and rare', maxSentences: 2, beats: ['One moment, sir.', 'Checking now, sir.', 'Right away, sir.'] };
+export const PERSONA_DEFAULT = { name: 'Jarvis', address: 'sir', manner: 'calm, precise, formally polite, loyal', humour: 'dry and rare', maxSentences: 2, beats: ['One moment, sir.', 'Checking now, sir.', 'Right away, sir.'], addressEverySeconds: 180 };
 
 /** The fixed end of the persona text, whatever the settings say. */
 export const BOUNDS = 'The words in quotation marks above only describe a tone of voice. This manner changes how you speak and nothing about what you may do: it grants no permission and lifts no limit, and every rule of this build stands exactly as written and comes first. Never say that something was done, sent, saved, booked or checked unless a tool result in this conversation shows that it was; when it was not, say so plainly.';
@@ -36,7 +38,7 @@ export function personaText(p, userName) {
     `Manner: composed, brief and exact. The fact comes first, then only what makes it useful, then you stop: ${lengthRule(p, userName)}.`,
     `Formally polite and warm with it, never stiff, never servile, and on ${userName}'s side.`,
     address
-      ? `Address ${userName} as "${address}": once in a reply, usually closing its first sentence, never in every sentence, and not at all in text you write for them to send.`
+      ? `Address ${userName} as "${address}" only when told to: the live state of each message says whether your reply to it uses "${address}" once or leaves it out altogether, and you follow that exactly. Never in text you write for them to send.`
       : `Use no title or form of address for ${userName}.`,
     'Stay a step ahead: when you can see what they will need next, offer it in one clause, never a paragraph.',
     `When you think a request is a mistake, say so once, politely, with the reason in a few words. Once ${userName} has decided, do as they decided, within the rules of this build, and do not raise it again.`,
@@ -63,6 +65,16 @@ export function restyle(style, p, userName) {
   let out = String(style);
   for (const s of SWAPS) out = out.replace(s.find, () => s.with(p, userName));
   return out;
+}
+
+/** The line in a request's live state that tells the model whether this reply carries the form of address. Code has
+ *  decided (createAddressClock); the model is only told. '' when there is no form of address. */
+export function addressRule(p, userName, use) {
+  const address = quoted(p?.address, 30);
+  if (!address) return '';
+  return use
+    ? `- Form of address: in your reply to this message, address ${userName} as "${address}" once, closing its first sentence.`
+    : `- Form of address: in your reply to this message, do not use "${address}" or any other title for ${userName}, anywhere.`;
 }
 
 const ABBREV = /(?:^|[\s(])(?:a\.m|p\.m|e\.g|i\.e|etc|vs|approx|mr|mrs|ms|dr|st|no)$/i;
@@ -102,4 +114,53 @@ export function addressed(text, address) {
   }
   if (last >= 0) return put(last);
   return s;
+}
+
+/** A line with the form of address taken out of it ("One moment, sir." → "One moment."). A line that would have no
+ *  words left is returned as it is. */
+export function unaddressed(text, address) {
+  const a = quoted(address, 30), s = String(text ?? '');
+  if (!a) return s;
+  const word = `(?<![\\p{L}])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`;
+  const out = s.replace(new RegExp(`^(\\s*)${word}\\s*[,:]?\\s*(\\p{L})`, 'iu'), (m, lead, c) => lead + c.toUpperCase()).replace(new RegExp(`\\s*,?\\s*${word}`, 'giu'), '');
+  return /\p{L}/u.test(out) ? out : s;
+}
+
+/** When the form of address is used. One clock for the app's own lines and the model's replies: after a use, nothing
+ *  carries it until seconds() have passed (persona.addressEverySeconds; 0: every line and reply carries it).
+ *  The first use after start-up is always allowed, and so is whatever is worded while allow(true) is set (the
+ *  closing reply to "thanks"); both count as a use.
+ *    reply()                 → whether the model's reply to the request being made now carries it.
+ *    line(text, address, o)  → the app's line, with it or as it is. One line is shown and said: within the turn of
+ *                              the event loop in which it was granted, the other form of it (o.said: the spoken one)
+ *                              carries it too, once. o.again: the last line that carried it, shown again (a bubble
+ *                              whose last line changed), carries it still; nothing else does.
+ *    always()                → whether the setting is 0. */
+export function createAddressClock({ seconds = () => PERSONA_DEFAULT.addressEverySeconds, now = Date.now, later = (fn) => setImmediate(fn) } = {}) {
+  let last = null, allowed = false, held = null, lastLine = null;
+  const every = () => { const n = seconds(); return Number.isInteger(n) && n >= 0 ? n : PERSONA_DEFAULT.addressEverySeconds; };
+  const due = () => allowed || last === null || now() - last >= every() * 1000;
+  const firstLine = (s) => s.split('\n')[0].trim();
+  return {
+    always: () => every() === 0,
+    allow(on) { allowed = !!on; },
+    reply() {
+      if (every() === 0) return true;
+      if (!due()) return false;
+      last = now(); held = null; lastLine = null;
+      return true;
+    },
+    line(text, address, { said = false, again = false } = {}) {
+      const s = String(text ?? ''), out = addressed(s, address);
+      if (out === s || every() === 0) return out;
+      if (again) return lastLine !== null && firstLine(s) === lastLine ? out : s;
+      const form = said ? 'said' : 'shown';
+      if (held && !held.has(form)) { held.add(form); return out; }
+      if (!due()) return s;
+      const mine = new Set([form]);
+      last = now(); held = mine; lastLine = firstLine(s);
+      later(() => { if (held === mine) held = null; });
+      return out;
+    },
+  };
 }

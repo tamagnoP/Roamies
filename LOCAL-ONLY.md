@@ -215,7 +215,8 @@ setup guide is open, the bubble waits until it closes.
               "voice": "bm_george", "lang": "b", "speed": 1.05 },
   "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
                "humour": "dry and rare", "maxSentences": 2,
-               "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."] },
+               "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."],
+               "addressEverySeconds": 180 },
   "limits": {
     "approvalBubbleChars": 600,
     "promptChars": 8000,
@@ -315,7 +316,8 @@ setup guide is open, the bubble waits until it closes.
   | `manner` | `calm, precise, formally polite, loyal` | up to 200 characters | A description of the tone, given to the model in quotation marks. |
   | `humour` | `dry and rare` | up to 100 characters | The same, for humour. |
   | `maxSentences` | 2 | 1 to 5, whole | The longest reply, unless you ask for an explanation, a list or a story. |
-  | `beats` | `["One moment, sir.", "Checking now, sir.", "Right away, sir."]` | 1 to 40 lines of up to 60 characters | The short lines said before something slow. One is picked by code; no request is made for it. |
+  | `beats` | `["One moment, sir.", "Checking now, sir.", "Right away, sir."]` | 1 to 40 lines of up to 60 characters | The short lines said before something slow. One is picked by code; no request is made for it. Said without the form of address unless `addressEverySeconds` is 0. |
+  | `addressEverySeconds` | 180 | 0 to 86400, whole | The form of address is used at most once in this many seconds, by the app's lines and the model's replies together. 0: every time. |
 - `limits`: the sizes, times and counts. Each is a number in the range below; one that is missing or outside its
   range uses its default and is named in the start-up bubble. Leaving `limits` out altogether counts as one missing
   setting. An edit counts from the next request, except `answerWaitMinutes`, which is read when Roamies starts.
@@ -956,8 +958,16 @@ as "sir". It is a manner only.
 - Lines worded by the app (nudges, notices, failures, the closing reply, the app's questions) get the form of
   address once, by code, closing their first sentence: "Nudge test is due at 14:05, sir.". Button labels, pi's own
   reply, quoted text and anything the model wrote are left as they are. With `"address": ""` nothing is added.
+- When the form of address is used is decided by code, not by the model (`createAddressClock` in `persona.mjs`):
+  at most once in `addressEverySeconds` (180 by default), counting the app's lines and the model's replies
+  together. For each request the live state tells the model either to use it once in that reply or not at all; a
+  line of the app's gets it only when the clock allows. A line that is both shown and said carries it in both. Two
+  things carry it whatever the clock says, and count as a use: the first thing said after start-up, and the
+  closing reply to "thanks". With `0` every reply and every line carries it. The model's reply is not checked or
+  changed: it is told, and no more.
 - The short line before something slow is one of `beats`, picked by code and spoken from audio made beforehand. The
-  model is told to say nothing first; no request is made for a beat.
+  model is told to say nothing first; no request is made for a beat. A beat comes just before a reply, so it is said
+  with the form of address taken out ("One moment."), unless `addressEverySeconds` is 0.
 - The name is for the model only. Menus and labels keep the look's name.
 
 ## Updating
