@@ -85,6 +85,7 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `8b33fc5` | 2026-11-20 | A nudge for a to-do that has come due is worded by code and makes no request to the model. |
 | `c69e902` | 2026-11-20 | What a sync has to say goes to a bubble, never into a tool's result; the block offer is the app's own question. |
 | `2603453` | 2026-11-20 | A declined overlap no longer names what was in the way in the tool's result; `CLAUDE.md`: anything with a fixed shape lives in code, not in the model. |
+| `077f738` | 2026-11-21 | The word decides the kind: "to-do" or "task" makes a commitment, "remind me" a reminder; "make that a to-do" turns a reminder into a commitment (`update_commitment` with kind `commitment`). Committed on `local-only` directly. |
 
 Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
 `local-only` by fast-forward on 2026-11-13.
@@ -533,6 +534,10 @@ the screen blocks clicks.
   left unanswered, it comes back; a to-do of that title with no block is used without a question and the reply
   says it is the one already on the list; "the flow test" matches "Flow test". The two to-dos left by the check of
   19 November ("Flow test" `ccb9913`, "Flow test, second run" `c226ccc`) are still on the list.
+- [ ] The word decides the kind (2026-11-21, `077f738`) on the Mac, after the next install (it is not in the build
+  installed on 2026-11-21): "add a task: ..., in ten minutes" is a to-do with a task in Super Productivity; "remind
+  me in ten minutes to ..." is a reminder with none; "make that a to-do" after it keeps the one entry and its time,
+  and the task appears in the app.
 - [ ] Feature 13 on screen with the real app: the first-time bubble; a change made in the app arriving in Roamies; a
   block placed, moved and taken off; an overlap question; a day plan; the matrix tags showing on the app's
   Eisenhower board; the app closed while a to-do is added.
