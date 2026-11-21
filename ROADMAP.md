@@ -40,6 +40,7 @@ Last updated: 2026-11-21.
 | 24 | Lean running | Agreed, not designed | |
 | 25 | Check-ins on progress | Agreed, not designed | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
+| 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed | |
 
 Build order: 18, 14, 19, 16, 17, 15, then 20 and 21.
 
@@ -201,6 +202,21 @@ and reviewer (the owner's review skills, fresh session, cannot write). Anything 
 coder finishes, Roamies offers a review, and a yes brings a second Send bubble. Roles never start each other.
 Prompt F is a draft until the owner has shown the skills.
 
+**Helpers (agreed 2026-11-18).** Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+- Besides roles (pi with a narrow job), small single-task helpers inside Roamies with no file access, for work that
+  needs judgment, such as the two-sentence review of the day. Work with a fixed shape stays plain code. Calendar
+  and daily note are not roles: they stay as code inside Roamies (13 and 18).
+- Helpers run one at a time, and their results reach the owner one at a time.
+- Where it works, a helper uses the local model, which is free and private. The catch: the model takes about 4 GB
+  while loaded, so this is decided together with offline mode (23).
+- **Two kinds of helper.** Doers only use tools: one request, one tool call, no thinking step, so they answer fast
+  (a reminder, a to-do, a note). Thinkers reason first and are used only when the task needs it (sorting
+  priorities, reviewing the day, choosing between options).
+- Which kind handles a task is decided by code from the type of task, not by another model.
+- A doer that is unsure hands the task up to a thinker, or to Claude when online, instead of guessing.
+- Preferably one local model with its thinking switched on or off, not two models, so memory use does not double.
+
 ### 15. Search mode (Prompt C, draft, still being discussed)
 
 Built after 16 and 17.
@@ -231,9 +247,10 @@ Features 16 and 17 are built before search mode (15); 20 and 21 come last.
 | --- | --- | --- |
 | 16. Natural local voice | Later | Kokoro or Piper as a second voice engine; fits in 16 GB. Needs a tool install and a model download once. |
 | 17. Double clap, then "Jarvis", then speak | Later | The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word. |
-| 23. Offline mode with a local model | Agreed, not designed | The owner sends its text later. |
-| 24. Lean running | Agreed, not designed | The owner sends its text later. |
-| 25. Check-ins on progress | Agreed, not designed | The owner sends its text later. |
+| 23. Offline mode with a local model | Agreed, not designed | Agreed text and measurements below. |
+| 24. Lean running | Agreed, not designed | Agreed text and one reading below. |
+| 25. Check-ins on progress | Agreed, not designed | Agreed text below. |
+| 27. Better hearing | Agreed 2026-11-20, not designed | Agreed text below. |
 | Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
 | Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
 | Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
@@ -253,6 +270,176 @@ how many roles, and which work is a tool and which is a role.
 Replace the characters with a single ring of particles that responds to state (resting, listening, thinking,
 speaking, pi working), and rework the look of the app around it. An original design. Would also settle how much of
 the screen blocks clicks.
+
+**The new look and manner (agreed 2026-11-15).** Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+Roamies is redesigned as the owner's own assistant: one orb as the only look, the bubbles, panel and setup guide
+restyled to match, and a personality of its own. Upstream's characters are kept in the code and hidden, so
+upstream's fixes still merge. Four steps:
+
+- **21a, personality (designed 2026-11-19).** The manner of a calm, capable butler: composed, brief and exact,
+  formally polite but warm, loyal, quietly a step ahead, with dry humour that is rare and never at a bad moment. It
+  pushes back once, politely, then does as the owner decides. It calls the owner "sir". The lines are original; no
+  dialogue from the films is reused.
+  - Manner only, never behaviour: every safeguard holds, and it never claims to have done what it has not.
+  - Humour starts low, since a model told to be witty overdoes it; the owner can turn it up.
+  - Kept in `settings.json`, changed without a rebuild:
+
+    ```json
+    "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
+                 "humour": "dry and rare", "maxSentences": 2 }
+    ```
+  - The tone, by example: "Done, sir. The block is on Friday at ten." · "I'm afraid Super Productivity is closed,
+    sir. I'll book the slot when it's open." · "You have three blocks already this afternoon, sir. Shall I add a
+    fourth anyway?" · "Of course, sir."
+- **21b, the orb.** An original design (below). Five states: resting (one frame, then no drawing), listening,
+  thinking, speaking, pi working. Only a small spot in the centre takes clicks. The memory growth is diagnosed
+  first, since this rewrites the page that grows.
+- **21c, bubbles and text** restyled to match.
+- **21d, settings panel and setup guide.**
+
+**The orb's design (agreed 2026-11-17).** An instrument that is alive, where every line is a readout and nothing is
+decoration. It sits on its own dark disc, so it looks the same over any window. From the outside in:
+
+- a clock face of fine ticks, with today's calendar blocks as arcs (blue for the owner's, grey for time already
+  taken, dimmer once past) and a line for now;
+- a bright arc for time running out: the answer window, and the countdown before a read-only hand-off sends;
+- the particle ring, for voice only;
+- centre rings that turn while Claude thinks, with three extra arcs while pi works;
+- dots at the bottom, one per question still waiting.
+
+Values chosen in the second prototype ("Roamies orb instrument") on 2026-11-17; the first prototype's values (the
+plain particle ring) are superseded:
+
+```json
+{ "disc": 100, "line": 1, "ticks": 36, "hue": 194, "count": 700, "thick": 20, "size": 1, "speed": 50,
+  "screen": 100, "stillAtRest": true }
+```
+
+The bubbles follow the same language: near-black panels, hairline borders with corner marks, tick marks for the
+countdown, monospaced labels, white and one ice blue, amber only for "can edit". Two rounds are on the canvas
+"Roamies interface design": a softer glass style and the instrument style.
+
+Open: a 12-hour face puts 9 in the morning and 9 in the evening on the same spot, and the alternative is a dial of
+the working hours only; whether the day dial is always shown or only on request.
+
+### 16. Natural local voice
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+A more natural voice that runs on the Mac, using Kokoro, which the owner already has working. No cloud voices, no
+clones of real actors.
+
+- **The voice (tested and chosen by the owner, 2026-11-17):** `bm_george`, one of Kokoro's own British voices, run
+  through `mlx_audio`:
+
+  ```bash
+  python -m mlx_audio.tts.generate --model mlx-community/Kokoro-82M-bf16 \
+    --text "Good evening. All systems are online and running locally on your MacBook Air." \
+    --voice bm_george --lang_code b --speed 1.05 --play
+  ```
+
+  For the build these become settings: model `mlx-community/Kokoro-82M-bf16`, voice `bm_george`, language `b`,
+  speed `1.05`. The command loads the model for every sentence, so the build keeps it loaded in a server.
+- **How 16 and 23 run (agreed 2026-11-17).** Kokoro and the offline model are installed in the owner's conda
+  environment `localai` (`/opt/homebrew/anaconda3/envs/localai`). Roamies does not run inside it. It starts each as
+  a small server with that environment's Python, by full path, and talks to it at an address that exists only on
+  the Mac, the way it talks to Super Productivity.
+  - The environment's path and the model's name are lines in `settings.json`.
+  - Kokoro stays running, as the everyday voice. The model (about 4 GB) is started when Roamies goes offline and
+    stopped when Claude is reachable again, and stays loaded between requests while it is in use.
+  - If a server will not start, for example after a package update breaks the environment, Roamies says so plainly
+    and falls back to the built-in macOS voice.
+
+### 23. Offline mode with a local model
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+When there is no internet, Roamies uses a small model on the Mac for to-dos, reminders, the calendar and notes. No
+pi and nothing complex; it says so plainly. It never switches silently. Fewer tools are offered, and dates are
+worked out by code, not by the model. How the model is started and stopped is under 16 above. Still to do before a
+design: test real function calling through a local server.
+
+- **First measurement (2026-11-16, MacBook Air, `gemma-4-e2b-it-4bit`):** a 4,745-token prompt read in 5.4 seconds,
+  replies at 20 to 26 tokens a second, 4.4 GB peak memory, 5 of 6 tool calls right (it put "Friday" on the wrong
+  date).
+- **Second stage: seeing the screen offline (agreed 2026-11-19).** After tasks and notes work offline, the local
+  model may also look at a window. macOS's accessibility information is the main source and vision is the fallback:
+  - macOS supplies the list of what is in the front window (each button, field and menu item with its name, role
+    and exact position), cut down to what is visible and usable.
+  - The model picks from that list by name and never guesses coordinates. Small vision models put a click in the
+    wrong place too often to be trusted with that.
+  - A screenshot is used only for apps that describe themselves poorly, such as drawing canvases.
+  - The never-look list covers the accessibility information exactly as it covers screenshots.
+  - Offline, the model points and explains first. Clicking and typing stay with Claude until it has been measured
+    how often the small model picks the right element.
+  - First step of the design: Claude Code reports how much of this Roamies' helper already does.
+- **Two models compared (2026-11-19, MacBook Air, the same test script, thinking switched off).** The candidate for
+  both stages was `Qwen3.5-4B-MLX-4bit` (text and images; at `~/.cache/huggingface/hub/Qwen3.5-4B-MLX-4bit`).
+
+  | Measure | Gemma 4 E2B | Qwen3.5 4B |
+  | --- | --- | --- |
+  | Tool calls right | 5 of 6 | 4 of 6 |
+  | Reading the 4,740-token prompt | 5.4 s (881 tokens a second) | 31.6 s (150 tokens a second) |
+  | Speaking speed | 20 to 26 tokens a second | 10 to 15 tokens a second |
+  | Peak memory, big prompt | 4.4 GB | 4.9 GB |
+
+  Both got the Friday date wrong (Gemma the 19th, Qwen the 21st; it is the 20th), which confirms that dates must be
+  worked out by code. Qwen also put the whole sentence into a note's title and left the text empty.
+- **Screen test (2026-11-19), a full-screen picture of Activity Monitor.** Qwen produced nothing after several
+  minutes and was stopped. Gemma 4 E2B answered in about 10 seconds (287 prompt tokens, 23 tokens a second, 4.1 GB
+  peak). It got the menu bar and the search field right and recognised most process names, but misread small text
+  ("DockerHelper" for DockHelper, "iclude.ai" for claude.ai, "Appshell" for AppleSpell) and did not list the
+  window's real controls, the five tabs and the toolbar buttons.
+- **Second screen test, a Finder window,** same speed and memory. Menu bar fully right; sidebar mostly right, but
+  it wrote "Projects" where the window says "Applications", an invention and not a misreading; none of the
+  unlabelled toolbar icons were listed.
+- **Decision (2026-11-19): one local model, Gemma 4 E2B, for everything offline.** Its reading of a screen is good
+  enough for the gist and not for names or positions, which is the case for taking those from macOS's accessibility
+  information and using the picture only as a fallback.
+
+### 24. Lean running
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+Agreed 2026-11-18. Measure first, then fix:
+
+- find and fix the growth of the overlay page;
+- keep the conversation history trimmed so requests don't slow down through the day;
+- confirm, with a test, that pi and every process it starts end after each hand-off, including after a stop or a
+  timeout;
+- set targets for memory at rest and activity while idle.
+
+One reading so far (MacBook Air, 2026-11-18 22:44, about one hour after Roamies was started): overlay page
+(`tauri://localhost`) 332 MB, sidecar (`node`) 72 MB, no swap in use, memory pressure normal. The earlier report
+was about 2 GB after a day. The `pi` process in that reading (178 MB) appears to be the owner's own pi in the
+terminal, not one started by Roamies; to be confirmed. A second reading after a full day of use is still to come.
+
+### 25. Check-ins on progress
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+Agreed 2026-11-18. Roamies checks on progress without nagging.
+
+- It asks when a calendar block ends ("is it done?"), and the answer marks the task done or reschedules it.
+- A task ticked in the daily note in Obsidian is marked done without asking.
+- A future task reported as finished frees its block.
+- The owner sets a maximum number of check-ins a day, and none happen in the middle of a block.
+- Mostly code, since comparing lists has a fixed shape. It uses the daily note (18) and the answer window (22).
+
+### 27. Better hearing
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+Agreed 2026-11-20. Fewer mistakes when speech is turned into text, in this order:
+
+1. Give Apple's recogniser the owner's vocabulary (Jarvis, pi, Roamies, project names, task titles), supplied from
+   the Mac.
+2. Read known patterns such as "9 for 30 minutes" in code.
+3. Match the wake name loosely.
+4. Only if that is not enough: compare a large Whisper model with Apple's on ten of the owner's own recorded
+   commands, and if it wins use it for requests only. Apple's stays for the answer window, because Whisper can
+   invent words during silence, and an invented "yes" there could approve something.
 
 ## 5. Decisions log
 
@@ -481,6 +668,49 @@ the screen blocks clicks.
   is `update_commitment` with kind `commitment`, the same entry with its text and time, by a second marked function
   in upstream's `store.mjs` (`makeCommitment`); it goes one way only; which word was used is read by the model,
   since the tool never sees what was said. Committed on `local-only` directly, as the owner asked.
+- **2026-11-21.** Accepted by the owner, for "the word decides the kind": the conversion goes one way only (a to-do
+  is not turned back into a reminder); `makeCommitment` is a second marked function in upstream's `store.mjs`, beside
+  `renameCommitment` (the decision of 2026-11-14 had allowed one); which word was used is read by the model from the
+  tools' descriptions, and only the conversion is code.
+
+Recorded on 2026-11-21 from the owner's checklist, each under the date it was agreed:
+
+- **2026-11-15.** Feature 21 is the new look and manner: one orb as the only look, the bubbles, panel and setup
+  guide restyled to match, and a personality of its own. Upstream's characters are kept in the code and hidden, so
+  upstream's fixes still merge.
+- **2026-11-16.** Offline mode (23) measured on the MacBook Air with `gemma-4-e2b-it-4bit` and found viable: a
+  4,745-token prompt read in 5.4 seconds, 20 to 26 tokens a second, 4.4 GB peak, 5 of 6 tool calls right.
+- **2026-11-17.** The orb's design: an instrument on its own dark disc, where every line is a readout (clock face
+  with the day's blocks, an arc for time running out, the particle ring for voice only, centre rings for thinking
+  and pi, dots for waiting questions). Values chosen in the second prototype; the first prototype's are superseded.
+- **2026-11-17.** The natural voice (16) is Kokoro's `bm_george` through `mlx_audio` (model
+  `mlx-community/Kokoro-82M-bf16`, language `b`, speed `1.05`), tested and chosen by the owner.
+- **2026-11-17.** How 16 and 23 run: Kokoro and the offline model live in the owner's conda environment `localai`;
+  Roamies starts each as a small server with that environment's Python and talks to it at an address on the Mac
+  only. Kokoro stays running; the model is started when Roamies goes offline and stopped when Claude is reachable
+  again. A server that will not start is said plainly, and the macOS voice is the fallback.
+- **2026-11-18.** Check-ins on progress (25) and lean running (24) agreed. First memory reading for 24 taken
+  (overlay page 332 MB and sidecar 72 MB about an hour after start).
+- **2026-11-18.** Feature 19 gains helpers: small single-task helpers inside Roamies with no file access, for work
+  that needs judgment, one at a time. Two kinds: doers (one request, one tool call, no thinking step) and thinkers
+  (reason first, only when the task needs it). Code decides which from the type of task; an unsure doer hands up.
+  Preferably one local model with thinking on or off; decided together with offline mode (23).
+- **2026-11-19.** Personality (21a) designed: the manner of a calm, capable butler, original lines, "sir"; manner
+  only, never behaviour; humour low to start; kept under `persona` in `settings.json`.
+- **2026-11-19.** Offline mode, second stage: the local model may look at a window, from macOS's accessibility
+  information first and a screenshot only as a fallback; it picks by name and never guesses coordinates; offline it
+  points and explains, and clicking and typing stay with Claude until measured.
+- **2026-11-19.** One local model, Gemma 4 E2B, for everything offline, after comparing it with Qwen3.5 4B on tool
+  calls, speed, memory and two screen pictures (section 4, feature 23). Both put Friday on the wrong date: dates
+  are worked out by code.
+- **2026-11-20.** Better hearing (27) agreed: the owner's vocabulary for Apple's recogniser, known patterns read in
+  code, the wake name matched loosely; Whisper only if that is not enough, for requests only, never for the answer
+  window.
+- **2026-11-21.** Daily note (18) gains task pages: a task or reminder with at least one note gets a page
+  `Tasks/<title>` in the vault, made the first time a note is linked to it; every note about the task links to it,
+  and the page links to the days the task was planned, worked on and finished. A task with no notes gets no page. A
+  renamed task's page keeps its name and gains a line with the new one. Note contents are read only when asked;
+  nothing is written into Super Productivity for this. Recorded here only; section 3's text for 18 is unchanged.
 
 ## 6. Still to test
 
