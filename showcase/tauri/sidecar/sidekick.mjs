@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import {
-  addCommitment, addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, nextDue, pickFacts, planFold,
+  addCommitment, addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, makeCommitment, nextDue, pickFacts, planFold,
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
 } from './store.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
@@ -344,6 +344,7 @@ const cal = createCalendar({
     all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
     rename: async (id, text) => { await renameCommitment(id, text); menu(); },
+    commit: async (id) => { await makeCommitment(id); menu(); }, // a reminder turned into a to-do
     add: async (text) => { const c = await addCommitment(text, null, 'commitment'); menu(); showList({ flash: c.id, seconds: 6 }); return c; },
     adopt: async (text, due) => { const c = await addCommitment(text, due, 'commitment', { reminded: due !== null && due <= Date.now() }); menu(); scheduleReminders(); return c; }, // a task taken over from Super Productivity: added without the list being put on screen
   },

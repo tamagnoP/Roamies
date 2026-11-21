@@ -583,6 +583,14 @@ reminders ("remind me at five") have none. The first time, Roamies shows how man
 titles, and waits for your yes; before it, nothing is created. A new task appears in the app's Today list, as any
 task added there does.
 
+**To-do or reminder: the word you use decides.** "To-do" or "task" ("add a task: send the abstract, in ten minutes")
+makes a to-do, even when its time is only minutes away: it stays open until you say it is done, and has a task in
+the app. "Remind me" makes a reminder: it clears itself once you have been nudged, and has no task. "Make that a
+to-do" (or "a task") turns a reminder into a to-do: the same entry, with its words and its time, from then on open
+until it is done, with a task in the app at the next sync. A to-do is not turned back into a reminder. Which word
+was used is read by the model, from the rule in the two tools' descriptions (`KIND_RULE` in `calendar.mjs`); the
+conversion itself is code (`makeCommitment` in `store.mjs`).
+
 **The sync.** For a to-do and its task, seven things are kept the same on both sides: the title, whether it is done,
 the start time, the length, urgent, important, and the due time (the app's deadline). A change on either side
 reaches the other.
@@ -804,8 +812,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler
   words, closing phrases, the "Heard" line.
 - `showcase/tauri/sidecar/flow.mjs` (new): the exchange, the answer window, pending questions, `show_pending`.
-- `showcase/tauri/sidecar/store.mjs`: one function added, `renameCommitment`, so a title changed in the app reaches
-  the list.
+- `showcase/tauri/sidecar/store.mjs`: two functions added: `renameCommitment`, so a title changed in the app reaches
+  the list, and `makeCommitment`, which turns a reminder into a to-do.
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches;

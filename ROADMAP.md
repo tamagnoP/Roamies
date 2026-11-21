@@ -473,6 +473,13 @@ the screen blocks clicks.
   urgent and important one, a failed step).
 - **2026-11-21.** Features 22 and 26 approved by the owner and merged into `local-only` by fast-forward
   (`2603453`).
+- **2026-11-21.** The word the owner uses decides the kind: "to-do" or "task" makes a commitment, even with a time
+  minutes away; "remind me" makes a reminder; "make that a to-do" turns a reminder into a commitment. The rule is in
+  the descriptions of `remember_commitment` and `update_commitment` (`KIND_RULE` in `calendar.mjs`, put over
+  upstream's wording when the tools are wrapped; `tools.mjs` is unchanged). Decided while building: the conversion
+  is `update_commitment` with kind `commitment`, the same entry with its text and time, by a second marked function
+  in upstream's `store.mjs` (`makeCommitment`); it goes one way only; which word was used is read by the model,
+  since the tool never sees what was said. Committed on `local-only` directly, as the owner asked.
 
 ## 6. Still to test
 

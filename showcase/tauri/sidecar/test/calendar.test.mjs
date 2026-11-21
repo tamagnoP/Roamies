@@ -84,6 +84,7 @@ const todos = {
   update: async (id, { status, dueMs }) => { const c = list.find((x) => x.id === id); if (status) c.status = status; if (dueMs !== undefined) c.due = dueMs; },
   rename: async (id, text) => { list.find((x) => x.id === id).text = text; },
   add: async (text) => add(text),
+  commit: async (id) => { list.find((x) => x.id === id).kind = 'commitment'; },
 };
 const logged = [];
 let answer = null; const asked = [], askedFull = [], booked = [];
@@ -1407,6 +1408,15 @@ const said = JSON.stringify([logged, asked, told]);
 assert.ok(!said.includes(TOKEN) && !said.includes(SECRET) && !JSON.stringify(logged).includes('Seminar') && !said.includes('Dentist'), 'a task that isn\'t Roamies\' is named only to the owner, in the question about a clash');
 assert.ok(logged.length > 10 && logged.every((l) => !/title|text/.test(Object.keys(l.data).join())), 'the records say what kind of change, not what a to-do says');
 assert.equal(fs.readFileSync(settingsFile, 'utf8'), settingsBytes, 'and settings.json is as the owner left it');
+// ---- a reminder turned into a to-do ("make that a to-do") gets its task; as a reminder it had none (test/kind.test.mjs has the store's side)
+{
+  const rem = add('Kind: call Ana', { kind: 'reminder', due: clock + 20 * 60_000 });
+  await cal.sync('timer'); assert.equal(state().links[rem.id], undefined);
+  const upd = cal.wrap([{ name: 'update_commitment', execute: async ({ id, ...more }) => { assert.deepEqual(more, {}, 'kind is not passed on to upstream\'s tool'); const c = list.find((x) => x.id === id); await cal.changed(c); return `${id} is now open.`; } }])[0];
+  assert.equal(await upd.execute({ id: rem.id, kind: 'commitment' }), `${rem.id} is now open. It is a to-do now, not a reminder: it stays open until they say it is done.`);
+  assert.equal(rem.kind, 'commitment'); assert.equal(taskOf(rem).title, 'Kind: call Ana');
+}
+
 assert.deepEqual(FIELDS, ['title', 'done', 'start', 'minutes', 'urgent', 'important', 'due']);
 assert.deepEqual(Object.keys(codeReference().superProductivity.synced).length, 7);
 

@@ -333,6 +333,16 @@ export async function renameCommitment(id, text) {
   return c;
 }
 
+// Local-only build: a reminder turned into a to-do ("make that a to-do"). It keeps its text and its time, and from
+// then on stays open until it is done or dropped, like anything of kind commitment; calendar.mjs is the only caller.
+export async function makeCommitment(id) {
+  const c = loadMemory().commitments.find((x) => x.id === id);
+  if (!c) return null;
+  c.kind = 'commitment';
+  await saveMemory();
+  return c;
+}
+
 // ---------- facts (long-term memory about the user) ----------
 
 const FACT_CAP = 150;

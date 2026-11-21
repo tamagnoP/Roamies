@@ -54,7 +54,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
-| `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, and `reminded` in `addCommitment`. |
+| `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, `makeCommitment`, and `reminded` in `addCommitment`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |
 | `showcase/tauri/sidecar/test/` | One test file per module, plain `node:assert`, no framework. |

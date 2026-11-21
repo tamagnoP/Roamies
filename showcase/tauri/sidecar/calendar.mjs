@@ -38,6 +38,13 @@ import { NUDGE, SP, limitsFor, loadSettings, readState, writeState } from './pi.
 const ROUTES = [['GET', /^\/health$/], ['GET', /^\/tasks(\?[\w=&]*)?$/], ['GET', /^\/tasks\/[^/?#]+$/], ['POST', /^\/tasks$/], ['PATCH', /^\/tasks\/[^/?#]+$/]];
 const TOKEN = /^[A-Za-z0-9]{32}$/;
 export const FIELDS = ['title', 'done', 'start', 'minutes', 'urgent', 'important', 'due'];
+
+// What remember_commitment and update_commitment (upstream's, in tools.mjs) say to the model here: the word they use
+// decides whether something is a to-do (kind commitment) or a reminder, never how soon it is due.
+export const KIND_RULE = {
+  remember: 'Save a to-do or a reminder for them, so that they are reminded at the right moment. The word they use decides the kind, and nothing else does. "To-do" or "task" ("add a to-do", "new task", "put it on my tasks") is kind \'commitment\', even when its time is only minutes away. "Remind me" is kind \'reminder\'. With neither word, something they say they will do or finish ("I\'ll finish the slides by Friday") is a \'commitment\', which is also the default. Never choose the kind by how soon it is due. A commitment stays open until they say it is done; a reminder clears itself once the nudge is given, and needs a time (without one it is kept as a commitment). due: a relative time like "in 90s", "in 5m", "in 1h30m" or "in 2 days" (best for short timers), or a local time YYYY-MM-DDTHH:mm:ss, YYYY-MM-DDTHH:mm, or YYYY-MM-DD if only the day is known; omit if there is no time at all. Resolve words like "Thursday", "at 2" or "tonight" from the timestamp on their message.',
+  update: 'Mark a saved to-do or reminder done or dropped, change its due time (same format as remember_commitment; use "none" to clear it), or turn a reminder into a to-do. When they say "make that a to-do" or "make that a task" about a reminder, call this with its id and kind \'commitment\': it keeps its text and its time, and from then on stays open until they say it is done. Never save it a second time with remember_commitment for that. A to-do is not turned back into a reminder.',
+};
 const WORDS = { title: 'the title', done: 'whether it\'s done', start: 'the start time', minutes: 'the length', urgent: 'urgent', important: 'important', due: 'the due time' };
 const HOW = 'Open Super Productivity, and check that Settings > Misc > Enable local REST API is on.';
 
@@ -234,6 +241,7 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
  * todos: Roamies' own list, as sidekick.mjs hands it over:
  *   all() → [{ id, text, due, status: 'open' | 'done', kind }]  (open ones, and those finished today)
  *   update(id, { status, dueMs }), rename(id, text), add(text) → { id }  (a new to-do of kind commitment)
+ *   commit(id)  (a reminder becomes a to-do of kind commitment)
  * ask: the question bubble. now: the clock. port, tokenFile: only tests set these.
  */
 export function createCalendar({ home = os.homedir(), todos, ask = async () => null, log = () => {}, now = () => Date.now(), port, tokenFile, book = null } = {}) { // book({ todo, title }): they said yes to the offer of a block
@@ -1167,7 +1175,22 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   /** Upstream's to-do tools, with a sync before each: what the app changed is in before the list is read or changed.
    *  list_commitments is replaced by the one above: the list itself is never handed over whole. */
   const TODO_TOOLS = new Set(['remember_commitment', 'update_commitment', 'list_commitments', 'show_list']);
-  const wrap = (tools) => tools.map((t) => (t.name === 'list_commitments' ? listTool : t)).map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { await sync('tool'); return t.execute(...a); } } : t)); // what the sync had to say is the app's to show, not part of the result
+  const kinded = (t) => {
+    if (t.name === 'remember_commitment') return { ...t, description: KIND_RULE.remember };
+    if (t.name !== 'update_commitment') return t;
+    return {
+      ...t,
+      description: KIND_RULE.update,
+      ...(t.parameters?.extend ? { parameters: t.parameters.extend({ kind: z.enum(['commitment']).optional() }) } : {}),
+      execute: async ({ kind, ...rest }, ...a) => {
+        const was = kind === 'commitment' ? (await todos.all()).find((x) => x.id === rest.id) : null;
+        if (was?.kind === 'reminder') { await todos.commit(rest.id); }
+        const said = await t.execute(rest, ...a);
+        return was?.kind === 'reminder' ? `${said} It is a to-do now, not a reminder: it stays open until they say it is done.` : was ? `${said} It already was a to-do.` : said;
+      },
+    };
+  };
+  const wrap = (tools) => tools.map((t) => (t.name === 'list_commitments' ? listTool : kinded(t))).map((t) => (TODO_TOOLS.has(t.name) ? { ...t, execute: async (...a) => { await sync('tool'); return t.execute(...a); } } : t)); // what the sync had to say is the app's to show, not part of the result
 
   const tools = [
     ...blockTools,
