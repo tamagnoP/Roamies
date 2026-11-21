@@ -29,7 +29,7 @@ Last updated: 2026-11-21.
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
 | 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 24 | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
-| 16 | Natural local voice (Kokoro), built with the personality (21a) | Queued, next; voice chosen, not designed | |
+| 16 | Natural local voice (Kokoro), built with the personality (21a) | Planned on `natural-voice`, waiting for the owner's go | |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
 | 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 16 | |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
@@ -165,7 +165,8 @@ and was left alone, `LOCAL-ONLY.md` carries the change.
 
 ## 2. In progress
 
-Nothing is in progress.
+Features 16 and 21a, the natural voice and the personality: planned on branch `natural-voice` (section 3,
+under 16). Nothing is built until the owner says go.
 
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
@@ -223,6 +224,127 @@ owner decides. It calls the owner "sir". The lines are original; no dialogue fro
 - The tone, by example: "Done, sir. The block is on Friday at ten." · "I'm afraid Super Productivity is closed,
   sir. I'll book the slot when it's open." · "You have three blocks already this afternoon, sir. Shall I add a
   fourth anyway?" · "Of course, sir."
+
+**Plan for 16 and 21a (2026-11-21, branch `natural-voice`). Nothing is built; it waits for the owner's "go".**
+
+*How it is today.* A reply is cut into sentences and each goes to `speaker.mjs`, which hands it to a voice object
+(`LocalVoice` in `localvoice.mjs`): one `/usr/bin/say` run per sentence, the audio sent to the overlay as it is
+made. The overlay (`voice-out.js`) plays it and answers each "mark" when everything handed over before the mark has
+finished playing; the answer window opens on that answer only.
+
+*Part 1, the voice.*
+
+1. **How the voice process is spoken to.** One Python process, started by the sidecar at start-up with the path in
+   `kokoro.python`, running a small script that ships with the app (`kokoro_server.py`, copied by `bundle.sh`). It
+   loads the model once and then waits. No listening port: requests go in on its standard input as one JSON line
+   per sentence (`id`, `text`, `voice`, `speed`), and audio comes back on a private pipe as framed blocks (a short
+   header with the `id`, the sample rate and the length, then 16-bit samples). Anything the libraries print goes to
+   the error stream, so it cannot corrupt the audio. One sentence is made at a time. No "conda activate": the full
+   path to the env's Python is enough.
+2. **New file `kokorovoice.mjs` (ours).** `KokoroVoice` extends `LocalVoice` and replaces only the step "make one
+   sentence into audio". The queue, the marks, cutting and closing stay the code that is already tested.
+   `speaker.mjs` (upstream's) gets two marked edits: which voice class a reply uses is asked at each reply, and the
+   sample rate comes from the voice (Kokoro makes 24 kHz, `say` 44.1 kHz; the overlay already takes a rate per
+   block).
+3. **No network.** The process is started with `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`,
+   `HF_DATASETS_OFFLINE=1`, `HF_HUB_DISABLE_TELEMETRY=1` and no proxy variables. On top of that I propose to run it
+   under `sandbox-exec` with all network denied, as pi already is, so that a library that ignored the variables
+   still could not connect. First build step: check that MLX runs under that rule; if it does not, I stop and
+   report. For the report: the process's open connections (`lsof -i`) at start, idle and while speaking, and the
+   sandbox's denial log for its process id, both expected empty.
+4. **Sentence by sentence, and "finished speaking" stays exact.** Sentences reach the voice as they do today, so
+   the first is spoken while the rest is still being written. A mark is still called only after the audio of every
+   sentence before it has been handed to the overlay, and the overlay still answers from the player itself; neither
+   piece of code changes. Verified by: the existing mark tests run again against `KokoroVoice` with a stand-in
+   process (a mark placed after three sentences is called after the third one's audio and not before; a cut calls
+   it at once; a fallback in the middle keeps the order); and on the Mac, a log line comparing the time of the
+   overlay's answer with the audio's own length (samples divided by rate) for ten lines.
+5. **Failure.** If the process cannot start, exits, sends a bad block or takes longer than a limit for a sentence,
+   the engine is marked down for the session, one bubble says so ("My natural voice isn't working, so I'm using the
+   Mac's voice until you restart me."), and the same sentence is made by `say` straight away. Every later reply
+   uses `say`. No restart attempts in the session. The limit is a new setting, `limits.kokoroTimeoutSeconds`.
+6. **No orphans.** The script exits when its standard input closes, which happens when the sidecar ends in any
+   way, a crash or a forced kill included. It also checks every few seconds that its parent is still the sidecar.
+   On a normal quit the sidecar closes the pipe and, after two seconds, kills it. The script starts no process of
+   its own.
+7. **Voices.** The script accepts a voice only if a file of that name is in the model's own `voices` folder. No
+   voice file from elsewhere, no reference audio; the script has no code path for cloning.
+8. **Settings** as given: `voiceEngine` (`"kokoro"` or `"system"`) and `kokoro` (`python`, `model`, `voice`,
+   `lang`, `speed`), in `pi.mjs`'s defaults and so in `settings.default.json`. `voice` and `speed` are read for
+   each reply; `python`, `model`, `lang` and `voiceEngine` at start (a restart of Roamies, no rebuild). With
+   `"system"` no Python process is started. The per-look `voices` setting keeps applying to the `say` voice only.
+9. **Measurements for the report:** start-up time (launch to ready), seconds from text to first sound for a short
+   sentence (model warm), memory of the process idle and while speaking.
+
+*What happens to a sentence being spoken when the owner starts talking.* As today: the overlay fades out within 50
+ms and the reply's waiting sentences are dropped. New: a sentence the Python process is in the middle of making
+cannot be interrupted; it is finished and its audio thrown away. The next thing said waits for it, at most the time
+of one sentence. While a Send or yes/no bubble is open, talking only hushes, as today.
+
+*Part 2, the personality.*
+
+1. **Setting** `persona` as given, in the defaults and `settings.default.json`; each field checked (text, and a
+   whole number from 1 to 5 for `maxSentences`), a bad one named in the start-up notice and replaced by its default.
+2. **New file `persona.mjs` (ours):** `personaText(persona, userName)` builds the instructions (composed, brief and
+   exact, the fact first; formally polite but warm; a step ahead in one clause; pushes back once, politely, then
+   does as the owner decides; humour as the setting says, never when something failed or was refused; at most
+   `maxSentences` spoken sentences unless asked for more).
+3. **Manner only.** The text ends with a fixed paragraph, not taken from the settings: it changes how Roamies
+   speaks and nothing about what it may do; every rule of this build comes first; it never says something was done
+   that was not. It is placed before "Rules of this build", which keeps the last word. `manner` and `humour` are
+   put in as quoted descriptions of a tone, capped in length.
+4. **Original wording**, mine; the owner's four example lines are not put in the prompt.
+5. **Code-worded lines:** one helper, `addressed(text)`, adds the form of address once, at the end of the first
+   sentence ("Nudge test is due at 14:05, sir.", "Shall I send it, sir?"). Used for nudges, notices, failures, the
+   closing reply and the app's questions, in `sidekick.mjs`, `pi.mjs`, `calendar.mjs`, `flow.mjs` and
+   `answers.mjs`, at the few places where those lines leave for the bubble and the voice, not at each of the
+   roughly one hundred lines. Not touched: button labels, pi's own reply, text copied from the owner, and anything
+   the model wrote. An empty `address` changes nothing. No humour is added by code.
+6. **What the persona replaces, and where it is.** In `stablePrompt` in `sidekick.mjs` (upstream's, marked edits):
+   the opening "You are Roamie, a tiny glowing pixel creature who lives on … screen" (`lookName`, `LOOK_BODY`), the
+   line "Personality: warm, funny, a little cheeky. You pump … up, … get playfully upset when they're
+   procrastinating", "the way you'd talk to a friend" in the voice style, and the paragraph of voice cues
+   ("[chuckling]"), which only Fish Audio performed and which are stripped before speaking today. The body tags
+   stay, since the character still moves, but their wording about being "upset" goes.
+7. **No rebuild:** the persona is read from `settings.json` when each request is put together, so a change applies
+   to the next request.
+
+*Tests* (`test/kokorovoice.test.mjs`, `test/persona.test.mjs`, additions to `speaker`, `settings` and `prompt`
+tests; the stand-in process is a Node script that speaks the same pipe format, so no Python is needed to run the
+suite).
+
+- 1.1: the process is started with the settings' path, by full path, once; two replies use the same process.
+- 1.2: the start has no port argument and the script opens no socket (checked in the script's text).
+- 1.3: the offline variables are set and proxy variables removed; the sandbox rule denies network.
+- 1.4: the mark tests above; the first sentence's audio is emitted before the second is requested.
+- 1.5: start failure, exit mid-sentence, bad block and timeout each give one bubble, the sentence through `say`,
+  and `say` for the next reply; never zero audio.
+- 1.6: closing the pipe ends the stand-in; quit kills a stand-in that ignores it; the script's parent check.
+- 1.7: a voice name not in the model's list, or a path, is refused.
+- 1.8: defaults, bad values, `"system"` starts nothing; the reference file holds every new setting.
+- 2.1 to 2.4: the text holds the name, address, manner, humour and sentence limit; the fixed paragraph is there
+  whatever the settings say; a `manner` that tries to grant permissions is still inside quotes and before the
+  rules; none of the upstream personality lines remain.
+- 2.5: `addressed` on a statement, a question, two sentences, a line that already has it, an empty address.
+- 2.7: a changed `settings.json` changes the next prompt without a restart.
+
+*Not in the automated tests, done on the Mac and given in the report:* the measurements, the no-connection check,
+and the timing check of "finished speaking".
+
+*Guarantees.* 1 holds (no network, checked two ways). 2 needs its wording widened: Roamies already runs one fixed
+program itself (`say`); it would now also run the Python named in `settings.json`, a file only the owner writes,
+with a fixed script, and what is to be spoken goes in on a pipe, never on a command line. The rest are untouched.
+
+*Questions for the owner.*
+
+1. Running the voice process under `sandbox-exec` with network denied: yes?
+2. Does the persona's name also replace "Roamie" in the menu and bubbles ("Ask Jarvis…"), or only in what the
+   model is told? The plan assumes only the model.
+3. `maxSentences: 2` against upstream's "one to three sentences" and "a story in 4 to 6 sentences": the plan lets
+   the persona's number win except when the owner asks for something longer.
+4. The upstream "beats" ("One sec.", "Okie-dokie.") are spoken before slow steps. They do not fit the manner. The
+   plan replaces the list with a short one in the persona's tone ("One moment, sir."); or keep them?
+5. Which rule in CLAUDE.md's guarantee 2 wording do you want for starting the Python process?
 
 ### 18. Daily note (Prompt E)
 
@@ -758,6 +880,9 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   local model is set aside as the everyday model and viable for offline mode. The notes vault's rule in the Done
   table reads "never changed, except as feature 14 will allow".
 - **2026-11-21.** Task pages are part of feature 18's text (section 3) and of Prompt E (appendix).
+- **2026-11-21.** Plan written for features 16 and 21a on `natural-voice`: Kokoro as one kept-loaded Python process
+  spoken to over its own pipes with no port, offline by environment and, proposed, by sandbox; `say` as the fallback
+  for the session; the persona built from `settings.json` by code, manner only. Five questions are with the owner.
 
 ## 6. Still to test
 
