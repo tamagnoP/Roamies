@@ -8,7 +8,7 @@ rules for working on it; this file tracks the work itself.
 same commit: move it between sections, fill in the branch and commit, and add a dated line to the decisions log when
 something is decided or reversed.
 
-Last updated: 2026-11-16.
+Last updated: 2026-11-21.
 
 ## Status at a glance
 
@@ -35,13 +35,13 @@ Last updated: 2026-11-16.
 | 19 | Roles for pi: coder and reviewer | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed | |
 | 21 | One orb as the only look | Idea, not designed | |
-| 22 | Conversation flow: spoken questions, answer window, pending questions | Built, not merged; to be reviewed and tried on screen | `voice-flow` |
+| 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed, not designed | |
 | 24 | Lean running | Agreed, not designed | |
 | 25 | Check-ins on progress | Agreed, not designed | |
-| 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Built, not merged; to be tried on the Mac | `voice-flow` |
+| 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 
-Build order: 22, 18, 14, 19, 16, 17, 15, then 20 and 21.
+Build order: 18, 14, 19, 16, 17, 15, then 20 and 21.
 
 ## 1. Done
 
@@ -72,6 +72,19 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `d42f3ba` | 2026-11-15 | A bubble that ignored what was said is as ready as when it opened; the Send bubble stays open after unclear words. |
 | `a5efb88` | 2026-11-15 | The Send bubble sends only on nothing but send words and declines only on nothing but don't-send words. |
 | `f5a30af` | 2026-11-15 | A click is resolved by which button it was, never by the spoken-word rule. |
+| `4916c04` | 2026-11-16 | Feature 22, conversation flow: in an exchange started by voice everything shown is also said; after a question the microphone opens by itself for `limits.answerWindowSeconds`; an unanswered question is kept in `state.json` and asked again at the end of the next exchange; `show_pending`. |
+| `dd039b9` | 2026-11-18 | A question is pending once; an answer clears every copy without a word; one whose thing was done is dropped without a word. |
+| `12fb0eb` | 2026-11-18 | A block asked for while Super Productivity is closed is kept and placed by the first sync that reaches the app. |
+| `898237b` | 2026-11-18 | A day and two times make a block, worked out by code; what is said matches what was done. |
+| `9fcb136` | 2026-11-18 | A title that an open to-do has is that to-do; "next Friday" is a question between two days; an end and a length that agree are accepted. |
+| `bfa3138` | 2026-11-19 | A notice about something done for the owner is spoken (`speakNotices`). |
+| `981001e` | 2026-11-19 | A block asked for by the title of a to-do that is already booked asks "Move it, or make a second one?". |
+| `3dc88df` | 2026-11-19 | `ROADMAP.md` only: the plan for seeing every open task in Super Productivity (planned as 23, built as 26). |
+| `3190ef8` | 2026-11-19 | A title close to an open to-do's asks "Is this <title>, or a new task?". |
+| `f30ab8a` | 2026-11-19 | Feature 26: every open task in Super Productivity that is not a sub-task has a to-do after a first yes, synced both ways; the model is given the to-do list in outline only, with titles through `list_commitments` filters. |
+| `8b33fc5` | 2026-11-20 | A nudge for a to-do that has come due is worded by code and makes no request to the model. |
+| `c69e902` | 2026-11-20 | What a sync has to say goes to a bubble, never into a tool's result; the block offer is the app's own question. |
+| `2603453` | 2026-11-20 | A declined overlap no longer names what was in the way in the tool's result; `CLAUDE.md`: anything with a fixed shape lives in code, not in the model. |
 
 Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
 `local-only` by fast-forward on 2026-11-13.
@@ -84,12 +97,14 @@ Feature 13 was built on `sp-calendar` by Claude Code on the Mac from Prompt D (w
 the whole to-do list mirrored, with the matrix on top), checked against the installed Super Productivity 20.0.0,
 approved by the owner and merged into `local-only` by fast-forward on 2026-11-16.
 
+Features 22 and 26 were built on `voice-flow` by Claude Code on the Mac (22 from the owner's prompt of 2026-11-16,
+26 from the plan of 2026-11-19), approved by the owner and merged into `local-only` by fast-forward on 2026-11-21
+(`2603453`).
+
 Confirmed working on the MacBook Air (M3): voice in and out, Send by click and by voice, notes, pi relay, countdown,
 stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answers, undo snapshots.
 
-## 2. In progress
-
-### 22. Conversation flow (branch `voice-flow`)
+### 22. Conversation flow
 
 Built 2026-11-16 from the owner's prompt and plan answers. When Roamies asks something, the owner answers by just
 speaking.
@@ -113,12 +128,12 @@ speaking.
   refused by the whole-phrase rule: after a key press, filler words no longer spoil an answer, and what was refused
   is shown.
 
-Not merged: the owner reviews it first. Not rebuilt, not installed, not seen or heard on the Mac.
+The faults found on the installed builds of 2026-11-16 to 2026-11-19 and their fixes are in the decisions log.
 
-### 26. Roamies sees every open task in Super Productivity (branch `voice-flow`)
+### 26. Roamies sees every open task in Super Productivity
 
 Decided by the owner on 2026-11-19 (plan of that day, with the owner's answers and changes a to e). Reverses "tasks
-Roamies did not create are never imported". Built, not merged, not installed. What it does is in `LOCAL-ONLY.md`
+Roamies did not create are never imported". What it does is in `LOCAL-ONLY.md`
 ("To-dos in Super Productivity" and "Safeguards"); the tests are `test/adopt.test.mjs`.
 
 - **Adopted:** every open task that is not a sub-task, in any project, with or without a time. Read: title, done,
@@ -146,13 +161,17 @@ Where the build differs from the plan: the first-time bubble has no separate lin
 its own task within one sync, so there is nothing to pair at that moment); `PRIVACY.md` is upstream's general text
 and was left alone, `LOCAL-ONLY.md` carries the change.
 
+## 2. In progress
+
+Nothing is in progress.
+
 **To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
 parent folders of research work and data; list the OrbStack app's project under `docker`.
 
 ## 3. Queued, in this order
 
-Build order: 22 (built on `voice-flow`, in review; section 2), 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
+Build order: 18, 14, 19, then 16 and 17 (section 4), then 15, then 20 and 21 (section 4).
 
 ### 18. Daily note (Prompt E)
 
@@ -415,7 +434,7 @@ the screen blocks clicks.
   adopted. The owner's answers: each open occurrence of a repeating task is adopted and the link records that it
   repeats, the rule is never touched; a to-do from the app that is removed in Roamies leaves its task exactly as it
   is, time included; one read of the real task list was allowed, field names and counts only. Built on
-  `voice-flow` (section 2).
+  `voice-flow` (section 1).
 - **2026-11-19.** A nudge for a to-do that has come due is worded by code and no longer goes through the model (the
   owner's answer to question 1 on feature 26). Until now every nudge was a request to the model: a note with each
   due to-do's id, title and due time, and the model wrote the one or two sentences (only when signed out did the
@@ -452,6 +471,8 @@ the screen blocks clicks.
   asked for: a to-do the owner gave Roamies with a time, in its nudge when it comes due; and the to-do concerned in
   a line a sync adds to the result of a to-do tool (a conflict, a to-do taken off the list, the block offer for an
   urgent and important one, a failed step).
+- **2026-11-21.** Features 22 and 26 approved by the owner and merged into `local-only` by fast-forward
+  (`2603453`).
 
 ## 6. Still to test
 
