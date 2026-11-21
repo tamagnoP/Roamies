@@ -29,12 +29,12 @@ Last updated: 2026-11-21.
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
 | 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 24 | |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
-| 16 | Natural local voice (Kokoro), built with the personality (21a) | Built on `natural-voice`, not merged; waiting for review | `natural-voice` |
+| 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
 | 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 16 | |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
-| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a built with 16 on `natural-voice`, not merged; the orb's design agreed; the rest not designed; after 19 | |
+| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
 | 24 | Lean running | Agreed, not designed; after 25 | |
@@ -42,7 +42,7 @@ Last updated: 2026-11-21.
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
 
-Build order: 16 with 21a, 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27.
+Build order: 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27.
 
 ## 1. Done
 
@@ -87,6 +87,8 @@ Base: upstream `KenKaiii/Roamies` at `fa798b4` (app version 0.1.34). All commits
 | `c69e902` | 2026-11-20 | What a sync has to say goes to a bubble, never into a tool's result; the block offer is the app's own question. |
 | `2603453` | 2026-11-20 | A declined overlap no longer names what was in the way in the tool's result; `CLAUDE.md`: anything with a fixed shape lives in code, not in the model. |
 | `077f738` | 2026-11-21 | The word decides the kind: "to-do" or "task" makes a commitment, "remind me" a reminder; "make that a to-do" turns a reminder into a commitment (`update_commitment` with kind `commitment`). Committed on `local-only` directly. |
+| `1a6b92c` | 2026-11-21 | `ROADMAP.md` only: the plan for features 16 and 21a. |
+| `c857a0b` | 2026-11-21 | Features 16 and 21a: the natural voice (Kokoro, one helper kept loaded, no port, under `sandbox-exec` with network denied, the macOS voice as the fallback for the session) and the personality (a manner only, built by code from the `persona` setting; the form of address on the app's own lines). Settings `voiceEngine`, `kokoro`, `persona`, `limits.kokoroTimeoutSeconds`, `limits.kokoroSentenceChars`. |
 
 Features 10 and 11 were built on `pi-sandbox` by Claude Code on the Mac, reviewed 2026-11-12, and merged into
 `local-only` by fast-forward on 2026-11-13.
@@ -102,6 +104,9 @@ approved by the owner and merged into `local-only` by fast-forward on 2026-11-16
 Features 22 and 26 were built on `voice-flow` by Claude Code on the Mac (22 from the owner's prompt of 2026-11-16,
 26 from the plan of 2026-11-19), approved by the owner and merged into `local-only` by fast-forward on 2026-11-21
 (`2603453`).
+
+Features 16 and 21a were built on `natural-voice` by Claude Code on the Mac from the plan of 2026-11-21, approved by
+the owner and merged into `local-only` by fast-forward on 2026-11-21 (`c857a0b`).
 
 Confirmed working on the MacBook Air (M3): voice in and out, Send by click and by voice, notes, pi relay, countdown,
 stopping a countdown, edit hand-offs waiting for Send, routines, hands-free answers, undo snapshots.
@@ -163,40 +168,10 @@ Where the build differs from the plan: the first-time bubble has no separate lin
 its own task within one sync, so there is nothing to pair at that moment); `PRIVACY.md` is upstream's general text
 and was left alone, `LOCAL-ONLY.md` carries the change.
 
-## 2. In progress
-
-Features 16 and 21a, the natural voice and the personality: built on branch `natural-voice` on 2026-11-21 after the
-owner's go, pushed, not merged, not in any installed build. The agreed text and the plan are in section 3, under 16.
-
-Where the build differs from the plan:
-
-- The helper's error stream is thrown away whole; a failure reaches Roamies as one word over the audio pipe (the
-  owner's addition a).
-- The script is copied into the helper's temporary folder and run from there, so the sandbox need not open the
-  app's own folder.
-- The beats are the `persona.beats` setting, picked by code; the model is told to say nothing before a slow step.
-- The form of address is added in `sidekick.mjs` only, at the places where the app's lines leave for the bubble and
-  the voice; `pi.mjs`, `calendar.mjs`, `flow.mjs` and `answers.mjs` did not need an edit for it.
-- The sandbox's denial log is not empty, as the plan expected: see known limits. MLX runs all the same.
-- Not done: the timing check of "finished speaking" on the Mac, which needs an installed build.
-
-Measured on this Mac on 2026-11-21, the helper run alone under its sandbox with the real model: 9.0 s from launch to
-ready; a sentence of 10 characters as audio after 0.24 s, 30 characters after 0.39 s, 77 after 0.97 s, 113 after
-1.17 s; resident memory 771 MB idle and up to 786 MB while speaking (footprint 0.7 to 0.9 GB idle, up to 2.0 GB
-while a sentence is made); no open connection at start, idle or while speaking.
-
-**To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
-`toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
-parent folders of research work and data; list the OrbStack app's project under `docker`.
-
-## 3. Queued, in this order
-
-Build order: 16 with 21a, 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
-2026-11-21; the subsections below follow it.
-
 ### 16. Natural local voice, with the personality (21a)
 
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+Built on `natural-voice` on 2026-11-21 after the owner's go, merged the same day (`c857a0b`). The agreed text, copied on
+2026-11-21 from the owner's checklist, then the plan as approved, then where the build differs.
 
 A more natural voice that runs on the Mac, using Kokoro, which the owner already has working. No cloud voices, no
 clones of real actors.
@@ -243,7 +218,7 @@ owner decides. It calls the owner "sir". The lines are original; no dialogue fro
   fourth anyway?" · "Of course, sir."
 
 **Plan for 16 and 21a (2026-11-21, branch `natural-voice`). Approved and built on 2026-11-21; the owner's answers
-are in the decisions log and the differences in section 2.**
+are in the decisions log and the differences below.**
 
 *How it is today.* A reply is cut into sentences and each goes to `speaker.mjs`, which hands it to a voice object
 (`LocalVoice` in `localvoice.mjs`): one `/usr/bin/say` run per sentence, the audio sent to the overlay as it is
@@ -363,6 +338,36 @@ with a fixed script, and what is to be spoken goes in on a pipe, never on a comm
 4. The upstream "beats" ("One sec.", "Okie-dokie.") are spoken before slow steps. They do not fit the manner. The
    plan replaces the list with a short one in the persona's tone ("One moment, sir."); or keep them?
 5. Which rule in CLAUDE.md's guarantee 2 wording do you want for starting the Python process?
+
+Where the build differs from the plan:
+
+- The helper's error stream is thrown away whole; a failure reaches Roamies as one word over the audio pipe (the
+  owner's addition a).
+- The script is copied into the helper's temporary folder and run from there, so the sandbox need not open the
+  app's own folder.
+- The beats are the `persona.beats` setting, picked by code; the model is told to say nothing before a slow step.
+- The form of address is added in `sidekick.mjs` only, at the places where the app's lines leave for the bubble and
+  the voice; `pi.mjs`, `calendar.mjs`, `flow.mjs` and `answers.mjs` did not need an edit for it.
+- The sandbox's denial log is not empty, as the plan expected: see known limits. MLX runs all the same.
+- Not done: the timing check of "finished speaking" on the Mac, which needs an installed build.
+
+Measured on this Mac on 2026-11-21, the helper run alone under its sandbox with the real model: 9.0 s from launch to
+ready; a sentence of 10 characters as audio after 0.24 s, 30 characters after 0.39 s, 77 after 0.97 s, 113 after
+1.17 s; resident memory 771 MB idle and up to 786 MB while speaking (footprint 0.7 to 0.9 GB idle, up to 2.0 GB
+while a sentence is made); no open connection at start, idle or while speaking.
+
+## 2. In progress
+
+Nothing is in progress.
+
+**To do in `settings.json`, by the owner, now that the sandbox is merged:** add the literature tool folders to
+`toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
+parent folders of research work and data; list the OrbStack app's project under `docker`.
+
+## 3. Queued, in this order
+
+Build order: 18, 25, 24, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
+2026-11-21; the subsections below follow it.
 
 ### 18. Daily note (Prompt E)
 
@@ -912,6 +917,8 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   its error stream stays out of Roamies' logs; `kokoro.python` is used only if it is an absolute path to an existing
   executable, started directly with a fixed argument list, and otherwise a bubble says so and the macOS voice is
   used; a sentence longer than `limits.kokoroSentenceChars` is split at a clause boundary before it is sent.
+- **2026-11-21.** Features 16 and 21a approved by the owner and merged into `local-only` by fast-forward
+  (`c857a0b`). Not rebuilt.
 
 ## 6. Still to test
 
