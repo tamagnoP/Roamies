@@ -876,6 +876,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/roamies/home.js` (new): where the home spot is, and its margins for the reference file.
 - `showcase/roamies/agent.js`: a bubble with buttons grows to show its whole question; the home position.
 - `showcase/roamies/core.js`: the frame loop stops while the character rests at home; no dozing off there.
+- `showcase/roamies/jarvis.js`, `10-dither.js`: JARVIS's globe holds still while it rests at home, so the page stops
+  drawing with this look as it does with the others (feature 24).
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
   with buttons stays on screen as it is while you talk; reports marks; shows the "Heard" line.
 - `showcase/desktop.html`: loads `home.js`.

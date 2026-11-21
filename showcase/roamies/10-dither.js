@@ -486,6 +486,8 @@
           wide: face.wide, dizzy: face.dizzy, happy: face.happy, sleepy: Math.max(env.sleepy ?? 0, face.sleepy ?? 0),
           mouth: pose?.mouth ?? (act && { wave: null, hype: 'shout', remind: 'o', upset: 'frown', motivate: 'grin' }[A]),
           brow: pose ? pose.brow : A === 'upset' ? 'angry' : A === 'motivate' ? 'determined' : A === 'remind' ? 'raised' : null,
+          // Local-only build: resting at home with nothing to do; a look that moves by itself holds still (jarvis.js).
+          rest: !!plug?.api?.resting && !pose?.mode && !act && !pending && m.speed < 2 && !m.dragging && !m.flung,
         });
         // The globe's points overlap (the brightest wins); a character is drawn in layers (the last one wins).
         if (look !== 'jarvis') {

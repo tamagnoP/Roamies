@@ -28,8 +28,7 @@
 
   R.jarvis = {
     // Voice level: rises while it talks or hears you, settles to a slow breath otherwise.
-    level(st) {
-      const t = st.t;
+    level(st, t = st.t) {
       if (st.mode === 'talk' && st.voice != null) return clamp(0.3 + st.voice * 0.9, 0, 1); // the real voice
       if (st.mode === 'talk') return clamp(0.45 + 0.35 * Math.abs(Math.sin(t * 11.3)) * Math.abs(Math.sin(t * 2.9 + 1)) + 0.2 * Math.sin(t * 23), 0, 1);
       if (st.mode === 'listen') return clamp(st.heard ?? 0.35 + 0.3 * Math.abs(Math.sin(t * 4.1)), 0, 1);
@@ -40,13 +39,16 @@
     // The globe. st: { t, mode, act, actA, open, look:[x,y], speed, sq, wide, dizzy, sleepy }
     // cx, cy are cells; rad the radius in cells. put(x, y, level) writes a cell, the brightest write wins.
     body(k, cx, cy, rad, st) {
-      const { put, L, th } = k, t = st.t;
+      // Local-only build: st.rest (10-dither.js) is true while it rests at home with nothing to do. Its own clock
+      // and its spin stop then, so the picture is the same every frame and the page stops drawing (core.js); they
+      // go on from where they stopped, so nothing jumps when it wakes.
+      const { put, L, th } = k, t = st.jt = (st.jt ?? st.t) + (st.rest ? 0 : st.dt ?? 0.016);
       const dots = rad < 9 ? DOTS.small : DOTS.default;
-      const v = this.level(st);
+      const v = this.level(st, t);
       const mode = st.mode, A = st.act;
       // Spin: slow at rest, faster thinking, a quick whirl while 'hype'; dizzy wobbles it.
       const spinRate = mode === 'think' ? 1.6 : A === 'hype' ? 3 : st.sleepy > 0.5 ? 0.1 : 0.32;
-      st.spin = (st.spin ?? 0) + spinRate * (st.dt ?? 0.016);
+      st.spin = (st.spin ?? 0) + (st.rest ? 0 : spinRate * (st.dt ?? 0.016));
       const yaw = st.spin + st.look[0] * 0.5, pitch = -0.42 + st.look[1] * 0.25 + (st.dizzy > 0.5 ? Math.sin(t * 9) * 0.3 : 0);
       const cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
       // Squash from the body's bounces, and a pulse out when it hears or speaks.

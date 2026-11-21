@@ -388,4 +388,21 @@ for (const [home, spot] of Object.entries(HOME)) {
   assert.equal(p.escHeld(), false);
 }
 
+// Feature 24: every look, in both sizes that rest at home, comes to rest and then draws nothing: not one frame asked
+// for, and the frame loop stopped. The same again after it has spoken and the bubble has closed.
+for (const look of ['classic', 'jarvis', 'anime', 'sarah', 'adrian']) for (const size of ['default', 'small']) {
+  const p = await started({ size });
+  p.host({ kind: 'look', look }); await p.tick(6);
+  const what = `${look}, ${size}`;
+  assert.equal(p.R.rested(), true, `${what}: the frame loop has stopped`);
+  assert.equal(await p.tick(5), 0, `${what}: no frame in 5 s at rest`);
+  assert.equal(await p.tick(60), 0, `${what}: none in the minute after`);
+  const said = p.agent.say('A line to wake it.'); await p.tick(1);
+  assert.equal(p.R.rested(), false, `${what}: speaking wakes it`);
+  p.agent.bubble?.close?.(); await said.catch?.(() => {}); p.agent.dismiss?.(); await p.tick(30);
+  assert.equal(p.agent.bubble, null, `${what}: the bubble has closed`);
+  assert.equal(p.R.rested(), true, `${what}: at rest again after speaking`);
+  assert.equal(await p.tick(5), 0, `${what}: no frame in 5 s at rest, afterwards`);
+}
+
 console.log('home position tests: passed');

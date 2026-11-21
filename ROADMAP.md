@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Measured and planned on `lean-running`; waiting for the owner's go. Nothing built | `lean-running` |
+| 24 | Lean running | Being built on `lean-running`: fix 1 of 5 done (every look draws nothing at rest), waiting for the owner's live run before fixes 2 to 5 | `lean-running` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
@@ -462,7 +462,36 @@ and remembered facts were empty here.
 model with tools, screenshots and drawings; two displays; the Claude Code route and the process it keeps warm;
 whether the classic look grows with a card up while it is active.
 
-#### Plan (nothing built; waits for "go")
+#### Live run on the installed build (2026-11-21, 21:15 to 21:33, the owner at the keyboard)
+
+Sampler: `showcase/tauri/sidecar/bench/sample.sh` (time, kind of process and size every 5 s), lined up with the
+activity log by `bench/align.mjs` (time and kind of event; the tool's name from `tool` lines, with the owner's leave).
+
+- Overlay page: 87 MB and flat for the first 11 minutes, then 87 → 814 MB in under five minutes, and still 811 MB a
+  minute after the drawing stopped. Shell 22 to 25 MB, sidecar 55 to 72, voice helper 9 to 14; no pi ran.
+- Growth began with the `draw` tool (a drawing on screen), went on through `list_commitments` (the to-do list card)
+  and `remember_commitment`, and ran at 2.7 to 2.8 MB a second for 106 s with no event at all while a card was on
+  screen (the owner confirmed the card). It stopped when the page stopped drawing. **The finding holds:** something
+  on the drawing layer while the character is drawn.
+- Not seen in the harness, to be explained before fix 2: a jump of 65 to 120 MB at the start of each spoken reply
+  and at the nudge; and the memory not coming back.
+- Kokoro helper: 654 MB, with single readings of 880 and 1,209 MB at the start of a spoken reply.
+- The eight `error` lines: all the same Node warning, code `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`, from the Claude Agent
+  SDK each time it starts a request. It says the SDK approves Roamies' own tools from the allowed list without asking
+  the callback; that callback only refuses tools that are not Roamies', which the allowed list does too. Harmless,
+  but it lands in the log as an error once per request.
+
+#### Built so far
+
+1. **Every look draws nothing at rest** (2026-11-21). JARVIS's globe kept turning at home, so the page drew 30
+   frames a second for good. It now holds still while it rests (`jarvis.js`, `10-dither.js`) and goes on from where
+   it stopped. `home.test.mjs`: each of the five looks, in the default and small sizes, asks for no frame in 65 s at
+   rest, and none again after speaking. In WebKit, with the list card up and JARVIS at rest: flat at 149 MB over
+   80 s, where it grew 2.8 MB a second before. The page still grows while a reply is spoken with a card up; that is
+   fix 2. No card today has a part that changes with time (there is no now-line yet); the rule for when one does is
+   in the plan, fix 2.
+
+#### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
 Fixes, smallest first:
 
@@ -1074,6 +1103,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   growth of the overlay page was not reproduced by replies or speech, and was found with a card of the drawing
   layer on screen while the character is drawn, which with the JARVIS look is always. Nothing is built until the
   owner's go.
+- **2026-11-21 (feature 24, the owner).** Plan approved, fixes 1 to 5; fix 6 only if the targets are missed, asked
+  first. The measuring tools go under `showcase/tauri/sidecar/bench/` (throwaway home folder only, not run by
+  `npm test`, not in the bundle). The fold point becomes `limits.historyTokens`, default 40,000; the live state is
+  kept on as few earlier requests as keeps the provider's reuse. Fix 1 covers every look and size; anything that
+  changes with time redraws once when it changes. Fix 3 also covers quitting and a crash of the sidecar, tested
+  against the real pi. The Kokoro helper's spikes are to be explained and bounded. The first request's size is
+  reported, not trimmed. If the page does not return near its start after five quiet minutes once 1 and 2 are in,
+  a way to get it back is proposed and waits for the owner. A live run on the installed build before and after.
 
 ## 6. Still to test
 
