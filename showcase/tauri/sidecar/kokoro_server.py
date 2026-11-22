@@ -15,6 +15,7 @@
 # - A voice is used only if a file of that name ships in the model's own "voices" folder. Nothing here takes a
 #   recording of a voice or a voice file from anywhere else.
 # - It ends when its input closes or its parent is gone.
+# - MLX's cache and memory limits are set from the settings before the model is loaded.
 import glob
 import json
 import os
@@ -58,7 +59,13 @@ def main():
     threading.Thread(target=watch_parent, daemon=True).start()
     try:
         import numpy as np
+        import mlx.core as mx
         from mlx_audio.tts.utils import load
+
+        # Feature 24: MLX's memory, bounded before anything is loaded (kokoro.cacheMB, kokoro.memoryMB). Without
+        # these MLX keeps every freed block for reuse and a sentence takes the helper to several GB for a moment.
+        mx.set_cache_limit(int(sys.argv[5]) * 1024 * 1024)
+        mx.set_memory_limit(int(sys.argv[6]) * 1024 * 1024)
 
         voices = voices_in(model_dir)
         if not voices:

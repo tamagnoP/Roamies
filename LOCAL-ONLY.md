@@ -212,7 +212,7 @@ setup guide is open, the bubble waits until it closes.
   "speakNotices": true,
   "voiceEngine": "kokoro",
   "kokoro": { "python": "/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "mlx-community/Kokoro-82M-bf16",
-              "voice": "bm_george", "lang": "b", "speed": 1.05 },
+              "voice": "bm_george", "lang": "b", "speed": 1.05, "cacheMB": 0, "memoryMB": 400 },
   "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
                "humour": "dry and rare", "maxSentences": 2,
                "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."],
@@ -305,6 +305,8 @@ setup guide is open, the bubble waits until it closes.
   | `voice` | `bm_george` | a voice that ships with the model | Read for each reply. |
   | `lang` | `b` | one letter | The model's language letter. Read at start. |
   | `speed` | 1.05 | 0.5 to 2 | 1 is the voice's own pace. Read for each reply. |
+  | `cacheMB` | 0 | 0 to 16384, whole | MB of freed memory MLX keeps for reuse while it makes a sentence. 0: none. Read at start. |
+  | `memoryMB` | 400 | 100 to 16384, whole | MB MLX aims to stay under while it makes a sentence. It goes over when one step needs more. Below about 400 sentences take longer and the helper gets no smaller. Read at start. |
 - `persona`: how Roamies speaks (see "The manner"). It changes nothing about what Roamies may do. Read for each
   request, so an edit counts from the next one. Each part that is missing or can't be used takes its default and is
   named in the start-up bubble.
@@ -935,6 +937,10 @@ own `voices` folder.
 - A sentence longer than `limits.kokoroSentenceChars` is split at a clause (a comma, semicolon, colon or dash), else
   between words, so each piece is made quickly. A piece being made when you start talking is finished and thrown
   away; what you say next waits for it.
+- Its memory: about 650 to 700 MB between sentences (the model and the libraries that turn text into sounds).
+  While a sentence is made it rises for under a second, more for a longer sentence: to about 1.3 GB for one at
+  `limits.kokoroSentenceChars` (120), then back. `kokoro.cacheMB` and `kokoro.memoryMB` are what bound it: without
+  them the same sentence took the helper to 3.8 GB. `bench/kokorocheck.py` measures it with the real model.
 - If the helper can't start, stops, answers wrongly or takes longer than `limits.kokoroTimeoutSeconds` over a
   sentence, one bubble says so ("My natural voice isn't working (…), so I'm using the Mac's voice until you restart
   me.") and the Mac's voice speaks from that sentence on, until Roamies is restarted. While the helper is still

@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done (nothing drawn at rest; the cause of the page's growth removed), waiting for the owner's live run before the Kokoro helper and fixes 3 to 5 | `lean-running` |
+| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done and accepted (nothing drawn at rest; the cause of the page's growth removed); the natural voice's helper bounded (`kokoro.cacheMB`, `kokoro.memoryMB`); next what the page's jumps leave behind, a page rebuild measured, then fixes 3 to 5 | `lean-running` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
@@ -516,6 +516,24 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    - Not checked in the real shell: its page cannot be changed without a build. The owner's live run is the check.
    - The release can be asked for only from outside the page: WebKit's low-memory signal, which goes to every
      WebKit page on the Mac. The page itself has no way.
+
+3. **The natural voice's helper, bounded** (2026-11-22). Every sentence took the helper from about 680 MB to
+   several GB for as long as it took to make: 3.9 GB for a sentence at the length limit (120 characters). Two
+   causes: the step that makes the sound needs about 190 MB per second of audio, and MLX kept every freed block
+   for reuse (its cache limit defaults to its memory limit, 15.5 GB on this Mac). The helper now sets MLX's cache
+   limit and memory limit before the model is loaded, from `kokoro.cacheMB` (0) and `kokoro.memoryMB` (400).
+   With the real model, 40 replies (128 sentences and 40 more at the length limit, `bench/kokorocheck.py`):
+   highest 1,344 to 1,369 MB, resting 690 to 711 MB between replies; a sentence at the length limit takes 0.76
+   to 0.79 s instead of 0.70, the others the same (0.37 to 0.39 s). The owner's target: under 1.5 GB at the
+   highest, back to rest between sentences. Under 1 GB would need pieces of 40 characters; not done.
+   `kokorovoice.test.mjs`: the limits reach the helper, are set before the model is loaded, and the script run
+   with stand-in libraries starts only under them.
+4. **An hour in the harness** (2026-11-22, fixes 1 and 2, 120 spoken replies at one every 30 s, the list card in
+   every fifth, a drawing in every third, a reading every 5 s). The page: 87 MB at the start, 105.5 at rest after
+   five minutes, 107.5 after an hour and after five quiet minutes, 88 after WebKit's low-memory signal. Thirty
+   jumps of about 89 MB while a drawing was up, each given back in full. The harness does not show the steps the
+   live run showed (135, 163, 192, 196, 221 MB): what leaves them is something the scripted run does not do.
+   Sidecar 74 to 82 MB. No fold of the conversation by 106,600 tokens: to be looked at with fix 5.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
@@ -1144,6 +1162,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   under 1 GB at all times), then fixes 3 to 5, the hour-long helper run, the first request's break-down, and the
   `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning kept out of the log's errors. Reports are saved in
   `~/Documents/roamies-reports/`. The measuring tools are committed under `showcase/tauri/sidecar/bench/`.
+- **2026-11-22 (feature 24).** Fix 2 accepted after the owner's live run (page: peak 288 MB, was 814 and 706).
+  The natural voice's helper: MLX's cache limit 0 and memory limit 400 MB, as settings `kokoro.cacheMB` and
+  `kokoro.memoryMB`; the sentence length stays. The owner's target for the helper is now under 1.5 GB at its
+  highest for a sentence at the length limit, and back to its resting size between sentences (under 1 GB is not
+  reachable without pieces of 40 characters). Order from here: what the page's jumps leave behind, with a limit on
+  the effort; a page rebuild measured in the real shell and reported before anything is built (fix 6 is the
+  owner's to decide, with numbers); not the drawing layer sized to its contents; then fixes 3 to 5, the first
+  request's break-down and the `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning.
 
 ## 6. Still to test
 

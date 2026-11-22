@@ -78,7 +78,7 @@ fs.writeFileSync(path.join(home, '.cache', 'huggingface', 'hub', 'blobs', 'aa', 
 fs.symlinkSync(path.join(home, '.cache', 'huggingface', 'hub', 'blobs', 'aa', 'weights'), path.join(modelDir, 'snapshots', 'abc', 'voices', 'bm_george.safetensors'));
 fs.writeFileSync(path.join(home, 'secret.txt'), 'private');
 
-const base = () => ({ kokoro: { python, model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05 }, limits: { kokoroTimeoutSeconds: 2, kokoroSentenceChars: 120 } });
+const base = () => ({ kokoro: { python, model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400 }, limits: { kokoroTimeoutSeconds: 2, kokoroSentenceChars: 120 } });
 /** An engine on the stand-in helper. spawns: every start, as it was asked for; events: what was asked and what came back, in order. */
 function engine(mode = '', change = (s) => s) {
   const spawns = [], events = [], downs = [], logs = [];
@@ -146,8 +146,8 @@ for (const bad of ['python', path.join(dir, 'nothing', 'python')]) { // anything
   assert.equal(path.basename(args[5]), 'kokoro_server.py');
   assert.ok(args[5].startsWith(dir) && fs.existsSync(args[5]), 'the script is run from the private temporary folder');
   assert.equal(fs.readFileSync(args[5], 'utf8'), fs.readFileSync(path.join(here, '..', 'kokoro_server.py'), 'utf8'), 'and is the one shipped with the app');
-  assert.deepEqual(args.slice(6), ['mlx-community/Kokoro-82M-bf16', modelDir, 'b', 'bm_george'], 'a fixed list: the model, where it is, the language, the voice');
-  assert.equal(args.length, 10);
+  assert.deepEqual(args.slice(6), ['mlx-community/Kokoro-82M-bf16', modelDir, 'b', 'bm_george', '0', '400'], "a fixed list: the model, where it is, the language, the voice, MLX's cache and memory limits in MB");
+  assert.equal(args.length, 12);
   assert.equal(opts.shell, false, 'never through a shell'); assert.equal(opts.detached, false);
   assert.deepEqual(opts.stdio, ['pipe', 'pipe', 'ignore'], 'its own pipes; its error stream goes nowhere');
   assert.ok(!args.some((a) => /--port|--host|:\d{2,5}$|localhost|127\.0\.0\.1/.test(a) && !a.startsWith('(version 1)')), 'no port and no address');
@@ -349,6 +349,40 @@ for (const [mode, why] of [['nostart', /it stopped \(7\)/], ['noload', /couldn't
   assert.match(code, /not VOICE_NAME\.match\(voice\) or voice not in voices/, 'a voice is used only if it ships with the model');
   assert.ok(!/ref_audio|ref_text|clone|\.wav|speaker_wav/.test(code), 'nothing takes a recording of a voice');
   assert.match(code, /os\.dup2\(2, 1\)/, 'what a library prints cannot land among the audio');
+  // Feature 24: the limits are MLX's before the model is loaded. The script itself, run with stand-ins for its
+  // libraries: the stand-in model loads only if both limits were already set to what the settings say, and its
+  // working memory is what MLX would hold under them; the helper says how much it reached.
+  assert.ok(code.indexOf('mx.set_cache_limit(int(sys.argv[5]) * 1024 * 1024)') > 0 && code.indexOf('mx.set_memory_limit(int(sys.argv[6]) * 1024 * 1024)') > 0, 'both limits come from the arguments, in MB');
+  assert.ok(code.indexOf('mx.set_memory_limit') < code.indexOf('load(model_name)'), 'and are set before the model is loaded');
+  const py3 = ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3'].find((f) => fs.existsSync(f));
+  if (process.platform === 'darwin') assert.ok(py3, 'a Python to run the helper script with stand-in libraries');
+  if (py3) {
+    const lib = fs.mkdtempSync(path.join(dir, 'standin-'));
+    fs.mkdirSync(path.join(lib, 'mlx')); fs.mkdirSync(path.join(lib, 'mlx_audio', 'tts'), { recursive: true });
+    fs.writeFileSync(path.join(lib, 'numpy.py'), '');
+    fs.writeFileSync(path.join(lib, 'mlx', '__init__.py'), '');
+    fs.writeFileSync(path.join(lib, 'mlx', 'core.py'), 'cache = None\nmemory = None\ndef set_cache_limit(n):\n    global cache\n    cache = n\ndef set_memory_limit(n):\n    global memory\n    memory = n\n');
+    fs.writeFileSync(path.join(lib, 'mlx_audio', '__init__.py'), ''); fs.writeFileSync(path.join(lib, 'mlx_audio', 'tts', '__init__.py'), '');
+    // A sentence at the length limit: 1,570 MB of working memory, less what the memory limit holds back, plus
+    // as much again in the cache unless the cache limit stops it (the measured shape, bench/kokoromem.py).
+    fs.writeFileSync(path.join(lib, 'mlx_audio', 'tts', 'utils.py'), [
+      'import mlx.core as mx', 'MB = 1024 * 1024',
+      'class Model:', '    sample_rate = 24000', '    def generate(self, **kw):', '        return []',
+      'def load(name):',
+      '    if mx.cache is None or mx.memory is None:', '        raise RuntimeError("limits not set before the model was loaded")',
+      '    work = min(1570, max(600, mx.memory // MB))', '    highest = 390 + 313 + work + min(work, mx.cache // MB)',
+      '    if highest > 1500:', '        raise RuntimeError("highest %d MB" % highest)',
+      '    return Model()', ''].join('\n'));
+    const modelDir2 = path.join(lib, 'model'); fs.mkdirSync(path.join(modelDir2, 'voices'), { recursive: true }); fs.writeFileSync(path.join(modelDir2, 'voices', 'bm_george.safetensors'), '');
+    const start = (limits) => {
+      const r = spawnSync(py3, ['-u', path.join(here, '..', 'kokoro_server.py'), 'm', modelDir2, 'b', 'bm_george', ...limits], { env: { PYTHONPATH: lib, PATH: '/usr/bin:/bin' }, input: '', timeout: 20_000 });
+      const n = r.stdout.readUInt32BE(0); return JSON.parse(r.stdout.subarray(4, 4 + n).toString('utf8'));
+    };
+    assert.deepEqual(start(['0', '400']), { ready: true, rate: 24000, voices: 1 }, 'with the defaults a sentence at the length limit stays under 1.5 GB');
+    assert.match(start(['16384', '16384']).error, /highest 3843 MB/, 'the limits are what bounds it: without them, 3.8 GB');
+    assert.match(start(['0', '16384']).error, /highest 2273 MB/, 'the cache limit alone is not enough');
+    assert.equal(start([]).ready, false, 'no limits given: it does not start');
+  }
   // bundle.sh ships it
   assert.match(fs.readFileSync(path.join(here, '..', 'bundle.sh'), 'utf8'), /cp kokoro_server\.py dist\//);
 }
@@ -376,26 +410,28 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   const file = path.join(h, 'Documents', 'roamies-pi', 'settings.json');
   const d = settingsDefaults(h);
   assert.equal(d.voiceEngine, 'kokoro'); assert.deepEqual(VOICE_ENGINES, ['kokoro', 'system']);
-  assert.deepEqual(d.kokoro, { python: '/opt/homebrew/anaconda3/envs/localai/bin/python', model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05 });
+  assert.deepEqual(d.kokoro, { python: '/opt/homebrew/anaconda3/envs/localai/bin/python', model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400 });
+  assert.deepEqual([KOKORO.cacheMB.min, KOKORO.cacheMB.max, KOKORO.memoryMB.min, KOKORO.memoryMB.max], [0, 16384, 100, 16384]);
   assert.equal(d.limits.kokoroTimeoutSeconds, 20); assert.equal(d.limits.kokoroSentenceChars, 120);
   const ref = settingsReference(h);
   assert.deepEqual(ref.kokoro, d.kokoro); assert.equal(ref.voiceEngine, 'kokoro');
   assert.ok(ref.limits.kokoroTimeoutSeconds && ref.limits.kokoroSentenceChars && ref.reference.limitRanges.kokoroSentenceChars && ref.reference.kokoroRanges && ref.reference.voiceEngines, 'every new setting is in settings.default.json');
+  assert.deepEqual(ref.reference.kokoroRanges.cacheMB, { min: 0, max: 16384, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }); assert.deepEqual(ref.reference.kokoroRanges.memoryMB, { min: 100, max: 16384, wholeNumber: true });
   let s = loadSettings(h);
   assert.deepEqual(s.kokoro, d.kokoro); assert.equal(s.voiceEngine, 'kokoro'); assert.deepEqual(s.invalid, []);
   const write = (o) => fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(JSON.stringify(d)), ...o }));
   write({ voiceEngine: 'system', kokoro: { ...d.kokoro, voice: 'af_heart', speed: 0.9 } });
   s = loadSettings(h);
   assert.equal(s.voiceEngine, 'system'); assert.equal(s.kokoro.voice, 'af_heart'); assert.equal(s.kokoro.speed, 0.9); assert.deepEqual(s.invalid, []);
-  write({ voiceEngine: 'cloud', kokoro: { python: 'python', model: 'x', voice: '../../my-voice.wav', lang: 'english', speed: 9 }, limits: { ...d.limits, kokoroSentenceChars: 5 } });
+  write({ voiceEngine: 'cloud', kokoro: { python: 'python', model: 'x', voice: '../../my-voice.wav', lang: 'english', speed: 9, cacheMB: -1, memoryMB: 50 }, limits: { ...d.limits, kokoroSentenceChars: 5 } });
   s = loadSettings(h);
   assert.equal(s.voiceEngine, 'kokoro');
   assert.equal(s.kokoro.python, 'python', 'kept as written: it is refused when the voice is started, and said');
-  assert.equal(s.kokoro.model, KOKORO.model.default); assert.equal(s.kokoro.voice, 'bm_george', 'a path is not a voice'); assert.equal(s.kokoro.lang, 'b'); assert.equal(s.kokoro.speed, 1.05);
+  assert.equal(s.kokoro.model, KOKORO.model.default); assert.equal(s.kokoro.voice, 'bm_george', 'a path is not a voice'); assert.equal(s.kokoro.lang, 'b'); assert.equal(s.kokoro.speed, 1.05); assert.equal(s.kokoro.cacheMB, 0); assert.equal(s.kokoro.memoryMB, 400);
   assert.equal(s.limits.kokoroSentenceChars, LIMITS.kokoroSentenceChars.default);
-  assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['kokoro.lang', 'kokoro.model', 'kokoro.speed', 'kokoro.voice', 'limits.kokoroSentenceChars', 'voiceEngine']);
+  assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['kokoro.cacheMB', 'kokoro.lang', 'kokoro.memoryMB', 'kokoro.model', 'kokoro.speed', 'kokoro.voice', 'limits.kokoroSentenceChars', 'voiceEngine']);
   write({ kokoro: { python: d.kokoro.python } });
-  assert.deepEqual(loadSettings(h).missing, ['kokoro.model', 'kokoro.voice', 'kokoro.lang', 'kokoro.speed']);
+  assert.deepEqual(loadSettings(h).missing, ['kokoro.model', 'kokoro.voice', 'kokoro.lang', 'kokoro.speed', 'kokoro.cacheMB', 'kokoro.memoryMB']);
   fs.rmSync(h, { recursive: true, force: true });
   // "system" starts nothing; anything else than a Mac starts nothing
   const side = fs.readFileSync(path.join(here, '..', 'sidekick.mjs'), 'utf8');

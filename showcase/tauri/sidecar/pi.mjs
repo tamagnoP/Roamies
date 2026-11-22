@@ -301,6 +301,10 @@ export const KOKORO = {
   voice: { default: 'bm_george', ok: (v) => typeof v === 'string' && /^[a-z]{2}_[a-z0-9]{1,32}$/.test(v) },
   lang: { default: 'b', ok: (v) => typeof v === 'string' && /^[a-z]$/.test(v) },
   speed: { default: 1.05, min: 0.5, max: 2, ok: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0.5 && v <= 2 },
+  // Feature 24: what the helper tells MLX when it starts. cacheMB: freed memory MLX keeps for reuse (0: none).
+  // memoryMB: what MLX aims to stay under while it makes a sentence; it goes over when one step needs more.
+  cacheMB: { default: 0, min: 0, max: 16384, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 16384 },
+  memoryMB: { default: 400, min: 100, max: 16384, ok: (v) => Number.isInteger(v) && v >= 100 && v <= 16384 },
 };
 /** The parts of "persona": how Roamies speaks, and nothing about what it may do (persona.mjs). address may be "". */
 export const PERSONA = {
@@ -929,7 +933,7 @@ export function codeReference() {
   const blocked = BLOCKED(h, dir);
   return {
     limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}) }])),
-    kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max } },
+    kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts' },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],
     calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max } },

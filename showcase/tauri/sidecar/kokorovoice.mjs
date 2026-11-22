@@ -199,8 +199,9 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
       fs.copyFileSync(script, copy); // run from the temporary folder, so the sandbox needn't open the app's own folder
       profile = profileFor({ home, tmp, modelDir: place.dir, python: k.python });
       // A fixed list: the profile, the Python, its flags, the script, where the model is, the language, the voice
-      // to warm up with. -I: no user site, no script folder on the path, no PYTHON* variables.
-      child = spawnImpl(sandboxExec, ['-p', profile, k.python, '-I', '-u', copy, place.name, place.dir, k.lang, k.voice],
+      // to warm up with, and MLX's two memory limits in MB (feature 24). -I: no user site, no script folder on the
+      // path, no PYTHON* variables.
+      child = spawnImpl(sandboxExec, ['-p', profile, k.python, '-I', '-u', copy, place.name, place.dir, k.lang, k.voice, String(k.cacheMB), String(k.memoryMB)],
         { cwd: tmp, env: helperEnv({ home, tmp, hub: place.hub }), stdio: ['pipe', 'pipe', 'ignore'], shell: false, detached: false });
     } catch (e) { return down(`it couldn't be started (${e.code ?? e.message})`); }
     const mine = child;

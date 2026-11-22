@@ -20,3 +20,4 @@ Build the two helper programs once: `./build.sh`. A copy of the page to measure 
 | `pitest.mjs` | Whether pi and what it starts end after a hand-off, `stop_pi` and the time limit, with a stand-in for pi. |
 | `muted.sh <command>` | Runs a command with the sound output muted and puts it back. |
 | `kokoromem.py <model folder> [mode]` | Run with the Python that has mlx_audio. Fixed sentences through Kokoro: the process's highest size during each (read every 10 ms), MLX's own counters, the time taken. Modes set MLX's cache and memory limits. |
+| `kokorocheck.py <model folder> [replies]` | Run with the Python that has mlx_audio. The helper as shipped, with the real model: the sentences of 40 scripted replies and one at the length limit after each; its highest size (read every 10 ms), its resting size, seconds per sentence. Ends with code 1 over 1.5 GB or if it does not come back to rest. |
