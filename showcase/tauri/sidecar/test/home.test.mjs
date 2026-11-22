@@ -405,4 +405,18 @@ for (const look of ['classic', 'jarvis', 'anime', 'sarah', 'adrian']) for (const
   assert.equal(await p.tick(5), 0, `${what}: no frame in 5 s at rest, afterwards`);
 }
 
+// Feature 24: while it is active (here thinking, so every frame is drawn) no look fills a Map or a Set frame after
+// frame. JARVIS did: a Map emptied and filled again each frame, whose old storage WebKit could not always free, and
+// the overlay page grew by megabytes a second.
+for (const look of ['classic', 'jarvis', 'anime', 'sarah', 'adrian']) for (const size of ['default', 'small']) {
+  const p = await started({ size });
+  p.host({ kind: 'look', look }); await p.tick(3);
+  let filled = 0;
+  for (const [C, k] of [['Map', 'set'], ['Set', 'add']]) { const proto = vm.runInContext(C, p.win).prototype, was = proto[k]; proto[k] = function (...a) { filled++; return was.apply(this, a); }; }
+  p.host({ kind: 'agent', e: { type: 'start' } }); await p.tick(1); filled = 0;
+  const frames = await p.tick(3);
+  assert.ok(frames > 100, `${look}, ${size}: it is being drawn while it thinks (${frames} frames in 3 s)`);
+  assert.ok(filled <= 3, `${look}, ${size}: no Map or Set filled frame after frame (${filled} entries added over ${frames} frames)`);
+}
+
 console.log('home position tests: passed');

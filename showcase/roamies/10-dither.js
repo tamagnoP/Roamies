@@ -98,14 +98,22 @@
       };
       const put = (x, y, lvl = 0) => setPx(x, y, PAL[clamp(lvl, 0, L)]);
       // JARVIS draws points that overlap; the brightest one in each cell wins, then they're written once.
-      const jbuf = new Map();
+      // Local-only build (feature 24): kept in two arrays the size of the grid, made once and used again every
+      // frame. Upstream kept them in a Map it emptied every frame, which left about 100 kB of the Map's old
+      // storage behind per frame for the collector, and the page grew by megabytes a second until it ran.
+      let jlv = new Int8Array(0), jidx = new Int32Array(0), jn = 0;
       const jput = (x, y, l) => {
         const gx = Math.round(x), gy = Math.round(y);
-        if (gx < 0 || gy < 0 || gx >= 8192) return;
-        const key = gy * 8192 + gx;
-        if ((jbuf.get(key) ?? -1) < l) jbuf.set(key, l);
+        if (gx < 0 || gy < 0 || gx >= gw || gy >= gh) return;
+        if (jlv.length !== gw * gh) { if (jn) return; jlv = new Int8Array(gw * gh).fill(-1); jidx = new Int32Array(gw * gh); }
+        const i = gy * gw + gx, was = jlv[i];
+        if (was < l) { if (was < 0) jidx[jn++] = i; jlv[i] = l; }
       };
-      const jflush = () => { for (const [key, l] of jbuf) put(key % 8192, Math.floor(key / 8192), l); jbuf.clear(); };
+      const jflush = () => {
+        const w = jlv.length === gw * gh ? gw : 0;
+        for (let k = 0; k < jn; k++) { const i = jidx[k]; if (w) put(i % w, (i / w) | 0, jlv[i]); jlv[i] = -1; }
+        jn = 0;
+      };
       const line = (x0, y0, x1, y1, lvl) => {
         const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / P));
         for (let i = 0; i <= n; i++) put(Math.round((x0 + ((x1 - x0) * i) / n) / P), Math.round((y0 + ((y1 - y0) * i) / n) / P), lvl);

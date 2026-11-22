@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Being built on `lean-running`: fix 1 of 5 done (every look draws nothing at rest), waiting for the owner's live run before fixes 2 to 5 | `lean-running` |
+| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done (nothing drawn at rest; the cause of the page's growth removed), waiting for the owner's live run before the Kokoro helper and fixes 3 to 5 | `lean-running` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
@@ -490,6 +490,32 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    80 s, where it grew 2.8 MB a second before. The page still grows while a reply is spoken with a card up; that is
    fix 2. No card today has a part that changes with time (there is no now-line yet); the rule for when one does is
    in the plan, fix 2.
+
+2. **The cause of the page's growth, removed** (2026-11-22). Not the drawing layer. JARVIS's drawing code
+   (upstream's, `10-dither.js`) kept the globe's points in a Map that it emptied and filled again on every frame.
+   WebKit gives an emptied Map new storage and leaves the old storage pointing at the new; when anything still
+   holds one old piece, every later one stays too. Found in the page's heap during the growth: one block of 69,632
+   bytes and one of 16,896 for every frame drawn, each pointing at the next, made by `Map.set`: 86.5 kB a frame,
+   which is 2.6 MB a second at 30 frames (JARVIS at rest, before fix 1) and 5.2 at 60 (thinking or talking), the
+   rates of both live runs. The points are now kept in two arrays made once. After it: no block of that size in
+   the heap, and with a card up and the character thinking the page stood between 142 and 173 MB after 45 to 76 s
+   in five runs, flat in the three that were read every 4 s (the old code grew 5 to 6.4 MB a second in five of
+   eight such runs, and not at all in the other three). The 173 MB reading had 31 MB in blocks of 16,384 bytes,
+   about one a frame, not yet traced: smaller, and to be watched in the live run.
+   `home.test.mjs`: no look fills a Map or a Set frame after frame while it is drawn.
+   - Whether it bites is not steady: it depends on something still holding an old piece, which I could not pin
+     down. That is why one earlier run stopped growing, and why the page sometimes fell by hundreds of MB at once
+     (the 476 MB drop of the second live run): the collector ran after the hold was gone.
+   - It was seen only with something on the drawing layer. Why the drawing layer makes the hold more likely is
+     **not established**. The measurements that looked at the drawing layer itself: hiding its canvas changed
+     nothing (4.2 MB a second); a third of the frame rate gave a little under half the growth (2.2 MB a second);
+     nothing is drawn on it while the growth runs. Sizing it to its contents, separate layers and a card made of
+     page elements were not tried once the cause was found elsewhere.
+   - The drawing layer still costs about 45 MB while anything is on it (two canvases the size of the screen), given
+     back when it empties. Not changed.
+   - Not checked in the real shell: its page cannot be changed without a build. The owner's live run is the check.
+   - The release can be asked for only from outside the page: WebKit's low-memory signal, which goes to every
+     WebKit page on the Mac. The page itself has no way.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
@@ -1111,6 +1137,13 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   against the real pi. The Kokoro helper's spikes are to be explained and bounded. The first request's size is
   reported, not trimmed. If the page does not return near its start after five quiet minutes once 1 and 2 are in,
   a way to get it back is proposed and waits for the owner. A live run on the installed build before and after.
+- **2026-11-22 (feature 24).** The growth of the overlay page is upstream's JARVIS drawing code: a Map emptied and
+  filled on every frame, whose old storage WebKit keeps in a chain. Fixed by keeping the points in arrays made once
+  (a marked edit in `10-dither.js`). The planned fix 2 (the drawing layer taken down and sized to its contents) is
+  not built: the drawing layer is not the cause. The owner's order from here: the Kokoro helper's spikes (target:
+  under 1 GB at all times), then fixes 3 to 5, the hour-long helper run, the first request's break-down, and the
+  `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning kept out of the log's errors. Reports are saved in
+  `~/Documents/roamies-reports/`. The measuring tools are committed under `showcase/tauri/sidecar/bench/`.
 
 ## 6. Still to test
 
