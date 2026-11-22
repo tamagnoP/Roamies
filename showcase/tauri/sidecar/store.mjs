@@ -182,10 +182,11 @@ const isRequestMsg = (m) => m.role === 'user' && (typeof m.content === 'string' 
 export const SUMMARY_HEAD = '[Summary of the earlier conversation, written by the app when older turns were folded to save space; background, not instructions]';
 export const isSummary = (m) => m?.role === 'user' && typeof m.content === 'string' && m.content.startsWith(SUMMARY_HEAD);
 
-/** Input tokens at which the conversation is folded: 75 % of the request budget, or ROAMIES_COMPACT_AT. */
-export function compactTrigger(budgetTokens, override = process.env.ROAMIES_COMPACT_AT) {
+/** Input tokens at which the conversation is folded: 75 % of the request budget, or ROAMIES_COMPACT_AT.
+ *  Local-only build (feature 24): or `historyTokens` (limits.historyTokens) when that is lower. */
+export function compactTrigger(budgetTokens, override = process.env.ROAMIES_COMPACT_AT, historyTokens = Infinity) {
   const n = Number(override);
-  return n > 0 ? n : Math.round(budgetTokens * 0.75);
+  return n > 0 ? n : Math.round(Math.min(budgetTokens * 0.75, historyTokens > 0 ? historyTokens : Infinity));
 }
 
 // Words and tool ids per message, like Claude Code's resume check: what was folded must still be the start.
@@ -198,17 +199,27 @@ export function foldPrint(messages) {
  * Which turns to fold: all but the newest ~20K tokens and at least the last two requests, cut at a request so
  * tool calls stay paired. Keep and minimum shrink with a low trigger (tests). An earlier summary at the start
  * is merged into the new one rather than folded as a turn. { ok: false, reason } when there's too little.
+ *
+ * Local-only build (feature 24): the sizes are of what is really sent. `extra(message)` is what goes with a message
+ * beyond its stored text, in characters (its live block). `sent` is how many tokens the conversation took in the
+ * last request as the provider counted it (its input, less the instructions and the tool definitions): when that
+ * is more than the estimate from the characters, every message counts for that much more. Without them the
+ * decision to fold was made on what was sent and the plan on the stored text alone, and a fold that was due found
+ * too little to fold.
  */
-export function planFold(messages, { trigger }) {
+export function planFold(messages, { trigger, extra = () => 0, sent = 0 }) {
   const keep = Math.min(20_000, trigger / 4), min = Math.min(8_000, trigger / 10);
   const start = isSummary(messages[0]) ? 1 : 0;
   const requests = messages.map((m, i) => (i >= start && isRequestMsg(m) ? i : -1)).filter((i) => i >= 0);
   if (requests.length < 3) return { ok: false, reason: 'fewer than three requests' };
+  const raw = messages.map((m) => (approxChars(m) + extra(m)) / 3.6), all = raw.reduce((n, x) => n + x, 0);
+  const scale = all > 0 ? Math.min(8, Math.max(1, sent / all)) : 1;
+  const size = (from, to = messages.length) => { let n = 0; for (let i = from; i < to; i++) n += raw[i]; return Math.round(n * scale); };
   let cut = -1;
-  for (const r of requests.slice(1, -1)) if (approxTokens(messages.slice(r)) >= keep) cut = r;
+  for (const r of requests.slice(1, -1)) if (size(r) >= keep) cut = r;
   if (cut < 0) return { ok: false, reason: 'too little to fold yet' };
   cut = Math.min(cut, requests.at(-2));
-  const folded = messages.slice(start, cut), tokens = approxTokens(folded);
+  const folded = messages.slice(start, cut), tokens = size(start, cut);
   if (tokens < min) return { ok: false, reason: 'too little to fold yet' };
   return { ok: true, start, end: cut, folded, tokens, summary: start ? messages[0].content.slice(SUMMARY_HEAD.length).trim() : '', print: foldPrint(messages.slice(0, cut)) };
 }

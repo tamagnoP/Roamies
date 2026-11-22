@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done and accepted (nothing drawn at rest; the cause of the page's growth removed); the natural voice's helper bounded (`kokoro.cacheMB`, `kokoro.memoryMB`); next what the page's jumps leave behind, a page rebuild measured, then fixes 3 to 5 | `lean-running` |
+| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done and accepted (nothing drawn at rest; the cause of the page's growth removed); the natural voice's helper bounded (`kokoro.cacheMB`, `kokoro.memoryMB`); fix 5 done (the live state sent only when it changes, the fold point a setting, a fold plan that counts what is sent); next what the page's jumps leave behind, a page rebuild measured, fixes 3 and 4, then the helper's sleep | `lean-running` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
@@ -534,6 +534,33 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    jumps of about 89 MB while a drawing was up, each given back in full. The harness does not show the steps the
    live run showed (135, 163, 192, 196, 221 MB): what leaves them is something the scripted run does not do.
    Sidecar 74 to 82 MB. No fold of the conversation by 106,600 tokens: to be looked at with fix 5.
+
+5. **Fix 5: the conversation** (2026-11-22). Found first: the fold point (90,000 tokens) was reached and every
+   fold was refused. The decision to fold counted what was sent (with a copy of the live state, about 500 tokens,
+   on every earlier request); the plan counted the stored conversation alone and found too little. Short spoken
+   exchanges never folded: the request grew by 570 tokens an exchange to the hard limit (137,000 tokens, at about
+   exchange 213), after which the oldest exchange was cut on every request and nothing of the conversation could
+   be reused by the provider. The owner's own route (Claude Code), from his logs, numbers only: one conversation
+   since 11 November, 304 model calls in seven days of 60,700 to 96,200 tokens each (middle 77,600), 93 % read
+   from the provider's cache, two folds, ten fold checks refused.
+   Built:
+   - The live state in named parts, sent only when they change (`live.mjs`): in full on the first request of a
+     conversation and the first after a fold, then only the parts that differ, and no block when none does; a
+     part that is gone is sent once as removed; the form of address is told again for each reply that uses it.
+     The instructions say a later part replaces an earlier one of the same name. `live.test.mjs` holds the rule:
+     what can be pieced together from the conversation equals the real state, at every request, through removed
+     parts, a fold, the hard trim and a fresh Claude Code session.
+   - `limits.historyTokens` (40,000; 20,000 to 500,000) is the fold point, never later than three quarters of
+     what a request may hold.
+   - The fold plan counts what is really sent: each message with its live block, and scaled to what the provider
+     counted. It keeps a quarter of the fold point (10,000 tokens).
+   Measured with `bench/tokens.mjs` (the direct route, the stand-in model), tokens per request before → after:
+   exchange 1: 16,157 → 16,262; 10: 21,284 → 17,028; 40: 38,370 → 19,313. Over 600 short exchanges: highest
+   137,147 → 40,109, mean 115,475 → 30,127, new to the provider in all 47.5 million → 0.14 million, folds 0 → 2.
+   With longer answers (250 exchanges): 26,600 to 40,700, a fold every 31 to 37 exchanges.
+   Removing old copies was not done: it changes an earlier message, which stops the provider's reuse from there
+   (keeping the newest eight reuses nothing of the conversation), and on the Claude Code route the app cannot
+   take anything off a message already sent.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
@@ -1170,6 +1197,13 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   the effort; a page rebuild measured in the real shell and reported before anything is built (fix 6 is the
   owner's to decide, with numbers); not the drawing layer sized to its contents; then fixes 3 to 5, the first
   request's break-down and the `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning.
+- **2026-11-22 (feature 24, fix 5).** The owner chose "send only what changed" for the live state over removing
+  old copies: it keeps all of the provider's reuse and works on both routes. In full on the first request of a
+  conversation and after each fold; in between only the lines that differ; nothing when nothing differs; the
+  instructions say the newest of each kind holds; a test that the state pieced together from the conversation
+  equals the real one. `limits.historyTokens` 40,000, and the fold plan counts what is really sent. Added last in
+  the order: the Kokoro helper sleeps when quiet (`kokoro.sleepAfterMinutes`, default 0). Not built, reported
+  only: a fresh conversation at the first request of each day.
 
 ## 6. Still to test
 

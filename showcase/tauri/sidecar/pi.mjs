@@ -287,6 +287,7 @@ export const LIMITS = {
   spokenQuestionChars: { default: 200, min: 40, max: 1000, whole: true }, // characters of a question (or of a hand-off's first sentence) that are said aloud
   heardLineChars: { default: 80, min: 20, max: 300, whole: true }, // characters of a phrase that wasn't taken, as shown in the bubble's last line
   kokoroTimeoutSeconds: { default: 20, min: 2, max: 120 }, // how long the natural voice may take over one sentence (and, six times that, to start) before the macOS voice takes over
+  historyTokens: { default: 40_000, min: 20_000, max: 500_000, whole: true }, // feature 24: tokens sent in one request at which the older part of the conversation is folded into a summary (never later than three quarters of what a request may hold)
   kokoroSentenceChars: { default: 120, min: 40, max: 1000, whole: true }, // a sentence longer than this is split at a clause before the natural voice makes it
 };
 // The voice that speaks ("voiceEngine"): Kokoro, kept loaded in a helper process (kokorovoice.mjs), or the macOS voice.

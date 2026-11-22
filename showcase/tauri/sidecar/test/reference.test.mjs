@@ -63,7 +63,7 @@ assert.deepEqual(readNames, Object.keys(refSettings).sort(), 'loadSettings reads
 assert.deepEqual([...body.matchAll(/\braw\.(\w+)/g)].map((m) => m[1]), [], 'and none straight from the file, past the checks');
 assert.ok(body.includes('for (const name of Object.keys(defaults))') && body.includes('CLEAN[name](raw[name], defaults[name])'), 'each goes through its check');
 // the limits: all of them, each a default inside its range; every one is used somewhere, and nothing uses another
-assert.deepEqual(Object.keys(ref.limits), Object.keys(LIMITS)); assert.equal(Object.keys(LIMITS).length, 23); // 16, feature 22's five, and feature 16's two
+assert.deepEqual(Object.keys(ref.limits), Object.keys(LIMITS)); assert.equal(Object.keys(LIMITS).length, 24); // 16, feature 22's five, feature 16's two, and feature 24's fold point
 for (const [name, l] of Object.entries(LIMITS)) { assert.equal(ref.limits[name], l.default); assert.ok(l.min <= l.default && l.default <= l.max && l.min > 0, `${name}: a positive range around its default`); assert.deepEqual(reference.limitRanges[name], { min: l.min, max: l.max, ...(l.whole ? { wholeNumber: true } : {}) }); }
 const used = new Set();
 for (const f of ['pi.mjs', 'notes.mjs', 'sidekick.mjs', 'calendar.mjs', 'flow.mjs', 'kokorovoice.mjs']) for (const m of fs.readFileSync(path.join(src, f), 'utf8').matchAll(/\b(?:limits|limitsFor\(\w*\))\.(\w+)/g)) used.add(m[1]);

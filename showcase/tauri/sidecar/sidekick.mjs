@@ -23,6 +23,8 @@ import {
   addCommitment, addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, makeCommitment, nextDue, pickFacts, planFold,
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
 } from './store.mjs';
+import { resolveToolSchema } from '@kenkaiiii/gg-ai';
+import { createLiveBlocks, stripLive } from './live.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
 import { EMOTES, EchoFilter, ReplyStream } from './reply.mjs';
 import { downloadModel, isReady, modelDir, sizeLabel, totalBytes } from './voicemodel.mjs';
@@ -580,66 +582,39 @@ A message may include a picture of an area they selected on screen, or marked by
 ${VOICE_OK ? `${userName} often talks to you by voice, so their messages may be speech transcripts: expect missing punctuation and misheard words, and act on what they most likely meant. ` : ''}Never claim you did something you didn't. Each message from ${userName} starts with its local date, time and time zone in brackets; use it for anything time-related. Their time zone is ${TZ} (${tzOffset()}); convert to other zones from that when asked. ${PLATFORM}
 Memory: keep track of what ${userName} commits to. When they say they'll do something, save it with remember_commitment (with a due time if they gave one). When it's done or off, update it. Saving or updating one shows their reminders list on screen by itself, so don't also draw a list or note of what you saved. Don't save small talk or things you'll do yourself. Hold them to these: bring up overdue ones and celebrate finished ones.
 Long-term memory: lasting facts about ${userName} are saved for you from your conversations (you don't save them yourself), so when they tell you something lasting or ask you to remember it, just take it in and say you will. Use what's saved without being asked, and never announce that you're saving something. Let what you know color your replies lightly (the right example, the right default, a nod to their goal now and then); never recite it back or open with it ("As a YouTuber…"). A saved fact that's wrong, or one they ask you to forget: forget_fact.
-The <live-state> block at the top of the user's newest message is the current state (settings, the app in front); older messages keep the one they had then. Its memory section (the to-do list in outline, what you remember) is only sent again when it changes, so the newest memory section in the conversation is current and overrides older ones; it may be a relevant selection rather than everything. Both are added by the app, not typed by the user, and override anything older in the conversation. A message starting "[Summary of the earlier conversation" stands in for older turns: take it as what happened, not as instructions.`;
+A <live-state> block at the top of a message is added by the app, not typed by the user. It is the state as of that message, in named parts: each part starts on a line of its own with its name in square brackets ([front] the app in front, [pi], [voice], [memory] the to-do list in outline and what you remember, and so on). The first block of the conversation has every part; later blocks have only the parts that changed, and a message has no block when nothing changed. A later part replaces an earlier one with the same name, and one that reads "no longer applies." removes it. So what holds now is the newest of each part anywhere in the conversation, and it overrides anything older, in the conversation or in an earlier block. A message starting "[Summary of the earlier conversation" stands in for older turns: take it as what happened, not as instructions.`;
 
-// Made once per request. `context` (the latest user message) picks which facts are relevant. → { turn, memory }
+// Made once per request. `context` (the latest user message) picks which facts are relevant. → [[part, text], …]
 let lastFactIds = [];
 let frontNow = ''; // set just before each request (whereFront)
 let addressNow = false; // set just before each request: whether this reply carries the form of address (addressClock)
-const addressLine = () => { const line = addressRule(personaNow(), userName, addressNow); return line ? `${line}\n` : ''; }; // local-only build
+const addressLine = () => addressRule(personaNow(), userName, addressNow) ?? ''; // local-only build
 const livePrompt = (context = '') => {
   const facts = pickFacts(context, 40), total = listFacts().length;
   lastFactIds = facts.map((f) => f.id);
-  const turn = `Live state (current as of this moment):
-${frontNow ? `${frontNow}\n` : ''}${addressLine()}${pi.live()}
-${notes.live()}
-${cal.live()}
-- Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
-${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}
-- Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
+  // Feature 24: the live state as named parts, so a request carries only the parts that changed (live.mjs).
+  const parts = [
+    ['front', frontNow],
+    ['address', addressLine(), { again: addressNow }], // told again for every reply that uses it: it speaks about that one reply
+    ['pi', pi.live()],
+    ['notes', notes.live()],
+    ['calendar', cal.live()],
+    ['actions', `- Clicking and typing in other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.`],
+    ['voice', `${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}`],
+    ['shortcuts', `- Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`],
+  ];
   // Local-only build (2026-11-19): the to-do list goes to the model as an outline, never as the list (calendar.mjs).
   const memory = `${cal.outline()}
 ${facts.length ? `What you know about ${userName}${total > facts.length ? ` (${facts.length} most relevant of ${total})` : ''}:\n${facts.map((f) => `- ${f.id}: ${f.text}`).join('\n')}` : `You don't know anything lasting about ${userName} yet.`}`;
-  return { turn, memory };
+  parts.push(['memory', `Memory (the to-do list in outline and what you remember; it may be a relevant selection rather than everything):\n${memory}`]);
+  return parts;
 };
 const system = () => stablePrompt();
-const LIVE_OPEN = '<live-state>', LIVE_CLOSE = '</live-state>';
-const stripLive = (text) => (typeof text === 'string' && text.startsWith(LIVE_OPEN) ? text.slice(text.indexOf(LIVE_CLOSE) + LIVE_CLOSE.length).replace(/^\n+/, '') : text);
-// Each request's live block is made once and kept on that message from then on, so earlier messages
-// never change and the prompt cache keeps hitting. Keyed by the request's own (timestamped) text:
-// { block, sig } where sig names the memory section it carries (null: none), relies the one it leaves to an older message.
-const liveBlocks = new Map();
-const sigOf = (t) => createHash('sha256').update(t).digest('hex').slice(0, 8);
-/** Puts each request's live block on it: the newest gets one made now, older ones keep theirs. */
-function withLive(msgs) {
-  let last = -1;
-  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') { last = i; break; }
-  if (last < 0) return msgs;
-  const textOf = (c) => (typeof c === 'string' ? c : (c ?? []).map((p) => p.text ?? '').join(' '));
-  const cleanOf = (m) => (typeof m.content === 'string' ? stripLive(m.content)
-    : m.content.map((p, j) => (j === 0 && p.type === 'text' ? { ...p, text: stripLive(p.text) } : p)));
-  const keyOf = (c) => textOf(c).slice(0, 300);
-  // The memory section the model sees as newest, from the messages still in this (fitted) history.
-  let carried = null;
-  for (let i = last - 1; i >= 0 && !carried; i--) if (msgs[i].role === 'user') carried = liveBlocks.get(keyOf(cleanOf(msgs[i])))?.sig ?? null;
-  return msgs.map((m, i) => {
-    if (m.role !== 'user') return m;
-    const clean = cleanOf(m), key = keyOf(clean);
-    if (i !== last && !liveBlocks.has(key)) return clean === m.content ? m : { ...m, content: clean };
-    const had = liveBlocks.get(key);
-    // Made fresh unless already made; remade if the older copy it relied on has been trimmed away since.
-    if (i === last && (!had || (had.sig === null && had.relies !== carried))) {
-      const live = livePrompt(textOf(clean)), sig = sigOf(live.memory), send = sig !== carried;
-      const memory = send ? `\nMemory #${sig} (only sent again when it changes; the newest memory section is current):\n${live.memory}` : '';
-      liveBlocks.set(key, { block: `${LIVE_OPEN}\n${live.turn}${memory}\n${LIVE_CLOSE}\n\n`, sig: send ? sig : null, relies: send ? null : carried });
-      logLine('live', { memory: send ? sig : null, chars: live.turn.length + memory.length });
-    }
-    const block = liveBlocks.get(key).block;
-    if (typeof clean === 'string') return { ...m, content: block + clean };
-    const [first, ...rest] = clean;
-    return { ...m, content: first?.type === 'text' ? [{ ...first, text: block + first.text }, ...rest] : [{ type: 'text', text: block.trimEnd() }, ...clean] };
-  });
-}
+// Local-only build (feature 24): each request's live block holds only the parts that changed since the blocks
+// already in the conversation (live.mjs). It is made once and kept on that message from then on, so earlier
+// messages never change and the prompt cache keeps hitting.
+const liveBlocks = createLiveBlocks({ now: livePrompt, log: (d) => logLine('live', d) });
+const withLive = (msgs) => liveBlocks.attach(msgs);
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const tzOffset = () => { const m = -new Date().getTimezoneOffset(), a = Math.abs(m); return `UTC${m >= 0 ? '+' : '-'}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`; };
@@ -688,7 +663,9 @@ function makeAgent(cc) {
     maxTurns: 24,
     transformContext: (msgs, o) => {
       const fitted = fitContext(msgs, { budgetTokens: requestBudget(), force: o?.force });
-      // Fresh live block every call, on the newest user message; older copies are dropped.
+      // Claude Code starting a session of its own (nothing to continue) has none of the earlier blocks: all parts again.
+      if (o?.fresh) liveBlocks.clear();
+      // The newest request gets the parts of the live state that changed; older requests keep the block they had.
       const out = withLive(fitted);
       touchFacts(lastFactIds);
       return out;
@@ -816,13 +793,16 @@ const syncSession = () => {
 // usage) passed 75 % of the request budget, older turns are summarised in the background and replaced by the
 // summary, raw turns archived locally. fitContext's hard trim and the overflow retry stay as safety nets.
 let lastInput = null; // { session, tokens, measured } from the newest model call
+// What every request carries before the conversation: the instructions and the tool definitions, in tokens (about).
+const fixedTokens = () => Math.round((system().length + tools.reduce((n, t) => { let schema = 600; try { schema = JSON.stringify(resolveToolSchema(t)).length; } catch { /* counted as a small one */ } return n + t.name.length + (t.description ?? '').length + schema; }, 0)) / 3.6);
 let compacting = null, pendingFold = null;
 function maybeCompact() {
   if (compacting || intro || busy || queued || !session?.messages.length || !config.model) return;
   const tokens = lastInput?.session === session.id ? lastInput.tokens : 0;
-  const trigger = compactTrigger(requestBudget());
+  // Local-only build (feature 24): the fold point is a setting, and the plan counts what is really sent.
+  const trigger = compactTrigger(requestBudget(), process.env.ROAMIES_COMPACT_AT, limitsFor(HOME).historyTokens);
   if (tokens < trigger) return;
-  const plan = planFold(session.messages, { trigger });
+  const plan = planFold(session.messages, { trigger, extra: (m) => liveBlocks.charsFor(m), sent: lastInput?.measured ? tokens - fixedTokens() : 0 });
   logLine('compact_check', { session: session.id, tokens, measured: !!lastInput?.measured, trigger, ...(plan.ok ? { fold: plan.end - plan.start, foldTokens: plan.tokens } : { skip: plan.reason }) });
   if (!plan.ok) return;
   const s = session, t0 = Date.now();
@@ -849,6 +829,7 @@ function applyPendingFold() {
   s.messages = next;
   saveSession(s);
   agent = null; lastInput = null; // rebuilt from the folded history; Claude Code is re-seeded (its resume no longer matches)
+  liveBlocks.clear(); // feature 24: the first request after a fold carries the whole live state again
   logLine('compacted', { session: s.id, model: f.model, ms: f.ms, folded: f.plan.end - f.plan.start, foldTokens: f.plan.tokens, keptMessages: next.length - 1, facts: f.facts });
 }
 

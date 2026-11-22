@@ -506,7 +506,8 @@ export class ClaudeCodeAgent {
     const o = this.options;
     const resume = resumeId(this.resume, this.messages);
     // The live block and trimming apply to what's sent, not to the saved history.
-    const loopMsgs = [...(o.transformContext ? await o.transformContext(this.messages, {}) : this.messages)];
+    // Local-only build (feature 24): `fresh` says Claude Code starts a session of its own, with none of what was sent before.
+    const loopMsgs = [...(o.transformContext ? await o.transformContext(this.messages, { fresh: !resume }) : this.messages)];
     const base = loopMsgs.length;
     let sessionId = resume;
     try {

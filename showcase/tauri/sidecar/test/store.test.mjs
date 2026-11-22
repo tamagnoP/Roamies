@@ -276,6 +276,10 @@ console.log('store tests: all passed');
   const S8 = await import('../store.mjs?fold');
   assert.equal(S8.compactTrigger(100_000, undefined), 75_000, '75 % of the request budget');
   assert.equal(S8.compactTrigger(100_000, '3000'), 3000, 'ROAMIES_COMPACT_AT overrides');
+  // Local-only build (feature 24): limits.historyTokens is the fold point when it is the lower of the two.
+  assert.equal(S8.compactTrigger(120_000, undefined, 40_000), 40_000, 'the setting');
+  assert.equal(S8.compactTrigger(40_000, undefined, 40_000), 30_000, 'never later than 75 % of the request budget');
+  assert.equal(S8.compactTrigger(120_000, '3000', 40_000), 3000);
   const req = (i, n = 3600) => [
     { role: 'user', content: `[Sat 7 Nov] q${i} ` + 'y'.repeat(n) },
     { role: 'assistant', content: [{ type: 'tool_call', id: `c${i}`, name: 'read_file', args: { path: 'x' } }] },
@@ -301,6 +305,7 @@ console.log('store tests: all passed');
   const bp = S8.planFold(big, { trigger: 75_000 });
   assert.ok(bp.ok && bp.end === 4, 'folds only the first of three big requests');
   assert.equal(S8.planFold(conv.slice(0, 12), { trigger: 75_000 }).ok, false, 'too little to fold yet');
+  assert.deepEqual(S8.planFold(conv, { trigger: 75_000, extra: () => 0, sent: 0 }).end, plan.end, 'nothing extra and no count: the same plan as upstream makes');
   assert.equal(S8.planFold(req(0), { trigger: 75_000 }).reason, 'fewer than three requests');
   // A second fold merges the earlier summary instead of folding it as a turn.
   const again = S8.planFold([...next, ...Array.from({ length: 20 }, (_, i) => req(100 + i)).flat()], { trigger: 75_000 });
@@ -308,6 +313,30 @@ console.log('store tests: all passed');
   assert.ok(!again.folded.some(S8.isSummary), 'the old summary is not a folded turn');
   // A low trigger (live tests) shrinks what's kept and the minimum with it.
   assert.ok(S8.planFold(conv.slice(0, 16), { trigger: 4000 }).ok, 'low trigger folds a short conversation');
+  // Local-only build (feature 24): the plan counts what is really sent. A spoken conversation: 120 short exchanges
+  // (the stored text is small) that each went out with 1,900 characters of live state, 106,600 tokens in all. On
+  // the stored text alone the fold that is due finds too little; counted as sent, it folds.
+  const short = Array.from({ length: 120 }, (_, i) => [{ role: 'user', content: `[10:00:${i}] How long is the report block, number ${i}?` }, { role: 'assistant', content: [{ type: 'text', text: 'The report block is ninety minutes long. It ends at half past three.' }] }]).flat();
+  assert.deepEqual(S8.planFold(short, { trigger: 90_000 }), { ok: false, reason: 'too little to fold yet' }, 'as it was: nothing to fold at 106,600 tokens sent');
+  const live = S8.planFold(short, { trigger: 90_000, extra: (m) => (m.role === 'user' ? 1900 : 0) });
+  assert.ok(live.ok && live.tokens >= 8000, 'with what went out with each message, it folds');
+  const keptLive = short.slice(live.end).reduce((n, m) => n + (m.role === 'user' ? 1900 : 0), 0) / 3.6 + S8.approxTokens(short.slice(live.end));
+  assert.ok(keptLive >= 20_000 && keptLive < 21_500, `and keeps about 20,000 tokens as sent (${Math.round(keptLive)})`);
+  // The provider counted more than the characters say (tool calls, pictures, another route's own framing): every
+  // message counts for that much more, so what is kept is 10,000 tokens as the provider counts them.
+  const all = S8.approxTokens(short);
+  const scaled = S8.planFold(short, { trigger: 40_000, sent: all * 5 });
+  assert.ok(scaled.ok, scaled.reason);
+  const keptScaled = S8.approxTokens(short.slice(scaled.end)) * 5;
+  assert.ok(keptScaled >= 10_000 && keptScaled < 10_600, `keeps a quarter of the fold point as the provider counts (${keptScaled})`);
+  assert.ok(Math.abs(scaled.tokens - (all * 5 - keptScaled)) < 50, 'and says how much it folds in the same measure');
+  assert.equal(S8.planFold(short, { trigger: 40_000, sent: all / 2 }).reason, 'too little to fold yet', 'a count below the estimate never shrinks it');
+  const wild = S8.planFold(short, { trigger: 40_000, sent: 1e9 });
+  assert.ok(wild.ok && wild.tokens < all * 8 && wild.tokens > all * 8 - 10_700, 'a wild count is held to eight times the estimate');
+  // With limits.historyTokens at its default, a fold that is due can happen: 40,000 sent, 16,400 of them the
+  // instructions and the tools, leaves 23,600 of conversation, of which 10,000 are kept and the rest folded.
+  const due = S8.planFold(short, { trigger: 40_000, sent: 23_600 });
+  assert.ok(due.ok && due.tokens > 12_000 && due.tokens < 14_000, `folds what is over the kept part (${due.tokens})`);
   // The folded raw turns are archived next to their session, privately.
   const ses = S8.newSession('anthropic', 'claude-haiku-5-5');
   await S8.archiveFolded(ses.id, conv.slice(0, plan.end));

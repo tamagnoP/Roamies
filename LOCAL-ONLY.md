@@ -240,6 +240,7 @@ setup guide is open, the bubble waits until it closes.
     "spokenQuestionChars": 200,
     "heardLineChars": 80,
     "kokoroTimeoutSeconds": 20,
+    "historyTokens": 40000,
     "kokoroSentenceChars": 120
   },
   "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60 }
@@ -348,6 +349,7 @@ setup guide is open, the bubble waits until it closes.
   | `spokenQuestionChars` | 200 | 40 to 1000, whole | Characters of a question, or of a hand-off's first sentence, that are said aloud. |
   | `heardLineChars` | 80 | 20 to 300, whole | Characters of a phrase that wasn't taken, as shown in the bubble's last line. |
   | `kokoroTimeoutSeconds` | 20 | 2 to 120 | Seconds the natural voice may take over one sentence (six times that to start) before the Mac's voice takes over for the session. |
+  | `historyTokens` | 40000 | 20000 to 500000, whole | Tokens sent in one request at which the older part of the conversation is folded into a summary (see "What goes with each request"). Never later than three quarters of what a request may hold. |
   | `kokoroSentenceChars` | 120 | 40 to 1000, whole | A sentence longer than this is split at a clause before the natural voice makes it. |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
@@ -508,6 +510,28 @@ Roamies asks the oldest pending question again, one at a time, spoken and with i
   question stays pending until it is.
 - Pending questions are never written to the notes vault. A hook for the daily note (feature 18: a Log line when a
   question becomes pending, and one when it is answered or dropped) is in place and connected to nothing yet.
+
+## What goes with each request
+
+Every request to the AI provider carries the instructions, the tool definitions (together about 16,000 tokens)
+and the conversation so far. Two things keep that from growing without end.
+
+- **The live state is sent only when it changes.** The live state is what the model must know as of now: the app
+  in front, whether this reply uses the form of address, where pi works and your routines, the notes vault, the
+  calendar's state, whether clicking and typing is allowed, the voice, the shortcuts, and the memory section (the
+  to-do list in outline and the facts it knows). It is made of named parts. The first request of a conversation,
+  and the first after a fold, carries all of them. After that a request carries only the parts that differ from
+  what the conversation already holds, and nothing when none does; a part that no longer exists is sent once as
+  removed. The instructions tell the model that a later part replaces an earlier one of the same name. A part
+  that was sent stays on the message it was sent with: taking it off would change that message and the provider
+  could no longer reuse what it has already read. (`live.mjs`; before this every request carried a full copy,
+  about 500 tokens, and kept it.)
+- **The older part is folded.** When a request reaches `limits.historyTokens` (40,000) tokens as the provider
+  counts them, the older exchanges are replaced by a summary, written by the same model in a request of its own,
+  and the newest quarter of the fold point (10,000 tokens) is kept as it is. The raw exchanges that were folded
+  stay on the Mac, next to the conversation's file. What is folded is planned on what was really sent (the live
+  state included, and counted the way the provider counted), so a fold that is due can happen.
+- The log's `live` line says which parts were sent and how many characters, never their text.
 
 ## Safeguards
 
@@ -882,6 +906,10 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   drawing with this look as it does with the others (feature 24).
 - `showcase/roamies/10-dither.js`: JARVIS's points are kept in two arrays made once, not in a Map emptied on every
   frame, which made the overlay page grow by megabytes a second (feature 24).
+- `showcase/tauri/sidecar/live.mjs` (new): the live state as named parts, sent only when they change (feature 24).
+- `showcase/tauri/sidecar/store.mjs`, `claudecode.mjs`: the fold point from `limits.historyTokens` and a fold plan
+  that counts what is really sent; Claude Code starting a session of its own is told so, so the live state goes
+  in full (feature 24).
 - `showcase/tauri/sidecar/bench/` (new): the measuring tools of feature 24. Not run by `npm test`, not in the app.
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
   with buttons stays on screen as it is while you talk; reports marks; shows the "Heard" line.
@@ -889,7 +917,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/live.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
   `package.json`: tests.
 
 ## Build (macOS)
@@ -971,7 +999,8 @@ as "sir". It is a manner only.
   reply, quoted text and anything the model wrote are left as they are. With `"address": ""` nothing is added.
 - When the form of address is used is decided by code, not by the model (`createAddressClock` in `persona.mjs`):
   at most once in `addressEverySeconds` (180 by default), counting the app's lines and the model's replies
-  together. For each request the live state tells the model either to use it once in that reply or not at all; a
+  together. The live state tells the model either to use it once in a reply (told again for each such reply) or
+  to leave it out until told otherwise; a
   line of the app's gets it only when the clock allows. A line that is both shown and said carries it in both. Two
   things carry it whatever the clock says, and count as a use: the first thing said after start-up, and the
   closing reply to "thanks". With `0` every reply and every line carries it. The model's reply is not checked or

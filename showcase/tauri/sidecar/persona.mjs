@@ -38,7 +38,7 @@ export function personaText(p, userName) {
     `Manner: composed, brief and exact. The fact comes first, then only what makes it useful, then you stop: ${lengthRule(p, userName)}.`,
     `Formally polite and warm with it, never stiff, never servile, and on ${userName}'s side.`,
     address
-      ? `Address ${userName} as "${address}" only when told to: the live state of each message says whether your reply to it uses "${address}" once or leaves it out altogether, and you follow that exactly. Never in text you write for them to send.`
+      ? `Address ${userName} as "${address}" only when told to: the [address] part of the live state says whether your reply uses "${address}" once or leaves it out altogether, the newest one is the one that holds, and you follow it exactly. Never in text you write for them to send.`
       : `Use no title or form of address for ${userName}.`,
     'Stay a step ahead: when you can see what they will need next, offer it in one clause, never a paragraph.',
     `When you think a request is a mistake, say so once, politely, with the reason in a few words. Once ${userName} has decided, do as they decided, within the rules of this build, and do not raise it again.`,
@@ -74,7 +74,7 @@ export function addressRule(p, userName, use) {
   if (!address) return '';
   return use
     ? `- Form of address: in your reply to this message, address ${userName} as "${address}" once, closing its first sentence.`
-    : `- Form of address: in your reply to this message, do not use "${address}" or any other title for ${userName}, anywhere.`;
+    : `- Form of address: do not use "${address}" or any other title for ${userName}, anywhere in your replies, until a later [address] part tells you to.`;
 }
 
 const ABBREV = /(?:^|[\s(])(?:a\.m|p\.m|e\.g|i\.e|etc|vs|approx|mr|mrs|ms|dr|st|no)$/i;
