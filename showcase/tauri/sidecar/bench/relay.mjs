@@ -98,5 +98,22 @@ for (let i = 0; i < N; i++) {
 }
 for (let q = 30; q <= QUIET; q += 30) { await sleep(30000); sample(`quiet ${q}s`); }
 if (QUIET) { try { execFileSync('/usr/bin/notifyutil', ['-p', 'org.WebKit.lowMemory']); } catch { /* not there */ } await sleep(10000); sample('released +10s'); await sleep(50000); sample('released +60s'); }
+// MEASURE_REBUILD=<n>: the overlay page is rebuilt n times the way the shell does it itself (a changed list of
+// characters makes it destroy the overlay window and make a new one), and the time until the new page reports
+// ready is taken, with the page's size before and after.
+const REBUILD = Number(process.env.MEASURE_REBUILD || 0), rebuilds = [];
+for (let i = 0; i < REBUILD; i++) {
+  sample(`before rebuild ${i + 1}`);
+  const from = sent.length, t = Date.now();
+  process.stdout.write(`${JSON.stringify({ type: 'overlays', ids: i % 2 ? ['sidekick'] : ['sidekick', 'none'] })}\n`);
+  while (!sent.slice(from).some((x) => x.type === 'ui_ready') && Date.now() - t < 20000) await sleep(5);
+  const ready = Date.now() - t;
+  await sleep(3000);
+  const s = sample(`after rebuild ${i + 1}`);
+  rebuilds.push({ readyMs: ready, sentAfter: sent.slice(from).map((x) => x.type) });
+  log('rebuild', i + 1, 'ready after', ready, 'ms');
+  await sleep(4000);
+}
+if (REBUILD) fs.writeFileSync(path.join(OUT, `${name}.rebuild.json`), JSON.stringify({ rebuilds, samples: samples.filter((x) => /rebuild/.test(x.label)) }, null, 1));
 fs.writeFileSync(path.join(OUT, `${name}.done`), JSON.stringify({ shell, sidecar: sidecar.pid, kids: tree(sidecar.pid).map((k) => [k, nameOf(k)]), relay: process.pid }));
 log('finished: waiting for the app to be quit');

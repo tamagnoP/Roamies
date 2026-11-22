@@ -57,7 +57,7 @@ for (let i = 0; i < N; i++) {
 }
 sidecar.stdin.end(); await sleep(1500); try { sidecar.kill('SIGKILL'); } catch { /* gone */ }
 model.close();
-fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ name, N, set: process.env.SET || '', replyChars: Number(process.env.REPLY_CHARS || 0), errors, rows }, null, 1));
+fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ name, N, set: process.env.SET || '', replyChars: Number(process.env.REPLY_CHARS || 0), errors, first: requests.find((r) => !r.fold), rows }, null, 1));
 const at = process.env.AT ? process.env.AT.split(',').map(Number) : rows.map((r) => r.exchange).filter((e) => e === 1 || e % 10 === 0);
 console.log('exchange | tokens sent | same as the request before | new | copies of the live state | their tokens | folds so far');
 let folds = 0; const foldsAt = new Map(); for (const r of rows) { folds += r.folds; foldsAt.set(r.exchange, folds); }

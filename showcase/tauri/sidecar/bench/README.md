@@ -11,13 +11,13 @@ Build the two helper programs once: `./build.sh`. A copy of the page to measure 
 | --- | --- |
 | `sample.sh <out.jsonl>` | Every 5 s, the memory of each process of a running Roamies: time, kind, size. |
 | `align.mjs <samples> <activity log>` | Lines the samples up with the activity log by time and kind of event. |
-| `run.mjs <kokoro\|system\|text\|bubbles> [replies] [quiet s]` (`CARD=5`: the list card up in every fifth exchange; `DRAW=3`: every third answer draws two cards first; `PACE=30`: one exchange every 30 s; `EVERY=5`: a reading every 5 s) | A fixed script of replies through the real sidecar and the page in `host`; memory after each, request sizes. |
+| `run.mjs <kokoro\|system\|text\|bubbles> [replies] [quiet s]` (`CARD=5`: the list card up in every fifth exchange; `DRAW=3`: every third answer draws two cards first, or calls the tools in `TOOLS` in turn; `VARY=1`: answers of varied length; `PACE=30`: one exchange every 30 s; `EVERY=5`: a reading every 5 s) | A fixed script of replies through the real sidecar and the page in `host`; memory after each, request sizes. |
 | `replay.mjs <tape> <dist> <name>` | Plays the messages recorded by a run into another copy of the page. |
 | `inject.mjs <what> <times> [dist]` | One kind of thing shown over and over (`list`, `say`, `active`: a card up and the character thinking, `saycard`, ...). |
 | `rate.sh <what> <dist> [times]` | `inject.mjs` with a reading every 4 s and the rate of growth. |
 | `heapcheck.sh <dist>` | A card up and the character thinking for 45 s, then the blocks that hold most of the page's heap, by size. |
-| `realrun.sh <mode> <replies> <quiet>` | The real built app (a copy, without its voice and hands helpers) with `relay.mjs` in the sidecar's place; times the quit. |
-| `pitest.mjs` | Whether pi and what it starts end after a hand-off, `stop_pi` and the time limit, with a stand-in for pi. |
+| `realrun.sh <mode> <replies> <quiet>` | The real built app (a copy, without its voice and hands helpers) with `relay.mjs` in the sidecar's place; times the quit. `REBUILD=6`: also rebuilds the overlay page six times and times each. |
+| `pitest.mjs` | Whether pi and what it starts end after a hand-off, `stop_pi`, the time limit, quitting, a crash of the sidecar and the sidecar killed outright, with a stand-in for pi that starts a long-running child. |
 | `muted.sh <command>` | Runs a command with the sound output muted and puts it back. |
 | `kokoromem.py <model folder> [mode]` | Run with the Python that has mlx_audio. Fixed sentences through Kokoro: the process's highest size during each (read every 10 ms), MLX's own counters, the time taken. Modes set MLX's cache and memory limits. |
 | `kokorocheck.py <model folder> [replies]` | Run with the Python that has mlx_audio. The helper as shipped, with the real model: the sentences of 40 scripted replies and one at the length limit after each; its highest size (read every 10 ms), its resting size, seconds per sentence. Ends with code 1 over 1.5 GB or if it does not come back to rest. |

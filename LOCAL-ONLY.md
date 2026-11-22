@@ -52,6 +52,12 @@ or named an app) is a rule in its instructions, which the model follows but the 
    away. Your answer to a question goes back to the same pi session, after another Send.
 6. While pi is working, Roamies can only talk, keep the to-do list and notes, or stop pi (say "stop pi", or Stop in
    the menu).
+7. Nothing pi started is left behind. pi runs as the leader of its own process group. When pi finishes, when it is
+   stopped, when it passes `maxMinutes`, and when Roamies quits, the whole group is asked to end and whatever is
+   left of it after 2 seconds is killed. A hand-off counts as finished when pi itself exits, even if something it
+   started is still holding its output open. If Roamies' own background process crashes, the group is killed as
+   it goes; if that process is killed outright, a small watcher started beside each hand-off (`/bin/sh` with a
+   fixed script and two process numbers) does the same within about three seconds and then ends itself.
 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.
@@ -906,6 +912,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   drawing with this look as it does with the others (feature 24).
 - `showcase/roamies/10-dither.js`: JARVIS's points are kept in two arrays made once, not in a Map emptied on every
   frame, which made the overlay page grow by megabytes a second (feature 24).
+- `showcase/tauri/sidecar/pi.mjs`, `sidekick.mjs`: pi's process group is ended with it, at quit and when the
+  background process dies; the Claude Agent SDK's warning that our tools are allowed by name is noted once as
+  `sdk_notice`, not logged as an error (feature 24).
 - `showcase/tauri/sidecar/live.mjs` (new): the live state as named parts, sent only when they change (feature 24).
 - `showcase/tauri/sidecar/store.mjs`, `claudecode.mjs`: the fold point from `limits.historyTokens` and a fold plan
   that counts what is really sent; Claude Code starting a session of its own is told so, so the live state goes

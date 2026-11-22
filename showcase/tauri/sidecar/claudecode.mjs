@@ -383,6 +383,12 @@ function takeSpare(o, resume) {
   return null;
 }
 
+// Local-only build (feature 24): the SDK warns, through Node, that canUseTool is not asked about tools named in
+// allowedTools. That is the set-up here on purpose (our tools are allowed by name and checked in the bridge;
+// canUseTool refuses everything else), so the warning is not an error.
+export const SDK_TOOL_SHADOWED = 'CLAUDE_SDK_CAN_USE_TOOL_SHADOWED';
+export const isToolShadowWarning = (text) => typeof text === 'string' && text.includes(SDK_TOOL_SHADOWED) && /canUseTool will not be invoked for: /.test(text);
+
 // One run: `messages` ends with the pending user turn(s); assistant and tool messages are appended to it.
 async function* claudeCodeLoop(messages, o) {
   const channel = new Channel();

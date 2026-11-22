@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { codeReference, createPi, describeStep, forVoice, gateTools, isAppName, isDontSend, isSend, loadSettings, messageText, projectProblem, REMOVED, snapshot, voiceFor } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-home-')));
@@ -477,6 +477,82 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
     assert.ok(!/isSend\((a|yes|answer)\)/.test(src), `${f}: an answer from a bubble is passed to the spoken-word check`);
   }
   answer = 'yes';
+}
+
+// ---- Feature 24: nothing pi started is left. A stand-in for pi that starts a process of its own (which keeps
+// pi's output open), run by the real createPi inside the real sandbox.
+if (process.platform === 'darwin') {
+  const { endGroup, watchParent, KILL_AFTER_MS, WATCH_SCRIPT } = await import('../pi.mjs');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const h = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-group-')));
+  const proj = path.join(h, 'Documents', 'proj'), d = path.join(h, 'Documents', 'roamies-pi'), bin = path.join(h, 'mytools');
+  for (const x of [proj, d, bin]) fs.mkdirSync(x, { recursive: true });
+  const fake = path.join(bin, 'pi');
+  fs.writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do p="$a"; done
+/bin/sleep 300 &
+echo $! > "$PWD/child.pid"; echo $$ > "$PWD/pi.pid"
+echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"stopReason":"stop"}}'
+case "$p" in
+  finish) exit 0 ;;
+  deaf) trap '' TERM; while :; do /bin/sleep 1; done ;;
+  *) wait ;;
+esac
+`, { mode: 0o755 });
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const spawns = [];
+  const { spawn: realSpawn } = await import('node:child_process');
+  const run = async (prompt, maxMinutes, act) => {
+    for (const f of ['pi.pid', 'child.pid']) fs.rmSync(path.join(proj, f), { force: true });
+    fs.writeFileSync(path.join(d, 'settings.json'), JSON.stringify({ project: proj, projects: [proj], toolFolders: [bin], pi: fake, autoSendReadOnly: 0, maxMinutes }));
+    const done = [];
+    const pi3 = createPi({ home: h, userName: 'T', shell: '/bin/sh', onDone: (r) => done.push({ ...r, at: Date.now() }), ask: async () => 'yes', spawnImpl: (c, a, o) => { spawns.push({ c, a, o }); return realSpawn(c, a, o); } });
+    await pi3.tools.find((t) => t.name === 'ask_pi').execute({ prompt, mode: 'edit' }, {});
+    for (let i = 0; i < 500 && !fs.existsSync(path.join(proj, 'child.pid')); i++) await sleep(10);
+    await sleep(200);
+    const ids = { pi: Number(fs.readFileSync(path.join(proj, 'pi.pid'), 'utf8')), child: Number(fs.readFileSync(path.join(proj, 'child.pid'), 'utf8')) };
+    const t0 = Date.now();
+    await act(pi3);
+    for (let i = 0; i < 600 && !done.length; i++) await sleep(10);
+    for (let i = 0; i < 300 && (alive(ids.pi) || alive(ids.child)); i++) await sleep(10);
+    return { status: done[0]?.status, ms: (done[0]?.at ?? Date.now()) - t0, gone: !alive(ids.pi) && !alive(ids.child), pi3 };
+  };
+  let r = await run('finish', 60, async () => {});
+  assert.equal(r.status, 'done', 'finished when pi exits, though what it started still held its output open');
+  assert.ok(r.ms < 2000, `and soon (${r.ms} ms)`);
+  assert.ok(r.gone, 'a hand-off that finishes: what pi started is ended with it');
+  const pi = spawns.find((x) => x.a.includes(fake));
+  assert.equal(pi.o.detached, true, 'pi is started as the leader of its own process group');
+  assert.equal(pi.c, '/usr/bin/sandbox-exec', 'inside the sandbox, as before');
+  assert.deepEqual(pi.a.slice(2, 6), ['/bin/sh', '-lc', 'exec "$0" "$@"', fake], 'by the same command');
+  const watch = spawns.find((x) => x.c === '/bin/sh' && x.a[1] === WATCH_SCRIPT);
+  assert.ok(watch && watch.a.length === 5 && watch.a[3] === String(process.pid) && /^\d+$/.test(watch.a[4]), 'a watcher with a fixed script and two numbers');
+  assert.deepEqual(watch.o.env, { PATH: '/usr/bin:/bin' });
+  assert.equal(spawns.length, 2, 'and nothing else is started');
+  r = await run('hang', 60, async (p) => { assert.equal(await p.tools.find((t) => t.name === 'stop_pi').execute({}, {}), 'Stopping pi.'); });
+  assert.equal(r.status, 'stopped'); assert.ok(r.gone, 'stop_pi: pi and what it started');
+  r = await run('hang', 0.01, async () => {});
+  assert.equal(r.status, 'error'); assert.ok(r.gone, 'the time limit: pi and what it started');
+  r = await run('deaf', 60, async (p) => { p.stop(); });
+  assert.equal(r.status, 'stopped'); assert.ok(r.gone, 'a pi that ignores the request to end is killed');
+  assert.ok(r.ms >= KILL_AFTER_MS - 100 && r.ms < KILL_AFTER_MS + 1500, `after ${KILL_AFTER_MS} ms (${r.ms})`);
+  r = await run('deaf', 60, async (p) => { const t = Date.now(); await p.stopAll(); assert.ok(Date.now() - t < KILL_AFTER_MS + 500, 'quit waits no longer than the kill'); });
+  assert.ok(r.gone, 'quitting: nothing of pi is left when stopAll has resolved');
+  r = await run('hang', 60, async (p) => { p.killNow(); });
+  assert.ok(r.gone, 'as the process ends: killed outright');
+  await sleep(1300);
+  const left = spawnSync('/usr/bin/pgrep', ['-f', 'while kill -0'], { encoding: 'utf8' }).stdout.trim();
+  assert.equal(left, '', 'no watcher is left once its hand-off is over');
+  // the pieces
+  assert.equal(KILL_AFTER_MS, 2000);
+  assert.match(WATCH_SCRIPT, /^while kill -0 "\$1" 2>\/dev\/null && kill -0 -- "-\$2" 2>\/dev\/null; do sleep 1; done; kill -0 -- "-\$2" 2>\/dev\/null \|\| exit 0; kill -TERM -- "-\$2" 2>\/dev\/null; sleep 2; kill -KILL -- "-\$2" 2>\/dev\/null; exit 0$/);
+  assert.deepEqual(Object.keys(watchParent(0)), ['stop'], 'no group: no watcher');
+  const g = endGroup({ pid: undefined, kill() {} }); assert.equal(g.alive(), false); await g.end();
+  const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
+  assert.match(side, /process\.on\('exit', \(\) => \{ try \{ pi\.killNow\(\); \} catch \{ \/\* nothing running \*\/ \} \}\);/, 'a crash of the sidecar');
+  assert.match(side, /Promise\.race\(\[Promise\.all\(\[flushWrites\(\), pi\.stopAll\(\)\]\), new Promise\(\(r\) => setTimeout\(r, 3000\)\)\]\)\.finally\(\(\) => process\.exit\(0\)\);/, 'the app quitting');
+  assert.match(side, /else if \(id === 'quit'\) \{ pi\.stopAll\(\); kokoro\.stop\(\);/);
+  fs.rmSync(h, { recursive: true, force: true });
 }
 fs.rmSync(home, { recursive: true, force: true });
 console.log('pi hand-off tests: passed');

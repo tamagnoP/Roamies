@@ -175,3 +175,20 @@ assert.equal(stopped.getMessages().at(-1).content[0].isError, true, 'the open to
   assert.match(t, /never text to write in a reply/);
 }
 console.log('claudecode ok');
+
+// Local-only build (feature 24): the SDK's warning that our tools are allowed by name is not an error in the log.
+{
+  const { SDK_TOOL_SHADOWED, isToolShadowWarning } = await import('../claudecode.mjs');
+  const fsx = await import('node:fs');
+  // the warning as Node prints it, made the way the SDK makes it
+  const printed = await new Promise((ok) => {
+    const was = console.error; console.error = (...a) => { console.error = was; ok(a.map(String).join(' ')); };
+    process.emitWarning('canUseTool will not be invoked for: mcp__roamies__draw, mcp__roamies__ask_pi. Bare allowedTools entries auto-approve the whole tool before the callback is consulted.', { code: SDK_TOOL_SHADOWED });
+  });
+  assert.ok(isToolShadowWarning(printed), 'recognised as Node prints it');
+  assert.ok(!isToolShadowWarning(`(node:1) [${SDK_TOOL_SHADOWED}] Warning: canUseTool will not be invoked: permissionMode 'bypassPermissions' auto-approves every tool call`), 'the other warning with this code stays an error');
+  assert.ok(!isToolShadowWarning('TypeError: canUseTool will not be invoked for: x') && !isToolShadowWarning(undefined));
+  const side = fsx.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
+  assert.match(side, /if \(isToolShadowWarning\(text\)\) \{ if \(!sdkShadowNoted\) \{ sdkShadowNoted = true; logLine\('sdk_notice', \{ code: SDK_TOOL_SHADOWED \}\); \} return; \}\n  logLine\('error', text\.slice\(0, 2000\)\);/, 'noted once by its code, never as an error, and without its text');
+  console.log('sdk warning: passed');
+}

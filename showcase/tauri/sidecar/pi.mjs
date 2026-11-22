@@ -547,6 +547,49 @@ export function snapshot(project, stampText, { init = false, limits = limitDefau
   } catch (e) { return { why: e.message }; }
 }
 
+// ---- feature 24: ending pi and everything it started
+export const KILL_AFTER_MS = 2000; // after being asked to end, what is left of pi's group is killed
+export const EXIT_DRAIN_MS = 300; // after pi exits, how long its last output may take to arrive
+const groups = new Set();
+const groupAlive = (pid) => { try { process.kill(-pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/** child was started detached, so its pid is its process group. end(): the group is asked to end (SIGTERM) and
+ *  killed after killAfterMs if any of it is left; resolves when none is. kill(): at once. */
+export function endGroup(child, { killAfterMs = KILL_AFTER_MS } = {}) {
+  const pid = child.pid;
+  let ending = null;
+  const signal = (sig) => { if (!pid) return; try { process.kill(-pid, sig); } catch { try { child.kill(sig); } catch { /* gone */ } } };
+  const g = {
+    pid,
+    alive: () => !!pid && groupAlive(pid),
+    kill() { signal('SIGKILL'); groups.delete(g); },
+    end() {
+      ending ??= new Promise((done) => {
+        if (!g.alive()) { groups.delete(g); return done(); }
+        signal('SIGTERM');
+        const t0 = Date.now();
+        const tick = setInterval(() => {
+          if (g.alive() && Date.now() - t0 < killAfterMs) return;
+          clearInterval(tick);
+          if (g.alive()) signal('SIGKILL');
+          groups.delete(g); done();
+        }, 50);
+      });
+      return ending;
+    },
+  };
+  if (pid) groups.add(g);
+  return g;
+}
+/** A small watcher outside this process: when this process is gone (killed, crashed) it ends pi's group the same
+ *  way, then ends itself. It runs /bin/sh with a fixed script; the two numbers are its only arguments. */
+export const WATCH_SCRIPT = 'while kill -0 "$1" 2>/dev/null && kill -0 -- "-$2" 2>/dev/null; do sleep 1; done; kill -0 -- "-$2" 2>/dev/null || exit 0; kill -TERM -- "-$2" 2>/dev/null; sleep 2; kill -KILL -- "-$2" 2>/dev/null; exit 0';
+export function watchParent(groupPid, spawnImpl = spawn) {
+  if (!groupPid || process.platform === 'win32') return { stop() {} };
+  let w = null;
+  try { w = spawnImpl('/bin/sh', ['-c', WATCH_SCRIPT, 'sh', String(process.pid), String(groupPid)], { stdio: 'ignore', detached: true, env: { PATH: '/usr/bin:/bin' } }); w.unref?.(); w.on?.('error', () => {}); } catch { /* no watcher: the exit handler still ends the group */ }
+  return { stop() { try { if (w?.pid) process.kill(-w.pid, 'SIGKILL'); } catch { /* gone */ } } };
+}
+
 export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now() } = {}) {
   let job = null; // the hand-off pi is working on
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
@@ -650,7 +693,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     // Under the sandbox it's sandbox-exec that starts the shell, so the shell's start-up, pi and all they run are confined.
     const line = [shell, '-lc', 'exec "$0" "$@"', settings.pi, ...args];
     const [cmd, ...cmdArgs] = box ? [sandboxExec, '-p', box.profile, ...line] : line;
-    const child = spawnImpl(cmd, cmdArgs, { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Local-only build (feature 24): pi is started as the leader of a process group of its own, so everything it
+    // starts can be ended with it. The command and the sandbox are unchanged.
+    const child = spawnImpl(cmd, cmdArgs, { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const group = endGroup(child, { killAfterMs: KILL_AFTER_MS });
+    const guard = watchParent(child.pid, spawnImpl); // ends the group if this process dies without a chance to
     const j = job = { id, prompt, mode, project, at: t0, child, snapshot: snap?.ref ?? null, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record };
     log('pi_start', { mode, followUp: !!session, chars: prompt.length });
     onChange();
@@ -691,12 +738,13 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     let told = 0;
     const lines = [(n, w) => `Still on it. Pi's ${n} step${n === 1 ? '' : 's'} in${w}.`, (n, w) => `Pi's still working${w}. ${n} step${n === 1 ? '' : 's'} so far.`, (n, w) => `Bear with me, pi's not done yet${w}.`];
     const progress = settings.progressSeconds > 0 ? setInterval(() => { if (job === j) tell(null, lines[told++ % lines.length](j.steps, stepText ? `, ${stepText.replace(/^Pi's /, '').replace(/…$/, '')} right now` : '')); }, settings.progressSeconds * 1000) : null;
-    const timer = setTimeout(() => { j.problem = `it ran for over ${settings.maxMinutes} minutes, so I stopped it`; j.stopped = 'timeout'; child.kill(); }, settings.maxMinutes * 60_000);
+    const timer = setTimeout(() => { j.problem = `it ran for over ${settings.maxMinutes} minutes, so I stopped it`; j.stopped = 'timeout'; group.end(); }, settings.maxMinutes * 60_000);
     let finished = false;
     const finish = (code, spawnError) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer); clearTimeout(stepTimer); clearInterval(progress);
+      group.end(); guard.stop(); // pi has gone: nothing it started stays, whatever still holds its output open
       const errText = spawnError ? spawnError.message : j.stderr.trim().split('\n').filter(Boolean).slice(-3).join(' ');
       let status = 'done';
       if (j.stopped === true) status = 'stopped';
@@ -717,15 +765,29 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     };
     child.on('error', (e) => finish(null, e));
     child.on('close', (code) => finish(code));
+    // Finished when pi exits, not when its output closes: something pi started can hold that open for as long as
+    // it runs. A moment is left for pi's last lines to arrive.
+    child.on('exit', (code) => setTimeout(() => finish(code), EXIT_DRAIN_MS));
+    j.group = group;
     return j;
   }
 
   function stop() {
     if (!job) return false;
     job.stopped = true;
-    try { job.child.kill(); } catch { /* already gone */ }
+    job.group.end();
     return true;
   }
+
+  /** At quit: everything pi started is ended now. Resolves when it has gone (at the latest after the kill). */
+  function stopAll() {
+    const g = job?.group;
+    if (!g) return Promise.resolve();
+    job.stopped = true;
+    return g.end();
+  }
+  /** As this process ends, whatever the reason: no waiting is possible, so the group is killed outright. */
+  function killNow() { for (const g of groups) g.kill(); }
 
   /** One hand-off: its checks, the Send bubble, and pi started on a yes. → { ok, mode, project }. kept: the pending
    *  question this is, when it is asked again: then there is no countdown, whatever its mode, so a hand-off is never
@@ -910,7 +972,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   };
 
   return {
-    tools, live, stop, tasksOn, briefing,
+    tools, live, stop, stopAll, killNow, tasksOn, briefing,
     busy: () => !!job,
     /** Something said while a Send bubble is open is for the bubble: "send" sends, "no" doesn't, anything else leaves
      *  it open. True when a bubble was open. */

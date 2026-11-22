@@ -13,7 +13,7 @@ fi
 printf '#!/bin/bash\nexec /opt/homebrew/bin/node %s/relay.mjs "$@"\n' "$PWD" > /tmp/lean/node-wrap.sh; chmod +x /tmp/lean/node-wrap.sh
 H=/tmp/lean/home-$NAME; rm -rf "$H"; mkdir -p "$H" /tmp/lean/out; rm -f /tmp/lean/out/$NAME.done
 BEFORE=$(pgrep -f 'com.apple.WebKit' | tr '\n' ',')
-env -i HOME="$H" PATH="$PATH" TMPDIR="$TMPDIR" LANG=en_US.UTF-8 ROAMIES_NODE=/tmp/lean/node-wrap.sh MEASURE_MODE=$MODE MEASURE_N=$N MEASURE_QUIET=$QUIET MEASURE_NAME=$NAME MEASURE_BEFORE="$BEFORE" MEASURE_NODE="$APP/Contents/MacOS/node" MEASURE_LOOK=${LOOK:-jarvis} "$APP/Contents/MacOS/roamies" >/tmp/lean/out/$NAME.app.log 2>&1 &
+env -i HOME="$H" PATH="$PATH" TMPDIR="$TMPDIR" LANG=en_US.UTF-8 ROAMIES_NODE=/tmp/lean/node-wrap.sh MEASURE_MODE=$MODE MEASURE_N=$N MEASURE_QUIET=$QUIET MEASURE_NAME=$NAME MEASURE_BEFORE="$BEFORE" MEASURE_NODE="$APP/Contents/MacOS/node" MEASURE_LOOK=${LOOK:-jarvis} MEASURE_REBUILD=${REBUILD:-0} "$APP/Contents/MacOS/roamies" >/tmp/lean/out/$NAME.app.log 2>&1 &
 PID=$!
 echo "app pid $PID"
 while [ ! -f /tmp/lean/out/$NAME.done ]; do kill -0 $PID 2>/dev/null || { echo "the app went away"; exit 1; }; sleep 2; done

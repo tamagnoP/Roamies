@@ -437,7 +437,7 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   const side = fs.readFileSync(path.join(here, '..', 'sidekick.mjs'), 'utf8');
   assert.match(side, /if \(MAC\) \{ try \{ if \(settingsNow\(\)\.voiceEngine === 'kokoro'\) kokoro\.start\(\); \}/);
   assert.equal((side.match(/kokoro\.start\(\)/g) ?? []).length, 1, 'the one place the helper is started');
-  assert.match(side, /else if \(id === 'quit'\) \{ pi\.stop\(\); kokoro\.stop\(\);/, 'it is stopped when Roamies quits');
+  assert.match(side, /else if \(id === 'quit'\) \{ pi\.stopAll\(\); kokoro\.stop\(\);/, 'it is stopped when Roamies quits');
   assert.match(side, /pickVoice: \(\) => \(kokoro\.usable \? KokoroReplyVoice : null\)/);
 }
 

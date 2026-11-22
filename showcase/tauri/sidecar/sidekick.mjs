@@ -5,7 +5,7 @@
 // in:  {type:'menu', id} {type:'answer', id, text} {type:'ui_ready'}
 // out: {type:'menu', items} {type:'ui', msg} {type:'overlays', ids}
 import { Agent } from '@kenkaiiii/gg-agent';
-import { ClaudeCodeAgent, closeSpare } from './claudecode.mjs';
+import { ClaudeCodeAgent, SDK_TOOL_SHADOWED, closeSpare, isToolShadowWarning } from './claudecode.mjs';
 import { SAFE, checkDrawAction, checkLink, redactArgs } from './safety.mjs';
 import { agentEvents, stallWatch } from './agentstream.mjs';
 import {
@@ -889,9 +889,22 @@ async function pruneLogs() {
   }
 }
 const consoleError = console.error.bind(console);
-console.error = (...a) => { consoleError(...a); if (!String(a[0]).startsWith('[')) logLine('error', a.map((x) => (x instanceof Error ? x.stack : String(x))).join(' ').slice(0, 2000)); };
+// Local-only build (feature 24): one warning of the Claude Agent SDK is not an error and is kept out of the log's
+// errors: it says our tools are allowed outright (which is how the bridge is set up; every call still goes
+// through the bridge's own checks). It is noted once per run by its code, without its text.
+let sdkShadowNoted = false;
+console.error = (...a) => {
+  consoleError(...a);
+  if (String(a[0]).startsWith('[')) return;
+  const text = a.map((x) => (x instanceof Error ? x.stack : String(x))).join(' ');
+  if (isToolShadowWarning(text)) { if (!sdkShadowNoted) { sdkShadowNoted = true; logLine('sdk_notice', { code: SDK_TOOL_SHADOWED }); } return; }
+  logLine('error', text.slice(0, 2000));
+};
 // Node exits on an unhandled rejection by default; one stray promise shouldn't take the agent down.
 process.on('unhandledRejection', (e) => console.error('unhandled rejection:', e));
+// Local-only build (feature 24): however this process ends (a crash included), what pi started is killed with it.
+// If it is killed outright, the watcher pi.mjs starts beside each hand-off does the same within seconds.
+process.on('exit', () => { try { pi.killNow(); } catch { /* nothing running */ } });
 process.on('uncaughtException', (e, origin) => {
   console.error(`uncaught exception (${origin}):`, e);
   // A sync throw leaves state unknown; exit after the log line lands so the app restarts us cleanly.
@@ -1648,7 +1661,7 @@ async function onMenu(id) {
     say('Fresh start. What are we doing?', 'happy');
   } else if (id.startsWith('forget:')) { await forgetFact(id.slice(7)); menu(); }
   else if (id === 'panel') send({ type: 'panel_show' });
-  else if (id === 'quit') { pi.stop(); kokoro.stop(); send({ type: 'quit' }); } // local-only build: pi doesn't outlive the app
+  else if (id === 'quit') { pi.stopAll(); kokoro.stop(); send({ type: 'quit' }); } // local-only build: pi doesn't outlive the app
   // The panel asks first in its own words, so this one doesn't ask again.
   else if (id === 'forgetall:yes') { const n = await clearFacts(); menu(); panelNote(`Forgot ${n} thing${n === 1 ? '' : 's'}.`); }
   else if (id === 'forgetall') {
@@ -1985,8 +1998,9 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   // The app quit (or is restarting for an update): save a reply still running, let the last saves land, never hang.
   if (busy) syncSession();
   closeSpare();
-  pi.stop(); // local-only build
-  Promise.race([flushWrites(), new Promise((r) => setTimeout(r, 3000))]).finally(() => process.exit(0));
+  // Local-only build (feature 24): pi and everything it started are ended before this process goes (asked, then
+  // killed after 2 s), so nothing of pi's outlives the app.
+  Promise.race([Promise.all([flushWrites(), pi.stopAll()]), new Promise((r) => setTimeout(r, 3000))]).finally(() => process.exit(0));
 });
 
 // Retired sign-ins (Claude from before Claude Code, the old ChatGPT, Kimi, Grok and Google ones) no longer work:

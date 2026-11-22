@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done and accepted (nothing drawn at rest; the cause of the page's growth removed); the natural voice's helper bounded (`kokoro.cacheMB`, `kokoro.memoryMB`); fix 5 done (the live state sent only when it changes, the fold point a setting, a fold plan that counts what is sent); next what the page's jumps leave behind, a page rebuild measured, fixes 3 and 4, then the helper's sleep | `lean-running` |
+| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done and accepted (nothing drawn at rest; the cause of the page's growth removed); the natural voice's helper bounded (`kokoro.cacheMB`, `kokoro.memoryMB`); fix 5 done (the live state sent only when it changes, the fold point a setting, a fold plan that counts what is sent); fix 3 done but for the run against the real pi; what the page's jumps leave behind found; a page rebuild measured (fix 6 waits for the owner); next fix 4, the helper's hour, then the helper's sleep | `lean-running` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
@@ -561,6 +561,32 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    Removing old copies was not done: it changes an earlier message, which stops the provider's reuse from there
    (keeping the newest eight reuses nothing of the conversation), and on the Claude Code route the app cannot
    take anything off a message already sent.
+
+6. **What the page's jumps leave behind** (2026-11-22). Reproduced in the harness once the scripted run used the
+   real reminder tools (`remember_commitment`, `list_commitments`, `show_matrix`), nudges, drawings and answers of
+   varied length: the page went from 90 to 153 MB in 20 minutes and stayed there through five quiet minutes; a
+   second run ended at 169 MB. It is two things. (a) Memory the page has finished with and WebKit has not yet
+   taken back: at the quiet point 127 MB of heap, 43 MB of it in 502 blocks of 90,112 bytes, against 20 MB after
+   WebKit's low-memory signal, which brought the first run back to 86 MB, below its start. Nothing in the page
+   still holds it, and nothing runs at rest to make WebKit collect it. (b) The drawing layer (about 45 MB) for as
+   long as a drawing stays on screen, which is until it is cleared or replaced. Not a leak: it levels off at a
+   size set by the last busy stretch. Not found: what makes the 90 kB blocks (they are absent with a card up and
+   the character thinking, so not the character's drawing; speech audio is the likely source, unproven). Ruled
+   out: anything still held by the page; the JARVIS Map; the drawing layer being redrawn. The page cannot ask for
+   the collection itself.
+7. **A page rebuild, measured in the real shell** (2026-11-22, for the owner's decision on fix 6; nothing built).
+   Made the way the shell already does it (the overlay window destroyed and made again): the new page reported
+   ready 120 to 127 ms after the request, six times out of six, in a new web process of 71.5 MB; the old one was
+   gone; the shell's own size did not change.
+8. **Fix 3: nothing pi started is left** (2026-11-22). pi is started as the leader of its own process group (the
+   command and the sandbox unchanged). When it finishes, is stopped, passes `maxMinutes`, or Roamies quits, the
+   group is asked to end and killed after 2 s. A hand-off is finished when pi exits, not when its output closes.
+   If the sidecar crashes the group is killed as it goes; if it is killed outright, a watcher started beside the
+   hand-off (`/bin/sh`, a fixed script) does it within about 3 s. `pi.test.mjs` and `bench/pitest.mjs`, with a
+   stand-in pi that starts a long-running child and ignores the request to end: gone in every case. Not yet run
+   against the real pi (it needs the owner's say on which folder pi may work in for the test).
+9. **The SDK's warning** `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` is noted once per run as `sdk_notice` with its code,
+   not logged as an error.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
