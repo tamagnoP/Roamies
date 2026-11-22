@@ -103,6 +103,8 @@ const save = (more = {}) => fs.writeFileSync(path.join(OUT, `${name}.json`), JSO
 
 await sleep(mode === 'kokoro' ? 30000 : 12000); // start-up: the page settles, the natural voice loads
 await sample('start');
+// EVERY=<seconds>: a reading on the clock as well as after each reply, so short jumps are seen
+if (process.env.EVERY) setInterval(() => { sample('tick').catch(() => {}); }, Number(process.env.EVERY) * 1000).unref();
 const playing = () => askPage('JSON.stringify(!!(window.Roamie && Roamie.voiceOut && Roamie.voiceOut.playing()))');
 // CARD=<n>: the to-do list card is put on the page before every n-th exchange and stays up through it, as it does
 // in the app when a list is asked for. Without it nothing is ever on the drawing layer, which is how the first
@@ -126,6 +128,9 @@ for (let i = 0; i < N; i++) {
     while (!sent.some((x) => x.type === 'speech_mark' && x.t >= Math.max(asked, doneAt - 0.5)) && Date.now() < until + 60000) await sleep(100);
     while (await playing()) await sleep(250);
     await sleep(mode === 'text' ? 6000 : 3000);
+    // PACE=<seconds>: one exchange every so many seconds, the pace of real use (the live runs: one in about 30 s)
+    const pace = Number(process.env.PACE || 0) * 1000 - (secs() - asked) * 1000;
+    if (pace > 0) await sleep(pace);
   }
   await sample(`reply ${i + 1}`);
   save();

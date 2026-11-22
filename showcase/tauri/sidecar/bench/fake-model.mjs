@@ -4,7 +4,8 @@ import http from 'node:http';
 import { REPLIES } from './script.mjs';
 
 export function startModel({ onRequest = () => {} } = {}) {
-  let turn = 0;
+  let turn = 0, asks = 0;
+  const draw = Number(process.env.DRAW || 0);
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
@@ -15,6 +16,10 @@ export function startModel({ onRequest = () => {} } = {}) {
       const tokens = Math.round((sys + tools + msgs) / 3.6);
       const last = j.messages?.at(-1), lastText = typeof last?.content === 'string' ? last.content : (last?.content ?? []).map((p) => p.text ?? '').join(' ');
       const fold = /summar/i.test(JSON.stringify(j.system ?? '').slice(0, 3000)) && !(j.tools?.length);
+      // DRAW=<n>: every n-th request answers by calling the draw tool (two cards beside the window), so a drawing goes
+      // up through the real sidecar and the reply after it is spoken with the drawing on screen.
+      const hasResult = Array.isArray(last?.content) && last.content.some((p) => p.type === 'tool_result');
+      const drawNow = draw && !fold && !hasResult && j.stream && j.tools?.some((t) => t.name === 'draw') && asks++ % draw === draw - 1;
       const text = fold ? 'Summary of the earlier conversation: the owner asked about the calendar, a report, a review, a grant deadline, a build and a draft, and was answered.' : REPLIES[turn++ % REPLIES.length];
       onRequest({ path: req.url, stream: !!j.stream, messages: j.messages?.length ?? 0, sys, tools, msgs, tokens, fold, model: j.model, lastChars: lastText.length });
       const usage = { input_tokens: tokens, output_tokens: Math.round(text.length / 3.6), cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
@@ -25,6 +30,15 @@ export function startModel({ onRequest = () => {} } = {}) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       const ev = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
       ev('message_start', { message: { id: `msg_${turn}`, type: 'message', role: 'assistant', model: j.model, content: [], stop_reason: null, stop_sequence: null, usage: { ...usage, output_tokens: 1 } } });
+      if (drawNow) {
+        const input = { beats: [{ say: 'Here is the plan for the afternoon.', marks: [{ type: 'card', title: 'Afternoon', heading: 'Two blocks', text: 'The report runs from two until half past three. The review follows at four.', items: ['Report, ninety minutes', 'Review at four', 'A call to return'] }, { type: 'note', text: 'The grant deadline is the twelfth of December.', tone: 'amber' }] }] };
+        ev('content_block_start', { index: 0, content_block: { type: 'tool_use', id: `toolu_${turn}_${asks}`, name: 'draw', input: {} } });
+        ev('content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } });
+        ev('content_block_stop', { index: 0 });
+        ev('message_delta', { delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 60 } });
+        ev('message_stop', {});
+        return res.end();
+      }
       ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
       const words = text.match(/\S+\s*/g) ?? [text];
       let i = 0;
