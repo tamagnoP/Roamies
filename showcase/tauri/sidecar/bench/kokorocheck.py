@@ -4,7 +4,7 @@
 # does not come back to its resting size between sentences.
 #   <python with mlx_audio> kokorocheck.py <model folder, named as the model: .../Kokoro-82M-bf16> [replies, default 40] [cacheMB, default 0] [memoryMB, default 400]
 #   WAV=<file>: also keeps the first reply's audio, to listen to.   GAP=<seconds between replies> (default 0.6)
-import ctypes, json, os, struct, subprocess, sys, threading, time, wave
+import array, ctypes, json, math, os, struct, subprocess, sys, threading, time, wave
 here = os.path.dirname(os.path.abspath(__file__))
 LIMIT_MB, REST_SLACK_MB, CHARS = 1500, 60, 120
 
@@ -42,6 +42,7 @@ def main():
     time.sleep(2); rest0 = footprint(p.pid)
     print(json.dumps({"started_s": round(time.time() - t0, 1), "highest_while_starting_mb": round(peak[0]), "resting_mb": round(rest0), "cacheMB": int(cache), "memoryMB": int(memory)}), flush=True)
     peak[0] = 0.0; rid = 0; highest = 0.0; highest_long = 0.0; rests = []; times = []; times_long = []; audio_s = 0.0; sentences = 0; first = []
+    level = {"peak": 0, "squares": 0, "n": 0, "full": 0}
     def say(text):
         nonlocal rid, audio_s, sentences
         rid += 1; t = time.time()
@@ -49,6 +50,9 @@ def main():
         head, pcm = block()
         if "error" in head: raise RuntimeError(head["error"])
         audio_s += len(pcm) / 48000; sentences += 1
+        a = array.array("h"); a.frombytes(pcm)  # the level of what was made: highest sample, sum of squares, samples at full scale
+        if len(a):
+            level["peak"] = max(level["peak"], max(a), -min(a)); level["squares"] += sum(x * x for x in a); level["n"] += len(a); level["full"] += sum(1 for x in a if x >= 32767 or x <= -32767)
         return time.time() - t, pcm
     for i, pieces in enumerate(replies):
         for s in pieces:
@@ -66,6 +70,7 @@ def main():
     top = max(highest, highest_long); ok = top < LIMIT_MB and max(rests) < rest0 + REST_SLACK_MB
     print(json.dumps({"replies": len(replies), "sentences": sentences, "audio_s": round(audio_s), "highest_mb": round(top), "highest_at_length_limit_mb": round(highest_long),
                       "resting_mb": {"first": round(rest0), "lowest": round(min(rests)), "highest": round(max(rests)), "last": round(rests[-1])},
+                      "peak_dbfs": round(20 * math.log10(max(level["peak"], 1) / 32768), 2), "average_dbfs": round(20 * math.log10(max(math.sqrt(level["squares"] / max(level["n"], 1)), 1) / 32768), 2), "samples_at_full_scale": level["full"],
                       "seconds_per_sentence": round(sum(times) / len(times), 3), "seconds_per_sentence_at_length_limit": round(sum(times_long) / len(times_long), 3),
                       "under_1500_mb": top < LIMIT_MB, "back_to_rest": max(rests) < rest0 + REST_SLACK_MB}), flush=True)
     return 0 if ok else 1
