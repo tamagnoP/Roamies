@@ -1,5 +1,6 @@
 #!/bin/bash
 # usage: rate.sh <what> <dist> [times]  : the page's size every 4 s while <what> runs, and its rate of growth over the stretches where it grew
+[ -n "${BENCH_GUARD:-}" ] || exec "$(dirname "$0")/guard.sh" "$0" "$@" # the sound is put back however the run ends
 EVERY=1 node inject.mjs $1 ${3:-20} $2 2>/dev/null | python3 -c "
 import sys,json
 S=[json.loads(l) for l in sys.stdin if l.startswith('{')]

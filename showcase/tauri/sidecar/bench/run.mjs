@@ -1,5 +1,6 @@
 // A live run: the real sidecar (in a throwaway home folder, with the stand-in model), the overlay page in host,
 // this script in the shell's place between them. usage: node run.mjs <kokoro|system|text|bubbles> [replies] [quietSeconds]
+import './guarded.mjs'; // first: the run starts itself again under guard.sh, which puts the sound back
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -1,5 +1,6 @@
 #!/bin/bash
 # usage: heapcheck.sh <dist>  : a card up and the character thinking for 45 s, then the blocks that hold most of the page's heap, by size
+[ -n "${BENCH_GUARD:-}" ] || exec "$(dirname "$0")/guard.sh" "$0" "$@" # the sound is put back however the run ends
 pkill -f bench/host; sleep 1; B=$(pgrep -f com.apple.WebKit.WebContent | tr '\n' ' ')
 (sleep 3; for m in '{"kind":"size","size":"default"}' '{"kind":"home","home":"bottom-left"}' '{"kind":"look","look":"jarvis"}' '{"kind":"greet"}'; do echo "{\"host\":$m}"; done; sleep 6
  echo '{"host":{"kind":"list","today":[{"id":"a","text":"One task","done":false},{"id":"b","text":"Two","done":false}],"later":[],"seconds":900,"flash":null,"toggle":false}}'; sleep 4; echo '{"host":{"kind":"agent","e":{"type":"start"}}}'; sleep 60; echo '{"quit":1}') | ./host $1 > /dev/null 2>&1 &

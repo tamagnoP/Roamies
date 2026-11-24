@@ -1,6 +1,7 @@
 #!/bin/bash
 # The real app (a copy of the built bundle, without its voice and hands helpers so nothing asks for a permission),
 # in a throwaway home folder, with relay.mjs in the sidecar's place. usage: realrun.sh <mode> <replies> <quiet> [name] [quitWhen: end|speaking]
+[ -n "${BENCH_GUARD:-}" ] || exec "$(dirname "$0")/guard.sh" "$0" "$@" # the sound is put back however the run ends
 set -u
 cd "$(dirname "$0")"
 MODE=$1; N=$2; QUIET=$3; NAME=${4:-real-$MODE}

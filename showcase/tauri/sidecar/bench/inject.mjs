@@ -1,4 +1,5 @@
 // One kind of thing shown over and over on the page, to see which of them grows it. usage: node inject.mjs <what> <times> [dist]
+import './guarded.mjs'; // first: the run starts itself again under guard.sh, which puts the sound back
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,6 +1,7 @@
 // Replays a recorded run (a tape of the messages the sidecar sent to the overlay, with their times) into a page:
 // the same messages at the same moments, so two versions of the page can be compared on exactly the same input.
 // usage: node replay.mjs <tape.jsonl> <dist folder> <name> [--ptr] [--talk] [--until seconds] [--quiet seconds] [--no-speech] [--no-agent]
+import './guarded.mjs'; // first: the run starts itself again under guard.sh, which puts the sound back
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

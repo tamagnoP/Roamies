@@ -10,13 +10,17 @@ const proj = path.join(home, 'Documents', 'proj'), dir = path.join(home, 'Docume
 for (const d of [proj, dir, tools]) fs.mkdirSync(d, { recursive: true });
 const fake = path.join(tools, 'pi');
 fs.writeFileSync(fake, `#!/bin/sh
-# the last argument is the prompt: finish | hang | deaf
+# the last argument is the prompt: finish | hang | deaf, or real-finish | real-hang: the child is started the way the
+# real pi's bash tool starts a command (detached: a session and process group of its own), and outlives that tool call
 for a in "$@"; do p="$a"; done
-/bin/sleep 300 &
+case "$p" in
+  real-*) /usr/bin/perl -e 'use POSIX; setsid(); exec "/bin/sleep", "300"' & ;;
+  *) /bin/sleep 300 & ;;
+esac
 echo $! > "$PWD/child.pid"; echo $$ > "$PWD/pi.pid"
 echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"stopReason":"stop"}}'
 case "$p" in
-  finish) exit 0 ;;
+  finish|real-finish) exit 0 ;;
   deaf) trap '' TERM; while :; do /bin/sleep 1; done ;;
   *) wait ;;
 esac
@@ -43,6 +47,12 @@ await run('stop_pi', 'hang', 60, async (pi) => { pi.tools.find((t) => t.name ===
 await run('the time limit (maxMinutes)', 'hang', 0.02, async () => { await sleep(1500); });
 await run('stop_pi, pi ignoring the signal', 'deaf', 60, async (pi) => { pi.stop(); });
 await run('quit (the sidecar ends everything, then goes)', 'deaf', 60, async (pi) => { const t = Date.now(); await pi.stopAll(); console.log(`   stopAll took ${Date.now() - t} ms`); });
+// The same four, with the child started as the real pi's bash tool starts a command (2026-11-24: the run against the
+// real pi showed its "sleep 600 &" in a group of its own, its parent launchd, alive after pi had finished).
+await run('like the real pi: a hand-off that finishes', 'real-finish', 60, async () => {});
+await run('like the real pi: stop_pi', 'real-hang', 60, async (pi) => { pi.stop(); });
+await run('like the real pi: the time limit (maxMinutes)', 'real-hang', 0.02, async () => { await sleep(1500); });
+await run('like the real pi: quit', 'real-hang', 60, async (pi) => { await pi.stopAll(); });
 // The sidecar itself dies: a process of its own that hands off and is then killed outright, or crashes.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
