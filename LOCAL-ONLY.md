@@ -82,8 +82,12 @@ or named an app) is a rule in its instructions, which the model follows but the 
    with "Pi ran without the extension that lets me end what its commands leave running, so anything they left
    running may still be running.", and the log has `pi_leftovers_off`.
    **Not caught:** Docker containers (Docker runs them, not the command); a process that moves itself to a new
-   process group or session (`setsid`, `nohup` with `setsid`, a daemon that detaches); and a command written to
-   write into the record (pi can append to it, as it can already signal any of your processes). macOS only.
+   process group or session (`setsid`, `nohup` with `setsid`, a daemon that detaches). macOS only.
+   **What the record lets pi do.** pi's commands can append to the record, so a command could name a group that
+   is not pi's, with a start time that matches, and Roamies would end it. That gives pi nothing new: the sandbox
+   (`(allow default)`, with no `signal` rule) already lets pi's commands send any signal to any of your
+   processes, Roamies' included, and read the process list. The record only lets them ask Roamies to do what they
+   can do themselves.
 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.

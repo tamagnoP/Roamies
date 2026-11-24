@@ -943,6 +943,12 @@ built later, after the new look (21).
 - **The size of the tool descriptions (2026-11-24, the owner, from feature 24's measurement).** The tool
   descriptions are 10,219 tokens of the first request (16,262 in all), the drawing tool's alone 4,383. Not to be
   trimmed now.
+- **Tool names (2026-11-24, the owner, from feature 24).** Through Claude Code Roamies' tools are called
+  `mcp__gg__<name>`, but the text the model reads (tool descriptions, the conversation replayed after a fold) names
+  them bare. In all Claude Code sessions from 12 to 24 November, 7 of about 654 calls used a bare name; each was
+  refused ("No such tool available") and retried with the right name within 1 to 2 s. A small local model will
+  retry less well, so offline the names the model reads and the tools' real names must match. Not to be changed
+  now.
 
 ### 17. Double clap, then "Jarvis", then speak
 
