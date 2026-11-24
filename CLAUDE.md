@@ -87,7 +87,8 @@ Run from `showcase/tauri`.
 
 ```bash
 (cd sidecar && npm ci)          # only after a lockfile change
-(cd sidecar && npm test)        # full sidecar suite; must pass before any commit
+(cd sidecar && npm test)        # the sidecar suite less the slow tests (a few minutes); must pass before any commit
+(cd sidecar && npm run test:all) # all of it, the slow drawing tests too; must pass before any merge
 (cd sidecar && ./bundle.sh)     # bundles the sidecar; build.sh does this too
 ./build.sh                      # full app build, output in src-tauri/target/release/bundle/macos
 ```
@@ -119,8 +120,9 @@ The reset is what makes macOS ask again.
   small; put new logic in our own modules.
 - **Leave `tools.mjs` as upstream wrote it**, apart from the removed `fetch_url`. Upstream's Mac-only tests
   (`hands.test.mjs`) exercise `open` and `act_in_app` directly. Narrow tools in `gateTools` instead.
-- **Every change gets a test** in `sidecar/test/`, added to the `test` script in `sidecar/package.json`. Stand in
-  for pi, `say` and the window helper with fakes, as the existing tests do. Never call a real model from a test.
+- **Every change gets a test** in `sidecar/test/`, added to the `test` script in `sidecar/package.json`, or to
+  `test:all` if it takes minutes. Stand in for pi, `say` and the window helper with fakes, as the existing tests
+  do. Never call a real model from a test.
 - **Update `LOCAL-ONLY.md`** in the same commit as the behaviour it describes.
 - **If a test fails, find the cause.** Do not weaken or delete a test to get a pass; say what failed.
 - **Update `ROADMAP.md`** in the same commit as any change of status: when a feature is started, finished, merged,

@@ -316,10 +316,13 @@
           spawn(x + s * rand(0.2, 0.9) * R, y, s * rand(60, 220), rand(-120, -20), 420, rand(0, 1) < 0.5 ? L : L - 1, i % 3 === 0 ? 1 : 0, 1.8);
         }
       };
-      const appear = (variant, x = m.x, y = m.y) => {
+      // Local-only build (feature 24, fix 6): instant: there at once, without an entrance or its sound (a new page
+      // taking over from one where it was resting).
+      const appear = (variant, x = m.x, y = m.y, instant = false) => {
         if (pres.state === 'shown' || pres.state === 'in') return false;
         const v = PRES[variant] ? variant : 'materialize';
         x = clamp(x, R * 1.5, EW - R * 1.5); y = clamp(y, R * 1.6, EH - R * 1.5);
+        if (instant) { Object.assign(pres, { state: 'shown', u: 1, v, tx: x, ty: y, landed: true, launched: false, crouched: false }); act = null; teleport(x, y); face.set(null, 0); return true; }
         Object.assign(pres, { state: 'in', u: 0, v, tx: x, ty: y, landed: false, launched: false, crouched: false });
         act = null;
         teleport(x, v === 'drop' ? -R * 2.4 : y);
@@ -549,6 +552,9 @@
         blink: (mid) => blink(mid),
         get presence() { return pres.state; }, get presU() { return pres.u; }, get form() { return form; },
         get look() { return look; },
+        // Local-only build (feature 24, fix 6): the turn of JARVIS's globe, so a new page shows it as the old one did.
+        get spin() { return jst.spin; },
+        set spin(v) { if (Number.isFinite(v)) jst.spin = v; },
         // From the cursor form's arrow tip to the body point (the pen draws with the tip), and the size the user picked.
         get tip() { return [AX * P, AY * P]; },
         get userForm() { return userForm; },

@@ -47,6 +47,7 @@ import { createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; //
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
+import { createPageRebuild } from './rebuild.mjs'; // Local-only build (feature 24, fix 6): the overlay page rebuilt after a quiet stretch
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
@@ -67,6 +68,10 @@ function releaseSpeech(drop) {
   micWindow = false;
   for (const m of heldSpeech.splice(0)) if (!drop || m.mark || m.end) ui(m);
 }
+// Local-only build (feature 24, fix 6): the overlay page's rebuild after a quiet stretch (rebuild.mjs), made below.
+// What is sent to the page counts as something shown or spoken, except its settings.
+let pageRebuild = null;
+const PAGE_SETTINGS = new Set(['sound', 'size', 'home', 'look', 'greet', 'settle']);
 const ui = (msg) => {
   if (msg.kind === 'speech') {
     if (micWindow && !msg.stop) { heldSpeech.push(msg); return; }
@@ -74,6 +79,7 @@ const ui = (msg) => {
     if (guideVoices.has(msg.id)) { if (msg.end) guideVoices.delete(msg.id); return send({ type: 'onboard', msg }); }
   }
   if (intro && msg.kind === 'agent') return send({ type: 'onboard', msg: { kind: 'chat', e: msg.e } });
+  if (!PAGE_SETTINGS.has(msg.kind)) pageRebuild?.shown();
   send({ type: 'ui', msg });
 };
 const ob = (msg) => send({ type: 'onboard', msg });
@@ -460,6 +466,16 @@ const flow = createFlow({
   log: (kind, data) => logLine(kind, data),
 });
 for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);
+// Local-only build (feature 24, fix 6): the page tells when it is at rest at home with nothing on it; this side adds
+// that nothing is being made, said or heard, nothing is held to be shown, and no question is pending (on screen or
+// kept in state.json). The setting is read at each check.
+pageRebuild = createPageRebuild({
+  minutes: () => limitsFor(HOME).pageRebuildQuietMinutes,
+  quiet: () => calQuiet() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase && flow.pending().length === 0,
+  rebuild: () => send({ type: 'rebuild_overlays' }),
+  log: (kind, data) => logLine(kind, data),
+});
+setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
 tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools])); // Local-only build: cal, flow
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
@@ -1952,18 +1968,21 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   } else if (m.type === 'panel_fishkey' && typeof m.key === 'string') fishKeyLogin({ given: m.key.slice(0, 1000), note: panelNote }).catch((e) => console.error('fish key', e));
   else if (m.type === 'answer') { pending.get(m.id)?.(m.text ?? null); pending.delete(m.id); }
   else if (m.type === 'ui_ready') {
+    const keep = pageRebuild?.ready(); // Local-only build (feature 24, fix 6): a page rebuilt after a quiet stretch is not greeted
     retired.then((notes) => { if (notes.length) { retired = Promise.resolve([]); say(`${notes.join(' ')} Do it on the Model page in ${PANEL}.`, 'concerned'); } });
     ui({ kind: 'sound', on: config.sound });
     ui({ kind: 'size', size: sizeNow() });
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
-    if (config.onboarded) ui({ kind: 'greet' });
+    if (keep) ui({ kind: 'settle', ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
+    else if (config.onboarded) ui({ kind: 'greet' });
     uiReady = true; offerSettingsNotice(); offerKokoroNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
   else if (m.type?.startsWith('voice')) onVoice(m);
   else if (m.type === 'snap') areaSnap();
   else if (m.type === 'write_tap') onWriteTap();
   // Local-only build (feature 22): the overlay reports that everything before this mark has finished playing.
+  else if (m.type === 'page_rest') pageRebuild?.page(m.on === true, Number.isFinite(m.keep?.spin) ? { spin: m.keep.spin } : null); // Local-only build (feature 24, fix 6)
   else if (m.type === 'speech_mark') { const done = played.get(m.mark); played.delete(m.mark); done?.(); }
   else if (m.type === 'auto_listen') {
     // Still the latest reply, nothing running since, and still switched on: listen once, hands-free.

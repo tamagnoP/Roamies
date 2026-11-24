@@ -583,10 +583,41 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    group is asked to end and killed after 2 s. A hand-off is finished when pi exits, not when its output closes.
    If the sidecar crashes the group is killed as it goes; if it is killed outright, a watcher started beside the
    hand-off (`/bin/sh`, a fixed script) does it within about 3 s. `pi.test.mjs` and `bench/pitest.mjs`, with a
-   stand-in pi that starts a long-running child and ignores the request to end: gone in every case. Not yet run
-   against the real pi (it needs the owner's say on which folder pi may work in for the test).
+   stand-in pi that starts a long-running child and ignores the request to end: gone in every case.
+   **Against the real pi (2026-11-24): not enough.** One hand-off (pi 0.80, the owner's yes, an empty folder he
+   named, removed afterwards; `bench/realpi.mjs`): pi was asked to start `sleep 600` in the background and reply
+   "done". It did, and finished in 5.5 s; the `sleep` was still running 2 s later, its parent launchd, in a process
+   group of its own. pi's bash tool starts every command detached (a session and process group of its own, the
+   leader being that command's shell), so whatever a command leaves running in the background is outside pi's group,
+   and when the command's shell exits nothing links it to pi. pi itself ends the commands still running when it is
+   asked to stop, not those left behind by finished ones. `bench/pitest.mjs` now has a stand-in that starts its
+   child the same way: left behind after a hand-off that finishes, after `stop_pi`, after the time limit and after
+   quitting, every time. Not run against the real pi: `stop_pi`, the time limit and quitting (one request was
+   agreed). Not fixed: it waits for the owner (section 5, 2026-11-24).
 9. **The SDK's warning** `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` is noted once per run as `sdk_notice` with its code,
    not logged as an error.
+10. **Fix 6: a fresh page after a quiet stretch** (2026-11-24, the owner's conditions). After
+   `limits.pageRebuildQuietMinutes` (15; 0 never) the overlay page is made afresh, only when all of these hold for
+   that long: the character at rest on its home spot (not where it was dragged, not sent away), nothing on screen,
+   nothing said or heard, no question pending (on screen or kept in `state.json`), nothing being made, nothing held
+   to be shown; and something was shown or spoken since the last rebuild. The page says when it is at rest
+   (`host.js`, `page_rest`); the sidecar adds the rest and decides (`rebuild.mjs`). The shell makes the new window
+   beside the old one on the same display, holds every message for the overlay meanwhile, hands the new page its
+   settings, then `settle` (the character at home at once, no entrance, sound or greeting, JARVIS's globe turned as
+   it was), then what it held; the old window goes 0.5 s later. If the new page doesn't take its settings within
+   10 s, what was held goes to it then. Tests: `rebuild.test.mjs` (when; the page's report and the new page taking
+   over, without a screen; the wiring), `rebuild-run.test.mjs` (the real sidecar with the setting at one minute),
+   a Rust test of what is held. A pending question in `state.json` holds the rebuild off for as long as it is
+   kept (`limits.pendingKeepHours`, 24).
+11. **The test suite split** (2026-11-24). `npm test` runs everything but the slow tests; `npm run test:all` runs
+   all of it and is what `CLAUDE.md` asks for before a merge. Moved out of `npm test`: the overlay part of
+   `home.test.mjs` (now `home-page.test.mjs`, 3 minutes), feature 24's every-look checks (`looks-rest.test.mjs`,
+   1 minute), and the new `rebuild-run.test.mjs` (2.5 minutes). The page stand-in they share is `test/page.mjs`.
+12. **The measuring tools put the sound back** (2026-11-24). `bench/guard.sh` replaces `muted.sh`: the sound muted
+   and the display kept awake (`caffeinate`, ended with the run; no setting changed) for the run, the sound put back
+   however it ends: finished, Ctrl-C, a signal, killed outright (a watcher), and with runs overlapping (the first
+   notes the sound, the last puts it back; a run whose watcher was killed too is put right by the next). Every tool
+   that can make a sound starts itself under it. Checked by hand in those five ways.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
@@ -611,6 +642,8 @@ Fixes, smallest first:
    this script would level off near 25,000 tokens. Code decides both; the model is not asked.
 6. **If 1 and 2 do not hold the targets:** after `limits.overlayRestMinutes` quiet minutes, with nothing on
    screen, the shell rebuilds the overlay's page (it already does on a display change). Last, and only if needed.
+   Approved by the owner on 2026-11-24 as `limits.pageRebuildQuietMinutes`, with his conditions; built (item 10
+   above).
 
 Targets, and how each is held:
 
@@ -678,6 +711,28 @@ the records folder. Replaces the "Daily log" note.
   the vault.
 - Titles are made safe for a file name by code. Two tasks with the same title get distinct pages.
 - Nothing is written to Super Productivity for this.
+
+**A fresh conversation each day, with a handover (the owner, 2026-11-24). Recorded, not to be built now.**
+
+- A fresh conversation starts at the first request of each day.
+- Before the old one is closed, a "Handover" section is added to that day's note in the vault, in two parts.
+  - Part one is written by code: the to-dos and reminders made, changed or finished that day, the pending
+    questions, and the kept blocks, each linked to its task page where one exists.
+  - Part two is one request to the model: at most eight short lines, under the fixed headings Decided, Left open
+    and Worth remembering.
+- The new conversation starts with the outline plus the most recent handover, capped at about 300 words. Older
+  days are read only when the owner asks.
+- The vault is a record, not a second task list.
+- If part two fails, part one is still written, and the old conversation is kept until part two succeeds.
+- **Open items roll forward.**
+  - Every "Left open" line becomes an open item in `state.json`, with the day it was raised.
+  - Each day's handover lists all items still open, oldest first.
+  - An item is closed only when its task or reminder is done, when the owner says it is dealt with, or when he
+    ticks its box in Obsidian. The model may suggest that one looks dealt with, and Roamies then asks; it never
+    closes one by itself.
+  - A closed item appears once, ticked, in the note of the day it was closed. Earlier notes are not rewritten.
+  - After `limits.openItemAskDays` (default 7), Roamies asks at the evening review whether to keep the item or let
+    it go.
 
 ### 25. Check-ins on progress
 
@@ -821,6 +876,9 @@ built later, after the new look (21).
 - **Decision (2026-11-19): one local model, Gemma 4 E2B, for everything offline.** Its reading of a screen is good
   enough for the gist and not for names or positions, which is the case for taking those from macOS's accessibility
   information and using the picture only as a fallback.
+- **The size of the tool descriptions (2026-11-24, the owner, from feature 24's measurement).** The tool
+  descriptions are 10,219 tokens of the first request (16,262 in all), the drawing tool's alone 4,383. Not to be
+  trimmed now.
 
 ### 17. Double clap, then "Jarvis", then speak
 
@@ -1230,9 +1288,25 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   equals the real one. `limits.historyTokens` 40,000, and the fold plan counts what is really sent. Added last in
   the order: the Kokoro helper sleeps when quiet (`kokoro.sleepAfterMinutes`, default 0). Not built, reported
   only: a fresh conversation at the first request of each day.
+- **2026-11-24 (feature 24, the owner).** Fixes 3 and 5 accepted as built. Fix 6 yes, as the setting
+  `limits.pageRebuildQuietMinutes` (15, 0 never): only at rest at home and not where the character was dragged,
+  nothing on screen, nothing said or heard, no question pending, and something shown or spoken since the last
+  rebuild; no greeting after it; anything held to be shown survives it. One real-pi hand-off allowed, in an empty
+  folder made for it and removed after. `npm test` without the slow drawing tests, `npm run test:all` with them,
+  and `test:all` before any merge. The measuring tools always put the sound and the display setting back. Recorded
+  for 23: the tool descriptions' size, not trimmed now. Recorded for 18, not built now: a fresh conversation each
+  day, with a handover and open items. Then fix 4, the hour-long helper run, the Kokoro helper's sleep; then the
+  owner installs and repeats the live run.
+- **2026-11-24 (feature 24, fix 3).** The real pi leaves behind what its commands start in the background, after
+  every way a hand-off ends (item 8 in section 2). Ending them takes a change that is not built: it waits for the
+  owner.
 
 ## 6. Still to test
 
+- [ ] Feature 24, fix 6, on the installed build: after 15 quiet minutes at home with nothing on screen (once
+  something has been shown), the log has `page_rebuild` and `page_rebuilt`, the overlay page's process is new (about
+  72 MB), and nothing was seen: no blink, no entrance, no sound, no wave, JARVIS's globe as it was. Not while the
+  character sits where it was dragged; not while a question is pending.
 - [ ] Features 16 and 21a on the Mac, after an install (none of it has been heard in the app): a reply in
   `bm_george`; the Mac's voice while the helper loads at start-up; a beat before a slow step, with no words from the
   model before it; a long sentence cut at a clause without an audible seam; talking over a reply; the answer window

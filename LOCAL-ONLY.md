@@ -52,12 +52,15 @@ or named an app) is a rule in its instructions, which the model follows but the 
    away. Your answer to a question goes back to the same pi session, after another Send.
 6. While pi is working, Roamies can only talk, keep the to-do list and notes, or stop pi (say "stop pi", or Stop in
    the menu).
-7. Nothing pi started is left behind. pi runs as the leader of its own process group. When pi finishes, when it is
+7. What is ended with pi. pi runs as the leader of its own process group. When pi finishes, when it is
    stopped, when it passes `maxMinutes`, and when Roamies quits, the whole group is asked to end and whatever is
    left of it after 2 seconds is killed. A hand-off counts as finished when pi itself exits, even if something it
    started is still holding its output open. If Roamies' own background process crashes, the group is killed as
    it goes; if that process is killed outright, a small watcher started beside each hand-off (`/bin/sh` with a
    fixed script and two process numbers) does the same within about three seconds and then ends itself.
+   **Not covered yet:** pi's bash tool starts each command in a process group of its own, so something a command
+   leaves running in the background (`sleep 600 &`) is outside pi's group and is left running after any of these.
+   Found with the real pi on 2026-11-24; not fixed.
 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.
@@ -247,7 +250,8 @@ setup guide is open, the bubble waits until it closes.
     "heardLineChars": 80,
     "kokoroTimeoutSeconds": 20,
     "historyTokens": 40000,
-    "kokoroSentenceChars": 120
+    "kokoroSentenceChars": 120,
+    "pageRebuildQuietMinutes": 15
   },
   "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60 }
 }
@@ -357,6 +361,7 @@ setup guide is open, the bubble waits until it closes.
   | `kokoroTimeoutSeconds` | 20 | 2 to 120 | Seconds the natural voice may take over one sentence (six times that to start) before the Mac's voice takes over for the session. |
   | `historyTokens` | 40000 | 20000 to 500000, whole | Tokens sent in one request at which the older part of the conversation is folded into a summary (see "What goes with each request"). Never later than three quarters of what a request may hold. |
   | `kokoroSentenceChars` | 120 | 40 to 1000, whole | A sentence longer than this is split at a clause before the natural voice makes it. |
+  | `pageRebuildQuietMinutes` | 15 | 0 to 1440, whole; 0 is never | Quiet minutes after which the overlay page is made afresh (see "Where the character sits"). |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
   missing setting.
@@ -419,6 +424,18 @@ the pointer, followed it, and hopped out of its way; in these two sizes it now d
   again for a message from Roamies, the pointer on its body, a change of Dock or display, and stops again when it is
   still. What keeps running is what ran before while it was hidden: the app reading the pointer's position, which is
   how it knows a click is on the character, and a check every 150 ms of whether Esc should be held.
+- **A fresh page after a quiet stretch.** WebKit keeps memory the overlay page has finished with until macOS asks
+  for it, and the page cannot give it back itself; a new page starts at about 72 MB. So once
+  `limits.pageRebuildQuietMinutes` (15) have passed with all of these holding, the page is made afresh: the
+  character is at rest at its home (not where you dragged it, not sent away), nothing is on screen (no bubble,
+  card, drawing, list or field), nothing is being said or heard, no question is pending (on screen, or kept in
+  `state.json` for later), nothing is being made, and nothing is waiting to be shown; and something was shown or
+  spoken since the last time. The new page is made beside the old one, on the same display; the character appears
+  in it at home at once, with no entrance, sound or greeting, and JARVIS's globe turned as it was; the old page goes
+  half a second later. Anything for the overlay that comes meanwhile (a bubble, a notice, the listening bubble) is
+  held by the app and shown on the new page once it is ready; if the new page doesn't report ready within 10
+  seconds, it is handed over then. 0 switches this off. The log has `page_rebuild` and `page_rebuilt` (with the
+  milliseconds it took), sizes only.
 - **Esc** is held from other apps only while there is something to stop or close, not while the character just
   rests. Esc closes what it is saying; it no longer sends the character away.
 - **The show/hide key** (⌃⌥S unless you changed it) still sends it away and brings it back; "Show …" in the menu
@@ -920,13 +937,18 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   that counts what is really sent; Claude Code starting a session of its own is told so, so the live state goes
   in full (feature 24).
 - `showcase/tauri/sidecar/bench/` (new): the measuring tools of feature 24. Not run by `npm test`, not in the app.
+- `showcase/tauri/sidecar/rebuild.mjs` (new), `sidekick.mjs`, `showcase/roamies/host.js`, `agent.js`,
+  `10-dither.js`, `showcase/tauri/src-tauri/src/main.rs`: the overlay page made afresh after a quiet stretch; the
+  page says when it is at rest at home; the shell makes the new page beside the old one and holds what comes for it
+  meanwhile; the character comes on in it at once, without an entrance (feature 24).
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
   with buttons stays on screen as it is while you talk; reports marks; shows the "Heard" line.
 - `showcase/desktop.html`: loads `home.js`.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
-  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/live.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
+  `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/home-page.test.mjs`,
+  `test/looks-rest.test.mjs`, `test/page.mjs`, `test/rebuild.test.mjs`, `test/rebuild-run.test.mjs`, `test/live.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
   `package.json`: tests.
 
 ## Build (macOS)
@@ -935,7 +957,7 @@ Needs the Xcode Command Line Tools, Rust and Node.js 22 or newer.
 
 ```bash
 cd showcase/tauri
-(cd sidecar && npm ci && npm test)
+(cd sidecar && npm ci && npm run test:all)
 cargo install tauri-cli --version "^2" --locked
 ./build.sh
 open src-tauri/target/release/bundle/macos

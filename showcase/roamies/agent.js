@@ -139,7 +139,8 @@
     // upstream's behaviour throughout. on: the setting has arrived. r: the body's radius in its own size (as the pen
     // it is cursor-sized). away: dragged off home, until it next goes back. dismissed: sent away with the summon
     // key, until it's next shown. calm: seconds it has been still at rest. look: its gaze easing back to straight ahead.
-    const den = { on: false, at: 'bottom-left', r: 0, away: false, intro: false, dismissed: false, gone: 0, calm: 0, look: [0, 0], was: false };
+    // quiet (feature 24, fix 6): the next time it comes on screen by itself, it is there at once, without an entrance.
+    const den = { on: false, at: 'bottom-left', r: 0, away: false, intro: false, dismissed: false, gone: 0, calm: 0, look: [0, 0], was: false, quiet: false };
     const homing = () => den.on && !!R.homeSpot && k.userForm !== 'cursor';
     const homeSpot = () => R.homeSpot(den.at, bounds(), den.r || k.R, R.origin);
 
@@ -956,6 +957,19 @@
       get resting() { return homing() && visible() && !b && !tool && !pen.held; },
       // Still, and has been for a second: nothing will change on screen until something wakes it (core.js).
       atRest: () => den.calm > 1,
+      // Local-only build (feature 24, fix 6): at rest on its home spot, not where it was dragged, with nothing of its
+      // own on screen (bubble, task tag, the pen) and nothing it is doing. host.js adds the rest of the page.
+      get atHome() { return homing() && k.presence === 'shown' && !den.away && !den.dismissed && !b && !dying.length && !tool && !pen.held && !m.dragging && !m.flung && !station.moving && now >= actUntil && den.calm > 1; },
+      // A page made to take over from one where it was resting: it is at home at once, without an entrance or a
+      // sound, with JARVIS's globe turned as it was (keep.spin).
+      get keep() { return { spin: k.spin }; },
+      settle: (keep) => {
+        R.wake?.();
+        if (Number.isFinite(keep?.spin)) k.spin = keep.spin;
+        if (!homing() || visible() || den.dismissed) { den.quiet = true; return; }
+        const [x, y] = spot();
+        k.appear(null, x, y, true); den.quiet = false;
+      },
       setAuto: (on, idle) => { presence.auto = !!on; if (idle) presence.idle = idle; presence.lastActive = now; },
       get visible() { return visible(); },
       // The speech bubble is still typing its words out.
@@ -1163,7 +1177,7 @@
         // Local-only build: at home it's on screen all the time. It never leaves for being idle, and comes (back) on
         // by itself: at the start, and after the overlay has changed screens.
         den.gone = hm && k.presence === 'hidden' && !den.dismissed ? den.gone + dt : 0;
-        if (den.gone > 0.4) { den.gone = 0; const [x, y] = spot(); k.appear(entrance(), x, y); }
+        if (den.gone > 0.4) { den.gone = 0; const [x, y] = spot(); k.appear(den.quiet ? null : entrance(), x, y, den.quiet); den.quiet = false; }
         if (presence.auto && !hm) {
           const hover = env.mouse?.active && Math.hypot(env.mouse.x - m.x, env.mouse.y - m.y) < k.R * 1.5;
           const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;

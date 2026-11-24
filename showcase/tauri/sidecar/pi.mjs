@@ -289,6 +289,7 @@ export const LIMITS = {
   kokoroTimeoutSeconds: { default: 20, min: 2, max: 120 }, // how long the natural voice may take over one sentence (and, six times that, to start) before the macOS voice takes over
   historyTokens: { default: 40_000, min: 20_000, max: 500_000, whole: true }, // feature 24: tokens sent in one request at which the older part of the conversation is folded into a summary (never later than three quarters of what a request may hold)
   kokoroSentenceChars: { default: 120, min: 40, max: 1000, whole: true }, // a sentence longer than this is split at a clause before the natural voice makes it
+  pageRebuildQuietMinutes: { default: 15, min: 0, max: 1440, whole: true, zero: 'never' }, // feature 24: quiet minutes, with the character at rest at home and nothing on screen, after which the overlay page is rebuilt (rebuild.mjs)
 };
 // The voice that speaks ("voiceEngine"): Kokoro, kept loaded in a helper process (kokorovoice.mjs), or the macOS voice.
 export const VOICE_ENGINES = ['kokoro', 'system'];
@@ -995,7 +996,7 @@ export function codeReference() {
   const h = '~', dir = `~/${PATHS.folder.split(path.sep).join('/')}`;
   const blocked = BLOCKED(h, dir);
   return {
-    limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}) }])),
+    limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}), ...(v.zero ? { zero: v.zero } : {}) }])),
     kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts' },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],

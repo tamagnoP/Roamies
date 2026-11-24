@@ -93,7 +93,111 @@ fn to_sidecar(app: &AppHandle, msg: &Value) {
     }
 }
 
+/// Local-only build (feature 24, fix 6): the overlay page being rebuilt after a quiet stretch (the sidecar's
+/// rebuild.mjs). The new windows are made beside the old ones, which stay on screen until the new page shows the
+/// character in their place. Meanwhile what goes to the overlays is held, and handed to the new page once it has
+/// its settings (the sidecar ends them with "settle"); the old windows get nothing more. gen: the windows' generation.
+struct Rebuild {
+    held: Vec<Value>,
+    gen: usize,
+}
+static REBUILD: Mutex<Option<Rebuild>> = Mutex::new(None);
+/// The old overlay windows of a rebuild, until they are closed.
+static RETIRING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// How long a new page has to take its settings before what was held goes to it anyway, and how long the old
+/// windows stay after it has (two or three frames of the new page drawing the character).
+const REBUILD_WAIT: Duration = Duration::from_secs(10);
+const RETIRE_AFTER: Duration = Duration::from_millis(500);
+
+/// What becomes of a message for the overlays while a rebuild is under way.
+#[derive(Debug, PartialEq)]
+enum Rebuilding {
+    /// One of the page's settings, the sidecar's answer to the new page: it goes to the new page now.
+    Pass,
+    /// The last of them: it goes, then everything held, and the old windows are closed.
+    Settle,
+    /// Anything else: held until then.
+    Hold,
+}
+fn rebuilding(msg: &Value) -> Rebuilding {
+    match msg.get("kind").and_then(Value::as_str) {
+        Some("settle") => Rebuilding::Settle,
+        Some("sound" | "size" | "home" | "look") => Rebuilding::Pass,
+        _ => Rebuilding::Hold,
+    }
+}
+
+fn retiring(label: &str) -> bool {
+    RETIRING.lock().unwrap().iter().any(|l| l == label)
+}
+
+/// The sidecar asks for a new overlay page. Made on the screen the character is on now.
+fn rebuild_overlays(app: &AppHandle) {
+    if REBUILD.lock().unwrap().is_some() {
+        return;
+    }
+    let old: Vec<String> = app.webview_windows().into_keys().filter(|l| is_overlay(l)).collect();
+    let on = SIDEKICK_OVERLAY.lock().unwrap().clone().and_then(|l| app.get_webview_window(&l)).and_then(|w| w.current_monitor().ok().flatten()).map(|m| *m.position());
+    let gen = GENERATION.load(Ordering::Relaxed);
+    *RETIRING.lock().unwrap() = old;
+    *REBUILD.lock().unwrap() = Some(Rebuild { held: Vec::new(), gen });
+    if make_overlays(app, on).is_err() {
+        REBUILD.lock().unwrap().take();
+        RETIRING.lock().unwrap().clear();
+        return;
+    }
+    let app2 = app.clone();
+    thread::spawn(move || {
+        thread::sleep(REBUILD_WAIT);
+        let app3 = app2.clone();
+        let _ = app2.run_on_main_thread(move || {
+            if REBUILD.lock().unwrap().as_ref().is_some_and(|r| r.gen == gen) {
+                end_rebuild(&app3);
+            }
+        });
+    });
+}
+
+/// The new page has its settings (or did not take them in time): what was held goes to it, the old windows go.
+fn end_rebuild(app: &AppHandle) {
+    let Some(r) = REBUILD.lock().unwrap().take() else { return };
+    for m in &r.held {
+        to_overlays(app, m);
+    }
+    let app2 = app.clone();
+    thread::spawn(move || {
+        thread::sleep(RETIRE_AFTER);
+        let app3 = app2.clone();
+        let _ = app2.run_on_main_thread(move || {
+            for label in std::mem::take(&mut *RETIRING.lock().unwrap()) {
+                if let Some(w) = app3.get_webview_window(&label) {
+                    let _ = w.destroy();
+                }
+            }
+        });
+    });
+}
+
 fn to_overlays(app: &AppHandle, msg: &Value) {
+    // Local-only build (feature 24, fix 6): a rebuild under way.
+    let during = REBUILD.lock().unwrap().is_some().then(|| rebuilding(msg));
+    match during {
+        Some(Rebuilding::Hold) => {
+            if let Some(r) = REBUILD.lock().unwrap().as_mut() {
+                r.held.push(msg.clone());
+            }
+            return;
+        }
+        Some(Rebuilding::Settle) => {
+            // The screen's edges first, so its home spot is worked out on the right ones.
+            if let Some(w) = SIDEKICK_OVERLAY.lock().unwrap().clone().and_then(|l| app.get_webview_window(&l)) {
+                if let Ok(Some(mon)) = w.current_monitor() {
+                    let _ = w.eval(safe_js(&mon));
+                }
+            }
+        }
+        _ => {}
+    }
     if let Some([x, y, w, h]) = point_target(msg) {
         // A drawing: go to the screen the marked thing is on, even if the cursor is elsewhere.
         move_sidekick_to(app, x + w / 2.0, y + h / 2.0);
@@ -105,9 +209,12 @@ fn to_overlays(app: &AppHandle, msg: &Value) {
     }
     let js = format!("window.__roamieHost&&__roamieHost({msg})");
     for (label, w) in app.webview_windows() {
-        if is_overlay(&label) {
+        if is_overlay(&label) && !retiring(&label) {
             let _ = w.eval(&js);
         }
+    }
+    if during == Some(Rebuilding::Settle) {
+        end_rebuild(app);
     }
 }
 
@@ -1050,13 +1157,29 @@ fn move_sidekick_to(app: &AppHandle, x: f64, y: f64) {
 }
 
 fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
+    // Local-only build (feature 24, fix 6): a rebuild under way is over; what it held goes to the new windows.
+    let held = REBUILD.lock().unwrap().take().map(|r| r.held).unwrap_or_default();
+    RETIRING.lock().unwrap().clear();
     for (label, w) in app.webview_windows() {
         if is_overlay(&label) {
             w.destroy()?;
         }
     }
+    make_overlays(app, None)?;
+    for m in &held {
+        to_overlays(app, m);
+    }
+    Ok(())
+}
+
+/// The overlay windows, one per screen that has a character. on: the screen the sidekick goes on (its top-left
+/// corner), when not the first.
+fn make_overlays(app: &AppHandle, on: Option<tauri::PhysicalPosition<i32>>) -> tauri::Result<()> {
     let gen = GENERATION.fetch_add(1, Ordering::Relaxed);
-    let monitors = app.available_monitors()?;
+    let mut monitors = app.available_monitors()?;
+    if let Some(i) = on.and_then(|p| monitors.iter().position(|m| *m.position() == p)) {
+        monitors.rotate_left(i);
+    }
     let ids = app.state::<Roster>().0.lock().unwrap().clone();
     let n = monitors.len().max(1);
     for (i, mon) in monitors.iter().enumerate() {
@@ -1451,6 +1574,8 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
         // A drawing is on a window (or isn't any more): the voice helper reports clicks there that change the screen.
         Some("watch_clicks") => to_voice(app, &json!({ "cmd": "watch_clicks", "on": msg.get("on").and_then(Value::as_bool) == Some(true) })),
         Some("quit") => app.exit(0),
+        // Local-only build (feature 24, fix 6): a new overlay page after a quiet stretch.
+        Some("rebuild_overlays") => rebuild_overlays(app),
         Some("onboard") => {
             if let Some(m) = msg.get("msg") {
                 to_onboarding(app, m);
@@ -1648,6 +1773,20 @@ mod tests {
         assert_eq!(listen_cmd(&json!({ "type": "listen", "seconds": null })), json!({ "cmd": "listen" }));
         assert!(shows_answer(&json!({ "kind": "ask", "id": "a1" })));
         assert!(!shows_answer(&json!({ "kind": "agent", "e": { "type": "start" } })));
+    }
+
+    // Local-only build (feature 24, fix 6): while the page is rebuilt, its settings go to the new page, "settle" ends
+    // the rebuild, and everything else waits for it.
+    #[test]
+    fn a_rebuild_holds_all_but_the_new_pages_settings() {
+        for k in ["sound", "size", "home", "look"] {
+            assert_eq!(rebuilding(&json!({ "kind": k })), Rebuilding::Pass, "{k}");
+        }
+        assert_eq!(rebuilding(&json!({ "kind": "settle", "spin": 1.5 })), Rebuilding::Settle);
+        for k in ["say", "ask", "agent", "speech", "voice", "list", "greet", "summon", "hands", "esc", "intro", "cancel_ask"] {
+            assert_eq!(rebuilding(&json!({ "kind": k })), Rebuilding::Hold, "{k}");
+        }
+        assert_eq!(rebuilding(&json!({})), Rebuilding::Hold);
     }
 
     #[test]

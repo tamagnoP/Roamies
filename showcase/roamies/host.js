@@ -443,6 +443,8 @@
       return;
     }
     if (m.kind === 'greet') { getAgent().act('wave'); return; }
+    // Local-only build (feature 24, fix 6): this page replaces one that was at rest: no entrance, no greeting.
+    if (m.kind === 'settle') { getAgent().settle?.({ spin: m.spin }); return; }
     if (m.kind === 'intro') { getAgent().intro(m.x, m.text); return; }
     if (m.kind === 'esc') { onEsc(); return; }
     if (m.kind === 'summon') {
@@ -485,9 +487,20 @@
     if (a.visible) a.hide();
   }
   let escUp = null;
+  // Local-only build (feature 24, fix 6): whether the page is at rest, said to the sidecar when it changes. At rest:
+  // the character still on its home spot (not where it was dragged), nothing on screen (bubble, card, drawing, the
+  // list, the field), nothing being played or heard, and nothing waiting in the page to be shown. Only then may the
+  // sidecar have the page rebuilt (rebuild.mjs); keep is what the new page takes over (JARVIS's globe as it stands).
+  let restWas = false;
+  const atRest = () => {
+    const a = getAgent();
+    return !!(a?.atHome && Roamie.rested?.() && !up() && !ask && !listen && !heard && !speech && !thought && !responding && !held && !deferred && !jobs.length && !current && !autoListen && !Roamie.ink?.busy && !Roamie.askBar?.isOpen);
+  };
   setInterval(() => {
     const on = up();
     if (on !== escUp) { escUp = on; invoke('esc_watch', { on }).catch(() => { escUp = null; }); }
+    const rest = atRest();
+    if (rest !== restWas) { restWas = rest; send(rest ? { type: 'page_rest', on: true, keep: getAgent().keep } : { type: 'page_rest', on: false }); }
   }, 150);
 
   // Start hidden in auto mode and tell the brain we're listening. It replies with the sound setting,
