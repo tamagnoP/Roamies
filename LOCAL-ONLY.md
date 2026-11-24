@@ -937,6 +937,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   that counts what is really sent; Claude Code starting a session of its own is told so, so the live state goes
   in full (feature 24).
 - `showcase/tauri/sidecar/bench/` (new): the measuring tools of feature 24. Not run by `npm test`, not in the app.
+- `showcase/tauri/src-tauri/src/pipe.rs` (new), `main.rs`, `voice.rs`, `sidecar.rs`: what goes to the sidecar and
+  to the voice helper is written by a thread of its own, so the app always answers a quit, even when a helper has
+  stopped reading (feature 24).
 - `showcase/tauri/sidecar/rebuild.mjs` (new), `sidekick.mjs`, `showcase/roamies/host.js`, `agent.js`,
   `10-dither.js`, `showcase/tauri/src-tauri/src/main.rs`: the overlay page made afresh after a quiet stretch; the
   page says when it is at rest at home; the shell makes the new page beside the old one and holds what comes for it

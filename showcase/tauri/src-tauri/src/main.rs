@@ -5,6 +5,7 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
+mod pipe;
 mod sidecar;
 #[cfg(target_os = "macos")]
 mod snapshot;
@@ -12,9 +13,8 @@ mod tap;
 mod voice;
 
 use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -25,6 +25,7 @@ use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem,
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 
+use pipe::PipeWriter;
 use sidecar::spawn_sidecar;
 use voice::{init_hotkeys, set_esc, set_hotkey, start_voice, stop_voice, to_voice, voice_binary};
 
@@ -50,10 +51,12 @@ fn panel_open_js() -> String {
     format!("window.__panelOpen&&__panelOpen({})", PANEL_FROM_BOTTOM.load(Ordering::SeqCst))
 }
 
-struct Sidecar(Mutex<Option<ChildStdin>>);
+/// Local-only build (feature 24, fix 4): the sidecar's input, written by a thread of its own (pipe.rs).
+struct Sidecar(Mutex<Option<PipeWriter>>);
 struct Roster(Mutex<Vec<String>>);
 /// The voice helper and how many times it has died on its own since it was last wanted.
-struct Voice(Mutex<Option<Child>>, AtomicUsize);
+/// Local-only build (feature 24, fix 4): and its input, written by a thread of its own (pipe.rs).
+struct Voice(Mutex<Option<Child>>, AtomicUsize, Mutex<Option<PipeWriter>>);
 /// Talk chord passed to the voice helper, e.g. ["control", "option"].
 struct TalkChord(Mutex<Vec<String>>);
 /// Windows: the downloaded speech model's folder (the sidecar owns the download and says where it is).
@@ -88,8 +91,9 @@ fn is_overlay(label: &str) -> bool {
 }
 
 fn to_sidecar(app: &AppHandle, msg: &Value) {
-    if let Some(stdin) = app.state::<Sidecar>().0.lock().unwrap().as_mut() {
-        let _ = writeln!(stdin, "{msg}");
+    // Local-only build (feature 24, fix 4): handed to the writer; this never waits on the sidecar.
+    if let Some(input) = app.state::<Sidecar>().0.lock().unwrap().as_ref() {
+        input.send(msg.to_string());
     }
 }
 
@@ -1690,7 +1694,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Sidecar(Mutex::new(None)))
         .manage(Roster(Mutex::new(vec!["sidekick".into()])))
-        .manage(Voice(Mutex::new(None), AtomicUsize::new(0)))
+        .manage(Voice(Mutex::new(None), AtomicUsize::new(0), Mutex::new(None)))
         .manage(TalkChord(Mutex::new(vec!["control".into(), "option".into()])))
         .manage(VoiceModel(Mutex::new(None)))
         .manage(PermGuide(Mutex::new(None)))

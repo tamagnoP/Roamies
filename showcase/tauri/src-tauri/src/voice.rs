@@ -2,7 +2,7 @@
 
 use super::*;
 use std::cell::RefCell;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::process::Child;
 use std::sync::atomic::AtomicU32;
 
@@ -54,6 +54,8 @@ pub(crate) fn start_voice(app: &AppHandle) {
     };
     let stdout = child.stdout.take().expect("piped stdout");
     let pid = child.id();
+    // Local-only build (feature 24, fix 4): its input is written by a thread of its own (pipe.rs).
+    *state.2.lock().unwrap() = child.stdin.take().map(|i| PipeWriter::new(i, "voice helper"));
     *state.0.lock().unwrap() = Some(child);
     let app = app.clone();
     thread::spawn(move || {
@@ -73,6 +75,7 @@ pub(crate) fn start_voice(app: &AppHandle) {
             let mut slot = state.0.lock().unwrap();
             let ours = slot.as_ref().map(Child::id) == Some(pid);
             if ours {
+                state.2.lock().unwrap().take();
                 if let Some(mut c) = slot.take() {
                     let _ = c.wait();
                 }
@@ -89,6 +92,7 @@ pub(crate) fn start_voice(app: &AppHandle) {
 
 pub(crate) fn stop_voice(app: &AppHandle) {
     let state = app.state::<Voice>();
+    state.2.lock().unwrap().take();
     let child = state.0.lock().unwrap().take();
     if let Some(mut c) = child {
         let _ = c.kill();
@@ -98,10 +102,9 @@ pub(crate) fn stop_voice(app: &AppHandle) {
 }
 
 pub(crate) fn to_voice(app: &AppHandle, msg: &Value) {
-    if let Some(child) = app.state::<Voice>().0.lock().unwrap().as_mut() {
-        if let Some(stdin) = child.stdin.as_mut() {
-            let _ = writeln!(stdin, "{msg}");
-        }
+    // Local-only build (feature 24, fix 4): handed to the writer; this never waits on the helper.
+    if let Some(input) = app.state::<Voice>().2.lock().unwrap().as_ref() {
+        input.send(msg.to_string());
     }
 }
 

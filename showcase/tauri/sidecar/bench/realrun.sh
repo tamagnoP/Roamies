@@ -1,6 +1,8 @@
 #!/bin/bash
 # The real app (a copy of the built bundle, without its voice and hands helpers so nothing asks for a permission),
-# in a throwaway home folder, with relay.mjs in the sidecar's place. usage: realrun.sh <mode> <replies> <quiet> [name] [quitWhen: end|speaking]
+# in a throwaway home folder, with relay.mjs in the sidecar's place. usage: realrun.sh <mode> <replies> <quiet> [name]
+# QUIT_AT=speaking: the quit is asked for while a reply is being spoken. PAGE_REBUILD=<minutes>: the setting
+# limits.pageRebuildQuietMinutes (feature 24, fix 6).
 [ -n "${BENCH_GUARD:-}" ] || exec "$(dirname "$0")/guard.sh" "$0" "$@" # the sound is put back however the run ends
 set -u
 cd "$(dirname "$0")"
@@ -14,7 +16,7 @@ fi
 printf '#!/bin/bash\nexec /opt/homebrew/bin/node %s/relay.mjs "$@"\n' "$PWD" > /tmp/lean/node-wrap.sh; chmod +x /tmp/lean/node-wrap.sh
 H=/tmp/lean/home-$NAME; rm -rf "$H"; mkdir -p "$H" /tmp/lean/out; rm -f /tmp/lean/out/$NAME.done
 BEFORE=$(pgrep -f 'com.apple.WebKit' | tr '\n' ',')
-env -i HOME="$H" PATH="$PATH" TMPDIR="$TMPDIR" LANG=en_US.UTF-8 ROAMIES_NODE=/tmp/lean/node-wrap.sh MEASURE_MODE=$MODE MEASURE_N=$N MEASURE_QUIET=$QUIET MEASURE_NAME=$NAME MEASURE_BEFORE="$BEFORE" MEASURE_NODE="$APP/Contents/MacOS/node" MEASURE_LOOK=${LOOK:-jarvis} MEASURE_REBUILD=${REBUILD:-0} "$APP/Contents/MacOS/roamies" >/tmp/lean/out/$NAME.app.log 2>&1 &
+env -i HOME="$H" PATH="$PATH" TMPDIR="$TMPDIR" LANG=en_US.UTF-8 ROAMIES_NODE=/tmp/lean/node-wrap.sh MEASURE_MODE=$MODE MEASURE_N=$N MEASURE_QUIET=$QUIET MEASURE_NAME=$NAME MEASURE_BEFORE="$BEFORE" MEASURE_NODE="$APP/Contents/MacOS/node" MEASURE_LOOK=${LOOK:-jarvis} MEASURE_REBUILD=${REBUILD:-0} MEASURE_QUIT_AT=${QUIT_AT:-end} MEASURE_PAGE_REBUILD_MINUTES=${PAGE_REBUILD:--1} "$APP/Contents/MacOS/roamies" >/tmp/lean/out/$NAME.app.log 2>&1 &
 PID=$!
 echo "app pid $PID"
 while [ ! -f /tmp/lean/out/$NAME.done ]; do kill -0 $PID 2>/dev/null || { echo "the app went away"; exit 1; }; sleep 2; done

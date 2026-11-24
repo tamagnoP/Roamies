@@ -70,7 +70,8 @@ pub(crate) fn spawn_sidecar(app: &AppHandle) {
             return;
         }
     };
-    *app.state::<Sidecar>().0.lock().unwrap() = child.stdin.take();
+    // Local-only build (feature 24, fix 4): its input is written by a thread of its own (pipe.rs).
+    *app.state::<Sidecar>().0.lock().unwrap() = child.stdin.take().map(|i| PipeWriter::new(i, "sidecar"));
     let stdout = child.stdout.take().expect("piped stdout");
     let app = app.clone();
     thread::spawn(move || {

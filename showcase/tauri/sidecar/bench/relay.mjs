@@ -38,7 +38,7 @@ execFileSync('/opt/homebrew/bin/node', ['--input-type=module', '-e', `
   const d = JSON.parse(JSON.stringify(settingsDefaults(os.homedir())));
   d.voiceEngine = '${mode === 'kokoro' ? 'kokoro' : 'system'}';
   d.kokoro.model = '/tmp/lean/Kokoro-82M-bf16';
-  delete d.persona.addressEverySeconds; // the build being measured is from before that setting
+  if (${Number(process.env.MEASURE_PAGE_REBUILD_MINUTES ?? -1)} >= 0) d.limits.pageRebuildQuietMinutes = ${Number(process.env.MEASURE_PAGE_REBUILD_MINUTES ?? -1)};
   fs.writeFileSync(path.join(os.homedir(), 'Documents', 'roamies-pi', 'settings.json'), JSON.stringify(d, null, 2));
 `], { cwd: REPO_SIDECAR, env, stdio: 'ignore' });
 fs.writeFileSync(path.join(home, '.gg', 'sidekick.json'), JSON.stringify({ provider: 'anthropic', model: 'claude-haiku-5-5', sound: true, allowActions: false, voice: true, onboarded: true, onboardStep: 0, filesAsked: true, muteWhileTalking: true, autoListen: false, setupVersion: 2, size: 'default', look: process.env.MEASURE_LOOK || 'jarvis', introDone: true, replies: mode === 'kokoro' || mode === 'system' ? 'voice' : 'text' }));
@@ -46,14 +46,18 @@ fs.writeFileSync(path.join(home, '.gg', 'sidekick.json'), JSON.stringify({ provi
 const sidecar = spawn(NODE, [script], { cwd: path.dirname(script), env, stdio: ['pipe', 'pipe', 'ignore'] });
 const sent = []; const kinds = {}; let audio = 0, replyEnds = 0;
 const tape = fs.createWriteStream(path.join(OUT, `${name}.tape.jsonl`));
+// Feature 24, fix 6: the page rebuilds the sidecar asks for (MEASURE_PAGE_REBUILD_MINUTES sets the setting), and when
+// the new page reported ready.
+const pageRebuilds = [];
 readline.createInterface({ input: process.stdin }).on('line', (line) => { // the shell (and through it the page) → the sidecar
-  try { const m = JSON.parse(line); sent.push({ t: secs(), type: m.type }); } catch { /* passed on all the same */ }
+  try { const m = JSON.parse(line); sent.push({ t: secs(), type: m.type }); const r = pageRebuilds.at(-1); if (m.type === 'ui_ready' && r && r.readyMs == null) { r.readyMs = Date.now() - r.at; log('page rebuilt: new page ready after', r.readyMs, 'ms'); } } catch { /* passed on all the same */ }
   sidecar.stdin.write(`${line}\n`);
 }).on('close', () => { log('the shell closed the pipe'); sidecar.stdin.end(); setTimeout(() => process.exit(0), 3500); });
 readline.createInterface({ input: sidecar.stdout }).on('line', (line) => { // the sidecar → the shell
   process.stdout.write(`${line}\n`);
   let m; try { m = JSON.parse(line); } catch { return; }
   kinds[m.type] = (kinds[m.type] ?? 0) + 1;
+  if (m.type === 'rebuild_overlays') { pageRebuilds.push({ t: secs(), at: Date.now(), readyMs: null }); log('page rebuild asked for'); }
   if (m.type !== 'ui') return;
   const msg = m.msg;
   tape.write(`${JSON.stringify({ t: secs(), msg })}\n`);
@@ -115,5 +119,16 @@ for (let i = 0; i < REBUILD; i++) {
   await sleep(4000);
 }
 if (REBUILD) fs.writeFileSync(path.join(OUT, `${name}.rebuild.json`), JSON.stringify({ rebuilds, samples: samples.filter((x) => /rebuild/.test(x.label)) }, null, 1));
+if (pageRebuilds.length) fs.writeFileSync(path.join(OUT, `${name}.pagerebuild.json`), JSON.stringify({ pageRebuilds, samples }, null, 1));
+// MEASURE_QUIT_AT=speaking: one more request, and the quit is asked for while its reply is being spoken (once the
+// first of its audio has gone to the page).
+if (process.env.MEASURE_QUIT_AT === 'speaking') {
+  const was = audio;
+  sidecar.stdin.write(`${JSON.stringify({ type: 'voice', text: ASKS[N % ASKS.length] })}\n`);
+  const until = Date.now() + 60000;
+  while (audio === was && Date.now() < until) await sleep(20);
+  await sleep(300);
+  log('speaking: the quit can be asked for', `audio so far ${Math.round((audio - was) * 10) / 10} s`);
+}
 fs.writeFileSync(path.join(OUT, `${name}.done`), JSON.stringify({ shell, sidecar: sidecar.pid, kids: tree(sidecar.pid).map((k) => [k, nameOf(k)]), relay: process.pid }));
 log('finished: waiting for the app to be quit');

@@ -608,7 +608,10 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    10 s, what was held goes to it then. Tests: `rebuild.test.mjs` (when; the page's report and the new page taking
    over, without a screen; the wiring), `rebuild-run.test.mjs` (the real sidecar with the setting at one minute),
    a Rust test of what is held. A pending question in `state.json` holds the rebuild off for as long as it is
-   kept (`limits.pendingKeepHours`, 24).
+   kept (`limits.pendingKeepHours`, 24). In the real shell (`bench/realrun.sh`, `PAGE_REBUILD=1`, three spoken
+   replies, then quiet): asked for 78 s after the last reply, the new page ready 127 ms later and answered with
+   its settings and `settle`, no greeting; a new web process of 86 MB in place of the old one at 93 MB; nothing of
+   the old page left. Not seen on screen (no blink, entrance or sound): the owner's live run.
 11. **The test suite split** (2026-11-24). `npm test` runs everything but the slow tests; `npm run test:all` runs
    all of it and is what `CLAUDE.md` asks for before a merge. Moved out of `npm test`: the overlay part of
    `home.test.mjs` (now `home-page.test.mjs`, 3 minutes), feature 24's every-look checks (`looks-rest.test.mjs`,
@@ -618,6 +621,16 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    however it ends: finished, Ctrl-C, a signal, killed outright (a watcher), and with runs overlapping (the first
    notes the sound, the last puts it back; a run whose watcher was killed too is put right by the next). Every tool
    that can make a sound starts itself under it. Checked by hand in those five ways.
+13. **Fix 4: the quit** (2026-11-24). What goes to the sidecar's and the voice helper's input pipes is handed to a
+   thread of its own for each (`pipe.rs`, used by `to_sidecar` and `to_voice`), so the main thread, which answers
+   the quit, never waits on a helper that has stopped reading; before, it wrote straight into the pipe holding the
+   helper's lock. A helper 4,096 lines behind gets nothing more until it reads (logged once); a helper that has
+   gone costs nothing. Rust tests: a helper that never reads, 100 kB handed over and the quit answered within
+   200 ms (a direct write of the same never finishes); every line arrives whole and in order; a helper that has
+   gone. In the real shell (`QUIT_AT=speaking`), the Apple-event quit during a spoken reply: the app gone after
+   0.2 s, three times out of three, nothing of ours left 5 s later. That copy has no voice helper, so the voice
+   pipe was checked by the Rust test only. This removes the one cause the code showed; it is not proof of what
+   happened on 21 November. Not type-checked for Windows (`cargo xwin` is not on this Mac).
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
