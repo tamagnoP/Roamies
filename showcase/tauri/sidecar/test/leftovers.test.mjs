@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { CHFLAGS, PS, PS_ARGS, START_SLACK, endable, endedNotice, etimeSeconds, extensionSource, offNotice, parsePs, parseRecord, prepareLeftovers, recordLine } from '../leftovers.mjs';
-import { WATCH_SCRIPT, createPi } from '../pi.mjs';
+import { WATCH_SCRIPT, createPi, tellResult } from '../pi.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -113,6 +113,37 @@ async function run(prompt, { mode = 'edit', maxMinutes = 60, act = async () => {
   await sleep(KILL + 300);
   return { r: done[0], logs, ids, pi, gone: (pid) => !pid || !alive(pid) };
 }
+// How a hand-off that ended done or error is told (sidekick.mjs): with spoken replies on, the gist in Roamies' own
+// turn, then the full text on screen, then, once the gist has finished playing, the notice said by code.
+{
+  const told = async (r, voiceOn) => {
+    const seen = []; let release;
+    const playing = new Promise((resolve) => { release = resolve; });
+    const p = tellResult(r, { voiceOn, summarise: async () => { seen.push(['gist']); }, show: (t) => seen.push(['show', t]), speak: (t) => seen.push(['speak', t]), played: () => { seen.push(['wait']); return playing; } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = seen.length;
+    release(); await p;
+    return { seen, before };
+  };
+  const r = { status: 'done', reply: 'ok', shown: `Here's what pi came back with:\n\nok\n\n${endedNotice(1)}`, notice: endedNotice(1) };
+  let o = await told(r, true);
+  assert.deepEqual(o.seen.map(([k]) => k), ['gist', 'show', 'wait', 'speak'], 'gist, the bubble, then the notice once the gist has played');
+  assert.equal(o.before, 3, 'not said before the gist has finished playing');
+  assert.deepEqual(o.seen[3], ['speak', endedNotice(1)], 'the notice alone, as worded by code');
+  o = await told({ ...r, status: 'error', notice: offNotice }, true);
+  assert.deepEqual(o.seen.at(-1), ['speak', offNotice], 'after an error, and for the extension not loaded');
+  o = await told({ ...r, notice: '' }, true);
+  assert.deepEqual(o.seen.map(([k]) => k), ['gist', 'show'], 'no notice: nothing more said');
+  o = await told(r, false);
+  assert.deepEqual(o.seen.map(([k]) => k), ['show'], 'replies not spoken: shown only');
+  // The gist's request to the model (sidekick.mjs) is made from pi's reply in the live state: it uses neither the
+  // notice nor the text on screen.
+  const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
+  const gist = side.slice(side.indexOf('summarise: async () => {'), side.indexOf('show: (text) => sayAsIs('));
+  assert.ok(gist.includes('enqueue(') && !/notice|shown/.test(gist), 'the model is not given the notice');
+  assert.ok(/speak: \(text\) => voiceLine\(text\)/.test(side) && /played: quietAgain/.test(side), 'said by code, after the gist');
+}
+
 const KILL = 2000;
 const left = () => fs.readdirSync(tmp);
 const cleanup = (ids) => { for (const x of Object.values(ids)) if (x) try { process.kill(x, 'SIGKILL'); } catch { /* gone */ } };
@@ -122,6 +153,8 @@ assert.equal(t.r.status, 'done');
 assert.ok(t.gone(t.ids.child), 'a hand-off that finishes: its command\'s background job is ended');
 assert.equal(t.r.shown, "Here's what pi came back with:\n\nok\n\nPi's commands had left 1 process running. I ended it.");
 assert.deepEqual(t.logs.filter(([k]) => /^pi_leftovers/.test(k)), [['pi_leftovers', { ended: 1, when: 'pi_end' }]], 'the count only');
+assert.equal(t.r.notice, endedNotice(1), 'the notice is passed on by itself, to be said');
+assert.ok(!t.pi.live().includes('I ended it') && !t.pi.live().includes('left 1 process'), 'the model is not told: the live state has pi\'s reply only');
 assert.ok(alive(t.ids.escaped), 'a process that moved itself to a new session is not caught (as documented)');
 assert.deepEqual(left(), [], 'the folder is removed');
 assert.equal(calls()[0][2], '-e', 'pi was given the extension');
@@ -147,10 +180,13 @@ cleanup(t.ids);
 
 t = await run('finish');
 assert.equal(t.r.shown, "Here's what pi came back with:\n\nok", 'nothing left running: no notice');
+assert.equal(t.r.notice, '');
 assert.deepEqual(t.logs.filter(([k]) => /^pi_leftovers/.test(k)), [['pi_leftovers', { ended: 0, when: 'pi_end' }]]);
 
 t = await run('bash finish nohook');
 assert.equal(t.r.shown, `Here's what pi came back with:\n\nok\n\n${offNotice}`, 'a pi without spawnHook: said');
+assert.equal(t.r.notice, offNotice);
+assert.ok(!t.pi.live().includes(offNotice));
 assert.ok(t.logs.some(([k, v]) => k === 'pi_leftovers_off' && v.why === 'hook'));
 assert.ok(alive(t.ids.child), 'and indeed not ended');
 cleanup(t.ids);

@@ -39,7 +39,7 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, forVoice, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
+import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -294,6 +294,18 @@ const userName = (() => {
 // ---------- tools ----------
 // The open request's voice, if replies are spoken: draw's beat lines are said on it, in order with the reply.
 let turnVoice = null;
+let lastReplyDone = null; // feature 24: resolves when the last reply has finished playing
+/** Feature 24: resolves once the last reply has finished playing, no answer window is open (one opened for a question
+ *  in that reply is left to close) and no other reply is being made or played, so a line said now cuts nothing off
+ *  and isn't heard as an answer. */
+async function quietAgain() {
+  for (;;) {
+    const d = lastReplyDone ?? whenPlayed(speech.mark());
+    await d;
+    if (!flow.window() && !turnVoice && (!lastReplyDone || d === lastReplyDone)) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
 const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: whereNow is not used here; whereFront takes its place
   allowActions: () => config.allowActions, ui, ask, openUrl, userName,
   speak: (line) => { if (!turnVoice) return false; turnVoice.say(line); return true; },
@@ -343,13 +355,18 @@ const pi = createPi({
   // then pi's full reply goes on screen, word for word, and stays there. In text mode the full reply is the answer.
   onDone: async (r) => {
     if (r.status === 'stopped') { say(r.shown); voiceLine(r.shown); return; }
-    if (VOICE_ON()) {
-      const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
-      // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
-      const asks = /\?\s*$/.test(r.reply ?? '');
-      await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
-    }
-    sayAsIs(r.shown, r.status === 'error' ? 'concerned' : 'happy'); // pi's own words: no form of address
+    await tellResult(r, {
+      voiceOn: VOICE_ON(),
+      summarise: async () => {
+        const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
+        // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
+        const asks = /\?\s*$/.test(r.reply ?? '');
+        await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
+      },
+      show: (text) => sayAsIs(text, r.status === 'error' ? 'concerned' : 'happy'), // pi's own words: no form of address
+      speak: (text) => voiceLine(text), // feature 24: the leftovers notice, after the gist
+      played: quietAgain,
+    });
   },
   log: (kind, data) => logLine(kind, data),
   onChange: () => menu(),
@@ -1136,7 +1153,8 @@ async function prompt(text, image = null, note = '', byVoice = false) {
   } finally {
     watch?.stop();
     busy = false; turnVoice = null;
-    flow.settle(replyDone ?? whenPlayed(speech.mark())); // Local-only build (feature 22)
+    lastReplyDone = replyDone ?? whenPlayed(speech.mark());
+    flow.settle(lastReplyDone); // Local-only build (feature 22)
     // A tool cut off by Stop never reports back: end its tag too, or the Sidekick kept showing it ("looking at
     // CapCut") on every later request, with their own tags queued behind it.
     for (const id of activity.stopped()) ui({ kind: 'agent', e: { type: 'tool_end', id, isError: true } });

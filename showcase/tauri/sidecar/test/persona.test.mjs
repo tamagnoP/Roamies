@@ -116,7 +116,7 @@ assert.match(side, /if \(!text \|\| !VOICE_ON\(\)\) return null;\n  text = sir\(
 assert.match(side, /if \(opts\.choices && opts\.placeholder\) opts = \{ \.\.\.opts, placeholder: sir\(opts\.placeholder\) \};/, 'a question from the app');
 assert.equal(side.split("ui({ kind: 'ask_text', text: sir(text, { again: true }) })").length, 3);
 assert.match(side, /message: sir\(msg\)/); assert.match(side, /voice\?\.say\(forVoice\(sir\(msg, \{ said: true \}\)\)\)/, 'a failure');
-assert.match(side, /sayAsIs\(r\.shown, r\.status === 'error' \? 'concerned' : 'happy'\);/, 'pi\'s own reply is not touched');
+assert.match(side, /show: \(text\) => sayAsIs\(text, r\.status === 'error' \? 'concerned' : 'happy'\),/, 'pi\'s own reply is not touched (tellResult shows r.shown as it is)');
 assert.match(side, /function sir\(text, how\) \{ return addressClock\.line\(text, personaNow\(\)\.address, how\); \}/, 'one helper, through the clock');
 
 // ---- the beats: the persona's, picked by code, no model call

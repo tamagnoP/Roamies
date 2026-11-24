@@ -76,7 +76,10 @@ or named an app) is a rule in its instructions, which the model follows but the 
    belongs to a process started at another time was reused by the system, and that group is left alone. The list
    is read in memory and dropped; it is never logged or kept. The activity log has `pi_leftovers` with the count
    only, and the reply on screen ends with a line when any were ended ("Pi's commands had left 1 process running.
-   I ended it."). This always happens; there is no setting.
+   I ended it."). This always happens; there is no setting. With spoken replies on, that line (or the one below)
+   is also said, worded by code: after "Stopped pi." when pi was stopped, and after Roamies has said the gist of a
+   reply that came back or hit a problem, once the gist has finished playing (and an answer window it opened has
+   closed). The model is never given it: the gist is made from pi's reply alone.
    If pi can't load the extension (it then stops before doing anything) it is started again without it, and if
    its bash tool has no `spawnHook` the extension leaves it as it is; either way the hand-off runs, the reply ends
    with "Pi ran without the extension that lets me end what its commands leave running, so anything they left

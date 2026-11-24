@@ -604,7 +604,9 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    2 s after its line was reused and is left alone; the rest get TERM, then KILL after 2 s. `pi_leftovers` logs the
    count; the reply ends with a line when any were ended. If pi can't load the extension (it exits 1 before doing
    anything) it is started again without it; with no `spawnHook` the extension leaves pi's bash alone; both end the
-   reply with a line that leftovers can't be ended (`pi_leftovers_off`). Read only: no extension.
+   reply with a line that leftovers can't be ended (`pi_leftovers_off`). Read only: no extension. With spoken
+   replies on, the line is also said by code: for done or error after the gist has played (`tellResult`, the
+   owner, 2026-11-24), the model never given it.
    Checked first against pi 1.6.0 here: `spawnHook` is there; each command is `/bin/bash -c` started detached; under
    the sandbox `sleep 600 &` stayed in the group of the shell whose pid was recorded; the record could be appended
    to but not emptied, deleted or unflagged, and nothing else could be written in the folder. Found on the way: the

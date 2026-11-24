@@ -611,6 +611,15 @@ export function watchParent(groupPid, spawnImpl = spawn, dir = '') {
   return { stop() { try { if (w?.pid) process.kill(-w.pid, 'SIGKILL'); } catch { /* gone */ } } };
 }
 
+/** How a hand-off that ended done or error is told (sidekick.mjs onDone). With spoken replies on, Roamies first says
+ *  the gist in its own turn (summarise; the model is given pi's reply, never the notice); then the full text goes on
+ *  screen; then, once the gist has finished playing, the leftovers notice (feature 24) is said, worded by code. */
+export async function tellResult(r, { voiceOn, summarise, show, speak, played }) {
+  if (voiceOn) await summarise(r);
+  show(r.shown);
+  if (voiceOn && r.notice) { await played(); speak(r.notice); }
+}
+
 export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now(), leftoversTmp = os.tmpdir(), leftoversSpawnSync = spawnSync } = {}) {
   let job = null; // the hand-off pi is working on
   const openLeftovers = new Set(); // feature 24: hand-off folders not yet removed (leftovers.mjs)
@@ -804,11 +813,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       onChange();
       // What's put on screen: pi's own words, whole and unchanged.
       const shown = `${status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`}${leftNotice ? `\n\n${leftNotice}` : ''}`;
-      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown };
+      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown, notice: leftNotice };
       // The app decides how it's told (sidekick.mjs: Roamies says the gist in its own voice, then the full reply goes on
       // screen). Without one, it's shown and read out as it is.
       if (onDone) Promise.resolve().then(() => onDone(result)).catch((e) => { console.error('pi relay', e); tell(shown, null); });
-      else tell(shown, status === 'done' ? `Pi says: ${forVoice(j.reply)}` : forVoice(shown));
+      else tell(shown, status === 'done' ? `Pi says: ${forVoice(j.reply)}${leftNotice ? ` ${leftNotice}` : ''}` : forVoice(shown));
     };
     child.on('error', (e) => finish(null, e));
     child.on('close', (code) => finish(code));
