@@ -430,14 +430,15 @@ the pointer, followed it, and hopped out of its way; in these two sizes it now d
   for it, and the page cannot give it back itself; a new page starts at about 72 MB. So once
   `limits.pageRebuildQuietMinutes` (15) have passed with all of these holding, the page is made afresh: the
   character is at rest at its home (not where you dragged it, not sent away), nothing is on screen (no bubble,
-  card, drawing, list or field), nothing is being said or heard, no question is pending (on screen, or kept in
-  `state.json` for later), nothing is being made, and nothing is waiting to be shown; and something was shown or
+  card, drawing, list or field), nothing is being said or heard, no question is on screen or waiting for its answer
+  in an answer window, nothing is being made, and nothing is waiting to be shown; and something was shown or
   spoken since the last time. The new page is made beside the old one, on the same display; the character appears
   in it at home at once, with no entrance, sound or greeting, and JARVIS's globe turned as it was; the old page goes
   half a second later. Anything for the overlay that comes meanwhile (a bubble, a notice, the listening bubble) is
   held by the app and shown on the new page once it is ready; if the new page doesn't report ready within 10
   seconds, it is handed over then. 0 switches this off. The log has `page_rebuild` and `page_rebuilt` (with the
-  milliseconds it took), sizes only.
+  milliseconds it took), sizes only. A question kept in `state.json` for later does not hold it off: it is asked
+  again as before, at the end of your next exchange, on the new page.
 - **Esc** is held from other apps only while there is something to stop or close, not while the character just
   rests. Esc closes what it is saying; it no longer sends the character away.
 - **The show/hide key** (⌃⌥S unless you changed it) still sends it away and brings it back; "Show …" in the menu

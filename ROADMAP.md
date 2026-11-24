@@ -599,16 +599,17 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
 10. **Fix 6: a fresh page after a quiet stretch** (2026-11-24, the owner's conditions). After
    `limits.pageRebuildQuietMinutes` (15; 0 never) the overlay page is made afresh, only when all of these hold for
    that long: the character at rest on its home spot (not where it was dragged, not sent away), nothing on screen,
-   nothing said or heard, no question pending (on screen or kept in `state.json`), nothing being made, nothing held
-   to be shown; and something was shown or spoken since the last rebuild. The page says when it is at rest
+   nothing said or heard, no question on screen or in an answer window, nothing being made, nothing held to be
+   shown; and something was shown or spoken since the last rebuild. The page says when it is at rest
    (`host.js`, `page_rest`); the sidecar adds the rest and decides (`rebuild.mjs`). The shell makes the new window
    beside the old one on the same display, holds every message for the overlay meanwhile, hands the new page its
    settings, then `settle` (the character at home at once, no entrance, sound or greeting, JARVIS's globe turned as
    it was), then what it held; the old window goes 0.5 s later. If the new page doesn't take its settings within
    10 s, what was held goes to it then. Tests: `rebuild.test.mjs` (when; the page's report and the new page taking
    over, without a screen; the wiring), `rebuild-run.test.mjs` (the real sidecar with the setting at one minute),
-   a Rust test of what is held. A pending question in `state.json` holds the rebuild off for as long as it is
-   kept (`limits.pendingKeepHours`, 24). In the real shell (`bench/realrun.sh`, `PAGE_REBUILD=1`, three spoken
+   a Rust test of what is held. A question kept in `state.json` does not hold the rebuild off (the owner,
+   2026-11-24, after the first build had it do so for up to `limits.pendingKeepHours`): it is raised as before at the
+   end of the next exchange, on the new page (`rebuild-run.test.mjs`, which fails with the old rule). In the real shell (`bench/realrun.sh`, `PAGE_REBUILD=1`, three spoken
    replies, then quiet): asked for 78 s after the last reply, the new page ready 127 ms later and answered with
    its settings and `settle`, no greeting; a new web process of 86 MB in place of the old one at 93 MB; nothing of
    the old page left. Not seen on screen (no blink, entrance or sound): the owner's live run.
@@ -1337,16 +1338,33 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - **2026-11-24 (feature 24, fix 3).** The real pi leaves behind what its commands start in the background, after
   every way a hand-off ends (item 8 in section 2). Ending them takes a change that is not built: it waits for the
   owner.
+- **2026-11-24, later (feature 24, the owner, after his live run on `daf228f`).** Fix 6, fix 4, the hour-long helper
+  run, the helper's sleep, the test split and the bench guard accepted. The display setting: nothing to do. A
+  question kept in `state.json` must not hold the page rebuild off, only one on screen or an open answer window;
+  built. pi's leftovers: yes to `/bin/ps`, with conditions (started by its full path with fixed arguments, never
+  through a shell, only when a hand-off ends, never on a timer; its output kept in memory, searched for a random
+  mark set in pi's environment for each hand-off, and dropped, never logged, written, sent to the model or put in an
+  error; a process ended only if it is the owner's, carries exactly that mark and is not Roamies or one of its
+  helpers, the mark checked again just before; TERM, then KILL after 2 s; the count logged and a notice worded by
+  code; always, no setting), and three more real-pi requests. Not built: on this Mac (macOS 26.6.2) `ps -E` shows
+  no environment for Apple's own programs (`/bin/sleep`, `/usr/bin/tail`, `zsh`, `bash` checked), only for others
+  (Homebrew and conda programs, node, Xcode's python), so the mark cannot be seen on the `sleep 600 &` the real pi
+  left. An inherited open file as the mark (found with `lsof`) fails too: node closes it in what it starts. Waiting
+  for the owner.
 
 ## 6. Still to test
 
+- [ ] Feature 24, fix 4 with the real voice helper: quit during a spoken reply (the live run on `daf228f` quit after
+  the reply had ended).
 - [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first
   reply after a quiet stretch in the Mac's voice from start to end, the next ones in the natural voice; no bubble;
   the answer window still opening only once the reply has finished playing; the helper woken before a briefing.
 - [ ] Feature 24, fix 6, on the installed build: after 15 quiet minutes at home with nothing on screen (once
   something has been shown), the log has `page_rebuild` and `page_rebuilt`, the overlay page's process is new (about
   72 MB), and nothing was seen: no blink, no entrance, no sound, no wave, JARVIS's globe as it was. Not while the
-  character sits where it was dragged; not while a question is pending.
+  character sits where it was dragged; not while a question is on screen or an answer window is open. A question
+  kept in `state.json` doesn't hold it off and is asked again at the end of the next exchange. (The live run on
+  `daf228f` quit 2.5 minutes after the last reply, before its 3-minute rebuild.)
 - [ ] Features 16 and 21a on the Mac, after an install (none of it has been heard in the app): a reply in
   `bm_george`; the Mac's voice while the helper loads at start-up; a beat before a slow step, with no words from the
   model before it; a long sentence cut at a clause without an audible seam; talking over a reply; the answer window

@@ -4,9 +4,10 @@
 //
 // The page is rebuilt only when all of these hold, and have held for "limits.pageRebuildQuietMinutes" (0: never):
 // the character is at rest at its home and not where it was dragged, nothing is on screen, nothing is being said or
-// heard, no question is pending (the page reports the first three, quiet() the rest); and something was shown or
-// spoken since the last rebuild. While the new page is made, the shell holds what goes to the overlay and hands it
-// over once the new page has its settings; the sidecar answers the new page without a greeting.
+// heard, no question is on screen or waiting in an answer window (the page reports the first three, quiet() the
+// rest; a question kept in state.json does not count); and something was shown or spoken since the last rebuild.
+// While the new page is made, the shell holds what goes to the overlay and hands it over once the new page has its
+// settings; the sidecar answers the new page without a greeting.
 
 /** minutes: → the setting. quiet: → whether the sidecar has nothing going on and no question pending. rebuild: asks
  *  the shell for a new page. timeoutMs: how long a new page has to report ready before the rebuild counts as over. */

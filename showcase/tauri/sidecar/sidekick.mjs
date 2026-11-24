@@ -467,11 +467,12 @@ const flow = createFlow({
 });
 for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);
 // Local-only build (feature 24, fix 6): the page tells when it is at rest at home with nothing on it; this side adds
-// that nothing is being made, said or heard, nothing is held to be shown, and no question is pending (on screen or
-// kept in state.json). The setting is read at each check.
+// that nothing is being made, said or heard, nothing is held to be shown, and no question is on screen or waiting in
+// an answer window. A question kept in state.json does not hold it off: it is raised as before, on the new page.
+// The setting is read at each check.
 pageRebuild = createPageRebuild({
   minutes: () => limitsFor(HOME).pageRebuildQuietMinutes,
-  quiet: () => calQuiet() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase && flow.pending().length === 0,
+  quiet: () => calQuiet() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase,
   rebuild: () => send({ type: 'rebuild_overlays' }),
   log: (kind, data) => logLine(kind, data),
 });

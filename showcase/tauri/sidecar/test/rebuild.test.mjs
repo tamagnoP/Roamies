@@ -44,7 +44,7 @@ import { HOME, atSpot, page } from './page.mjs';
   assert.equal(tick(10 * min), false); r.page(false); r.page(true); assert.equal(tick(10 * min), false, 'the page busy: again');
   assert.equal(tick(5 * min), true); t += 100; r.ready(); r.shown(); r.page(true);
   assert.equal(tick(10 * min), false); quiet = false; assert.equal(tick(15_000), false, 'a check finds the sidecar busy'); quiet = true;
-  assert.equal(tick(15 * min), false, 'the sidecar busy (a request, speech, a question pending): again, from the next check that finds it quiet');
+  assert.equal(tick(15 * min), false, 'the sidecar busy (a request, speech, a question on screen): again, from the next check that finds it quiet');
   assert.equal(tick(15_000), true); t += 100; r.ready();
 
   // the setting: 0 is never, a new value is read at the next check, a setting that can't be read is never
@@ -153,7 +153,8 @@ const restsWithin = async (p, sec) => { for (let t = 0; t < sec && !lastRest(p);
   assert.match(side, /if \(!PAGE_SETTINGS\.has\(msg\.kind\)\) pageRebuild\?\.shown\(\);\n\s*send\(\{ type: 'ui', msg \}\);/, 'everything the page is sent counts as shown, but its settings');
   assert.match(side, /minutes: \(\) => limitsFor\(HOME\)\.pageRebuildQuietMinutes,/, 'the setting is read at each check');
   const quiet = /quiet: \(\) => ([^\n]+),\n/.exec(side.slice(side.indexOf('pageRebuild = createPageRebuild(')))[1];
-  for (const part of ['calQuiet()', '!pi.bubble()', '!answers.open()', '!micWindow', '!heldSpeech.length', '!turnVoice', '!cal.hasHeld()', '!flow.open()', '!flow.window()', '!intro', '!showcase', 'flow.pending().length === 0']) assert.ok(quiet.includes(part), `quiet needs ${part}`);
+  for (const part of ['calQuiet()', '!pi.bubble()', '!answers.open()', '!micWindow', '!heldSpeech.length', '!turnVoice', '!cal.hasHeld()', '!flow.open()', '!flow.window()', '!intro', '!showcase']) assert.ok(quiet.includes(part), `quiet needs ${part}`);
+  assert.ok(!/pending/.test(quiet), 'a question kept in state.json does not hold the rebuild off');
   assert.match(side, /rebuild: \(\) => send\(\{ type: 'rebuild_overlays' \}\)/);
   const shell = fs.readFileSync(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.match(shell, /Some\("rebuild_overlays"\) => rebuild_overlays\(app\)/, 'the shell rebuilds when asked');
