@@ -17,6 +17,7 @@
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
 import { CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, NEW_WORDS, NO_WORDS, SECOND_WORDS, THAT_WORDS, Unanswered, YES_WORDS, firstButton, heardLine, heardShape, only, plain, unfilled } from './answers.mjs';
 import { WAKE_BEFORE_BRIEFING_MINUTES } from './kokorovoice.mjs'; // feature 24: shown in settings.default.json
+import { CHFLAGS, EXTENSION, PS, PS_ARGS, RECORD, START_SLACK, endedNotice, offNotice, prepareLeftovers } from './leftovers.mjs'; // feature 24
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -585,17 +586,34 @@ export function endGroup(child, { killAfterMs = KILL_AFTER_MS } = {}) {
   return g;
 }
 /** A small watcher outside this process: when this process is gone (killed, crashed) it ends pi's group the same
- *  way, then ends itself. It runs /bin/sh with a fixed script; the two numbers are its only arguments. */
-export const WATCH_SCRIPT = 'while kill -0 "$1" 2>/dev/null && kill -0 -- "-$2" 2>/dev/null; do sleep 1; done; kill -0 -- "-$2" 2>/dev/null || exit 0; kill -TERM -- "-$2" 2>/dev/null; sleep 2; kill -KILL -- "-$2" 2>/dev/null; exit 0';
-export function watchParent(groupPid, spawnImpl = spawn) {
+ *  way, and the groups recorded for the hand-off (leftovers.mjs: $3 is its folder, or empty), then removes that
+ *  folder and ends itself. It runs /bin/sh with a fixed script; the two numbers and the folder are its only arguments.
+ *  The recorded groups are found as leftovers.mjs finds them: /bin/ps with fixed arguments (pid, group, elapsed time),
+ *  its output read by awk and dropped; a pid now held by a process started at another time is left alone. */
+const AWK_ENDABLE = `BEGIN { while ((getline l < rec) > 0) if (l ~ /^[0-9]+ [0-9]+$/) { split(l, a, " "); if (a[1] > 1) t[a[1]] = a[2] } }
+{ n = split($3, e, /[-:]/); s = e[n] + 60 * e[n - 1]; if (n > 2) s += 3600 * e[n - 2]; if (n > 3) s += 86400 * e[n - 3]; st[$1] = now - s; m[$2] = 1 }
+END { for (p in t) if ((p in m) && !((p in st) && (st[p] < t[p] - ${START_SLACK.before} || st[p] > t[p] + ${START_SLACK.after}))) print p }`;
+export const WATCH_SCRIPT = [
+  'while kill -0 "$1" 2>/dev/null && kill -0 -- "-$2" 2>/dev/null; do sleep 1; done',
+  'kill -0 "$1" 2>/dev/null && exit 0',
+  'p=""; kill -0 -- "-$2" 2>/dev/null && p="$2"',
+  `g=""; [ -n "$3" ] && g=$(${PS} ${PS_ARGS.join(' ')} | /usr/bin/awk -v now="$(/bin/date +%s)" -v rec="$3/${RECORD}" '${AWK_ENDABLE}')`,
+  'for x in $p $g; do kill -TERM -- "-$x" 2>/dev/null; done',
+  '[ -n "$p$g" ] && sleep 2',
+  'for x in $p $g; do kill -KILL -- "-$x" 2>/dev/null; done',
+  `[ -n "$3" ] && { ${CHFLAGS} nouappnd "$3/${RECORD}"; /bin/rm -f "$3/${RECORD}" "$3/${EXTENSION}"; /bin/rmdir "$3"; } 2>/dev/null`,
+  'exit 0',
+].join('\n');
+export function watchParent(groupPid, spawnImpl = spawn, dir = '') {
   if (!groupPid || process.platform === 'win32') return { stop() {} };
   let w = null;
-  try { w = spawnImpl('/bin/sh', ['-c', WATCH_SCRIPT, 'sh', String(process.pid), String(groupPid)], { stdio: 'ignore', detached: true, env: { PATH: '/usr/bin:/bin' } }); w.unref?.(); w.on?.('error', () => {}); } catch { /* no watcher: the exit handler still ends the group */ }
+  try { w = spawnImpl('/bin/sh', ['-c', WATCH_SCRIPT, 'sh', String(process.pid), String(groupPid), dir], { stdio: 'ignore', detached: true, env: { PATH: '/usr/bin:/bin' } }); w.unref?.(); w.on?.('error', () => {}); } catch { /* no watcher: the exit handler still ends the group */ }
   return { stop() { try { if (w?.pid) process.kill(-w.pid, 'SIGKILL'); } catch { /* gone */ } } };
 }
 
-export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now() } = {}) {
+export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now(), leftoversTmp = os.tmpdir(), leftoversSpawnSync = spawnSync } = {}) {
   let job = null; // the hand-off pi is working on
+  const openLeftovers = new Set(); // feature 24: hand-off folders not yet removed (leftovers.mjs)
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
   let approval = null; // an approval waiting for Send: { answer(text) }
   const sessions = new Map(); // project folder -> pi session id of the last hand-off there
@@ -675,8 +693,13 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     }
   }
 
-  function start({ prompt, mode, project, followUp, settings, by, snap = null, box = null }) {
+  function start({ prompt, mode, project, followUp, settings, by, snap = null, box = null, leftovers = true }) {
     const id = ++seq, t0 = now();
+    // Feature 24: a hand-off that can edit gets the extension that records its commands (leftovers.mjs). macOS only.
+    const lf = mode === 'edit' && leftovers && process.platform === 'darwin' ? prepareLeftovers({ tmpdir: leftoversTmp, spawnSyncImpl: leftoversSpawnSync, log }) : null;
+    const lfOff = mode === 'edit' && process.platform === 'darwin' && !lf ? (leftovers ? 'setup' : 'load') : null; // why it runs without
+    const dropLf = () => { lf.remove(); openLeftovers.delete(lf); };
+    if (lf) openLeftovers.add(lf);
     // Old records go: keepLogsDays in the settings (30 unless it says otherwise; 0 keeps them all).
     if (settings.keepLogsDays > 0) {
       try {
@@ -689,20 +712,21 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const session = followUp ? sessions.get(project) : null;
     // "--" ends pi's options; a leading @ would attach a file, so it's kept off the front.
     const text = prompt.startsWith('@') ? ` ${prompt}` : prompt;
-    const args = ['--mode', 'json', ...(mode === 'read' ? ['--tools', READ_TOOLS] : []), ...(session ? ['--session', session] : []), '--', text];
+    const args = ['--mode', 'json', ...(mode === 'read' ? ['--tools', READ_TOOLS] : []), ...(lf ? ['-e', lf.extension] : []), ...(session ? ['--session', session] : []), '--', text];
     write({ type: 'roamies_handoff', at: new Date(t0).toISOString(), project, mode, follow_up: !!session, approved_by: by, snapshot: snap?.ref ?? null, undo: snap?.ref ? `git -C "${project}" restore --source=${snap.ref} --worktree -- .` : null, prompt, command: [settings.pi, ...args.slice(0, -1), '<prompt>'], sandbox: box ? 'on' : settings.sandbox ? 'not applied' : 'off', docker: box ? box.docker : undefined });
     const env = { ...process.env };
     if (path.isAbsolute(settings.pi)) env.PATH = `${path.dirname(settings.pi)}${path.delimiter}${env.PATH ?? ''}`; // node sits beside it
     // A login shell, so pi and node are found the way they are in Terminal. The prompt travels as an argument, never as shell text.
     // Under the sandbox it's sandbox-exec that starts the shell, so the shell's start-up, pi and all they run are confined.
     const line = [shell, '-lc', 'exec "$0" "$@"', settings.pi, ...args];
-    const [cmd, ...cmdArgs] = box ? [sandboxExec, '-p', box.profile, ...line] : line;
+    const [cmd, ...cmdArgs] = box ? [sandboxExec, '-p', lf ? `${box.profile}${lf.rules().join('\n')}\n` : box.profile, ...line] : line;
     // Local-only build (feature 24): pi is started as the leader of a process group of its own, so everything it
     // starts can be ended with it. The command and the sandbox are unchanged.
     const child = spawnImpl(cmd, cmdArgs, { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     const group = endGroup(child, { killAfterMs: KILL_AFTER_MS });
-    const guard = watchParent(child.pid, spawnImpl); // ends the group if this process dies without a chance to
-    const j = job = { id, prompt, mode, project, at: t0, child, snapshot: snap?.ref ?? null, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record };
+    const guard = watchParent(child.pid, spawnImpl, lf?.dir ?? ''); // ends the group (and the recorded ones) if this process dies without a chance to
+    if (lfOff) log('pi_leftovers_off', { why: lfOff });
+    const j = job = { id, prompt, mode, project, at: t0, child, snapshot: snap?.ref ?? null, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record, leftovers: lf, events: 0 };
     log('pi_start', { mode, followUp: !!session, chars: prompt.length });
     onChange();
     let stepAt = 0, stepTimer = null, stepText = '';
@@ -733,6 +757,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         if (!line.trim()) continue;
         let e;
         try { e = JSON.parse(line); } catch { write({ type: 'roamies_unparsed', line: clip(line, 2000) }); continue; }
+        j.events++;
         if (e.type !== 'message_update') write(line); // the streaming deltas are left out; message_end has the whole text
         try { onEvent(e); } catch (err) { console.error('pi event', err); }
       }
@@ -748,7 +773,25 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       if (finished) return;
       finished = true;
       clearTimeout(timer); clearTimeout(stepTimer); clearInterval(progress);
-      group.end(); guard.stop(); // pi has gone: nothing it started stays, whatever still holds its output open
+      group.end(); // pi has gone: nothing it started stays, whatever still holds its output open
+      // Feature 24: pi couldn't load the extension (it stops before doing anything): started again without it.
+      if (lf && !j.stopped && !j.events && code !== 0 && j.stderr.includes('Failed to load extension') && j.stderr.includes(path.basename(lf.dir))) {
+        guard.stop(); dropLf();
+        write({ type: 'roamies_retry', why: 'pi could not load the extension that records its commands' });
+        if (job === j) job = null;
+        start({ prompt, mode, project, followUp, settings, by, snap, box, leftovers: false });
+        return;
+      }
+      // Feature 24: what its commands left running (leftovers.mjs), then the watcher and the folder go.
+      let leftNotice = lfOff ? offNotice : '';
+      if (lf) {
+        const ran = lf.ready() || !j.events;
+        const { count, done } = lf.end('pi_end');
+        done.then(dropLf, dropLf);
+        if (count) leftNotice = endedNotice(count);
+        else if (!ran) { leftNotice = offNotice; log('pi_leftovers_off', { why: 'hook' }); }
+      }
+      guard.stop();
       const errText = spawnError ? spawnError.message : j.stderr.trim().split('\n').filter(Boolean).slice(-3).join(' ');
       let status = 'done';
       if (j.stopped === true) status = 'stopped';
@@ -760,7 +803,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       if (job === j) job = null;
       onChange();
       // What's put on screen: pi's own words, whole and unchanged.
-      const shown = status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`;
+      const shown = `${status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`}${leftNotice ? `\n\n${leftNotice}` : ''}`;
       const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown };
       // The app decides how it's told (sidekick.mjs: Roamies says the gist in its own voice, then the full reply goes on
       // screen). Without one, it's shown and read out as it is.
@@ -788,10 +831,12 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const g = job?.group;
     if (!g) return Promise.resolve();
     job.stopped = true;
-    return g.end();
+    const left = job.leftovers?.end('quit'); // feature 24: what pi's commands left running ends with it
+    return Promise.all([g.end(), left?.done]);
   }
-  /** As this process ends, whatever the reason: no waiting is possible, so the group is killed outright. */
-  function killNow() { for (const g of groups) g.kill(); }
+  /** As this process ends, whatever the reason: no waiting is possible, so the group is killed outright, and what
+   *  pi's commands left running too. */
+  function killNow() { for (const g of groups) g.kill(); for (const lf of openLeftovers) { lf.endNow(); lf.remove(); } }
 
   /** One hand-off: its checks, the Send bubble, and pi started on a yes. → { ok, mode, project }. kept: the pending
    *  question this is, when it is asked again: then there is no countdown, whatever its mode, so a hand-off is never

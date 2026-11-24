@@ -594,6 +594,32 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    child the same way: left behind after a hand-off that finishes, after `stop_pi`, after the time limit and after
    quitting, every time. Not run against the real pi: `stop_pi`, the time limit and quitting (one request was
    agreed). Not fixed: it waits for the owner (section 5, 2026-11-24).
+   **Built (2026-11-24, the owner's plan; `leftovers.mjs`).** A hand-off that can edit is started with an
+   extension (`pi -e`), written with an empty record into a folder made for it in the temporary folder. It puts
+   pi's own bash tool (`createBashTool`, pi's `shellPath` and `shellCommandPrefix`) back with a `spawnHook` that puts
+   one line in front of every command: the shell appends `$$` and the time to the record. The record is
+   append-only (`chflags uappnd`); the sandbox lets pi write it and nothing else in the folder. When pi stops
+   (finish, `stop_pi`, the time limit, quit, the sidecar's exit, the watcher), `/bin/ps -x -o pid=,pgid=,etime=`
+   (never `-E`) finds the recorded groups still there; a pid now held by a process started more than 5 s before or
+   2 s after its line was reused and is left alone; the rest get TERM, then KILL after 2 s. `pi_leftovers` logs the
+   count; the reply ends with a line when any were ended. If pi can't load the extension (it exits 1 before doing
+   anything) it is started again without it; with no `spawnHook` the extension leaves pi's bash alone; both end the
+   reply with a line that leftovers can't be ended (`pi_leftovers_off`). Read only: no extension.
+   Checked first against pi 1.6.0 here: `spawnHook` is there; each command is `/bin/bash -c` started detached; under
+   the sandbox `sleep 600 &` stayed in the group of the shell whose pid was recorded; the record could be appended
+   to but not emptied, deleted or unflagged, and nothing else could be written in the folder. Found on the way: the
+   sandbox can't tell an append from other writes (hence the flag), and pi stops with exit 1 when an extension
+   fails to load (hence the second start).
+   Tests: `leftovers.test.mjs` (the pieces; a stand-in pi run by the real createPi in the real sandbox: finish,
+   `stop_pi`, the time limit, quit, the sidecar's exit, no `spawnHook`, an extension that fails to load, read only,
+   what pi can do to the record; the watcher with a reused number), `pi-extension.test.mjs` (the real pi, the model
+   stood in for by pi's own scripted provider: in "Can edit" the bash tool is the extension's, the tools, their
+   descriptions and the system prompt are those of pi without it, the background job is ended, and the line is in
+   none of the tool results, events or session file; "Read only" has exactly read, grep, find and ls), and
+   `bench/pitest.mjs`. Against the real pi (`bench/realpi.mjs`, four requests, the owner's yes, in
+   `~/Documents/roamies-pi/workspace/lean-test`, made and removed each time): finish, `stop_pi`, the time limit and
+   quit each left nothing running and no folder; 1, 1, 1 and 3 processes ended (at quit Roamies got there before
+   pi had ended its running command).
 9. **The SDK's warning** `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` is noted once per run as `sdk_notice` with its code,
    not logged as an error.
 10. **Fix 6: a fresh page after a quiet stretch** (2026-11-24, the owner's conditions). After
@@ -1351,6 +1377,19 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   (Homebrew and conda programs, node, Xcode's python), so the mark cannot be seen on the `sleep 600 &` the real pi
   left. An inherited open file as the mark (found with `lsof`) fails too: node closes it in what it starts. Waiting
   for the owner.
+- **2026-11-24, later (feature 24, the owner).** The kept-question change accepted. For pi's leftovers neither
+  option offered (the environment mark for non-Apple programs only, or that plus ending processes whose environment
+  can't be read: the second could end other programs' processes). Instead: an extension of Roamies' given to pi
+  with `-e` in "Can edit" only, whose `spawnHook` records each command's shell pid and time in a file of the
+  hand-off's own temporary folder, the only file there the sandbox lets pi write; every recorded group ended when
+  pi stops (TERM, KILL after 2 s), always; `/bin/ps` by full path, fixed arguments, the process list only (pid,
+  group, start time), never `-E`, its output not logged, a reused number left alone; the model not told of the line
+  or the file; without `spawnHook` or the extension the hand-off still runs and a notice says so; the count logged,
+  a short notice when any were ended. Not caught: Docker containers, a process that moves itself to a new group or
+  session. Checked against pi here first, then built; three real-pi requests plus one for the normal finish. Also:
+  why "No such tool available" for `list_commitments` (reported); Super Productivity closed is logged once when it
+  starts and once when it ends (built); the never-ending conversation with no model signed in recorded as a known
+  fault (section 7).
 
 ## 6. Still to test
 
@@ -1483,6 +1522,12 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - Memory: the overlay page (tauri://localhost) reaches about 2 GB after a day of use. Measured on 2026-11-21
   (section 2, feature 24): it grows while a card of the drawing layer is up and the character is being drawn. Earlier note: not yet known whether
   upstream has the same growth. Quitting and reopening Roamies clears it. Needs a diagnosis.
+- Known fault, not to be fixed now (the owner, 2026-11-24): with no model signed in, a spoken request opens a
+  conversation that never ends. The request stops at "no model" before the conversation's quiet time is set going
+  (`prompt()` returns before `flow.activity()`), so `exchange_end` never comes until Roamies is restarted.
+  Meanwhile everything shown is also said, the page rebuild is held off (`flow.open()`), and kept questions are
+  not asked again at an exchange's end. Found by `rebuild-run.test.mjs`, which ends its exchange with "thanks"
+  instead.
 - Once the double clap is built, the microphone is open the whole time Roamies runs, and macOS shows its orange
   indicator throughout. Loud noises can set it off by mistake, which is why a clap only starts listening.
 

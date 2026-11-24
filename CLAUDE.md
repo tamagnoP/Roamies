@@ -28,10 +28,17 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    text going in on a pipe only. That Python is used only if `kokoro.python` is an absolute path to an existing
    executable; it is started directly, never through a shell, with a fixed argument list, under `sandbox-exec` with
    network denied (`kokorovoice.mjs`). The voice script never writes or logs the text it is given, and its error
-   stream never reaches Roamies' logs. File work is handed to pi (`pi.mjs`). The only files it
+   stream never reaches Roamies' logs. To end what pi's commands leave running (`leftovers.mjs`, the owner's plan of
+   2026-11-24) it starts two more, each by its full path with fixed arguments, never through a shell and never on a
+   timer: `/usr/bin/chflags` to make a hand-off's record append-only and then not, and `/bin/ps -x -o
+   pid=,pgid=,etime=` when pi stops, the process list only (never `-E`, the environment), read in memory to find the
+   recorded groups still there and dropped, never logged, kept or sent; the watcher beside a hand-off runs the same
+   `ps` in its fixed script. Only recorded groups are ended, and none whose number now belongs to a process started
+   at another time. File work is handed to pi (`pi.mjs`). The only files it
    writes are notes inside the Obsidian vault (`notes.mjs`), where it can create and append but never change or delete,
    and its own files in `~/Documents/roamies-pi` (`state.json`, the records in `log`, `pending.txt`, and
-   `settings.default.json`). Questions nobody answered are kept in `state.json` under `pending`, never in the vault. It never writes `settings.json` after making it, and never reads `settings.default.json`.
+   `settings.default.json`), and, for a hand-off that can edit, a folder in the temporary folder made for it and
+   removed after it (pi's extension and its record). Questions nobody answered are kept in `state.json` under `pending`, never in the vault. It never writes `settings.json` after making it, and never reads `settings.default.json`.
 3. **A hand-off that can edit is sent only after the owner says send.** Read-only hand-offs may send themselves after
    the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first. Heard hands-free (in
    an answer window) only "send" or "send it" sends one that can edit. A pending hand-off is only ever asked again:
@@ -54,6 +61,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/` | The Node.js sidecar: the agent, its tools and prompts. Most work happens here. |
 | `showcase/tauri/sidecar/sidekick.mjs` | Main sidecar file: prompts, turn handling, menu, voice wiring. Upstream's, with marked edits. |
 | `showcase/tauri/sidecar/pi.mjs` | Ours. Hand-off to pi, Send approval, background job, records, settings loader, `gateTools`. |
+| `showcase/tauri/sidecar/leftovers.mjs` | Ours. The extension pi is given for a hand-off that can edit, its record, and ending the process groups it records when pi stops. |
 | `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |

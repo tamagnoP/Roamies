@@ -57,10 +57,33 @@ or named an app) is a rule in its instructions, which the model follows but the 
    left of it after 2 seconds is killed. A hand-off counts as finished when pi itself exits, even if something it
    started is still holding its output open. If Roamies' own background process crashes, the group is killed as
    it goes; if that process is killed outright, a small watcher started beside each hand-off (`/bin/sh` with a
-   fixed script and two process numbers) does the same within about three seconds and then ends itself.
-   **Not covered yet:** pi's bash tool starts each command in a process group of its own, so something a command
-   leaves running in the background (`sleep 600 &`) is outside pi's group and is left running after any of these.
-   Found with the real pi on 2026-11-24; not fixed.
+   fixed script, two process numbers and the hand-off's folder) does the same within about three seconds, then
+   ends itself.
+   **What pi's commands leave running** (the owner's plan of 2026-11-24, `leftovers.mjs`). pi's bash tool starts
+   each command as the leader of a process group of its own, and something a command leaves running in the
+   background (`sleep 600 &`) stays in that group, outside pi's. So a hand-off that can edit is started with a
+   small extension of Roamies' (`pi -e …/roamies-leftovers.ts`), written with an empty record into a folder made
+   for that hand-off in your temporary folder and removed after it. The extension puts pi's bash tool back in
+   place with one line in front of every command: the shell appends its process number and the time to the
+   record. pi's own bash tool is used, with pi's shell settings; the tool's name, description and results, the
+   command as pi shows and keeps it (its events, its session file) and pi's system prompt are unchanged, so the
+   model is not told of the line or the record. The record is append-only (`chflags uappnd`), and the sandbox lets
+   pi write that one file and nothing else in the folder, nor take the flag off. "Read only" hand-offs get no
+   extension: they have no bash tool.
+   When pi stops, whichever of the ways above, every recorded group still there is asked to end, and what is
+   left after 2 seconds is killed. Before that, Roamies runs `/bin/ps -x -o pid=,pgid=,etime=`: your processes'
+   numbers, groups and running times only, never their environment or their commands. A recorded number that now
+   belongs to a process started at another time was reused by the system, and that group is left alone. The list
+   is read in memory and dropped; it is never logged or kept. The activity log has `pi_leftovers` with the count
+   only, and the reply on screen ends with a line when any were ended ("Pi's commands had left 1 process running.
+   I ended it."). This always happens; there is no setting.
+   If pi can't load the extension (it then stops before doing anything) it is started again without it, and if
+   its bash tool has no `spawnHook` the extension leaves it as it is; either way the hand-off runs, the reply ends
+   with "Pi ran without the extension that lets me end what its commands leave running, so anything they left
+   running may still be running.", and the log has `pi_leftovers_off`.
+   **Not caught:** Docker containers (Docker runs them, not the command); a process that moves itself to a new
+   process group or session (`setsid`, `nohup` with `setsid`, a daemon that detaches); and a command written to
+   write into the record (pi can append to it, as it can already signal any of your processes). macOS only.
 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.
@@ -699,7 +722,10 @@ reaches the other.
 - Done on both sides: the pair is retired and no longer synced. A task the app has archived counts as done. A to-do
   you open again in Roamies takes its old task up again if it is still in the app's list.
 - The app closed, or its API off: to-dos work as always, and the two are brought in step at the next sync. The
-  check that the app is there gives up after one second, so a closed or hung app never holds up a to-do.
+  check that the app is there gives up after one second, so a closed or hung app never holds up a to-do. The
+  activity log has `calendar_closed` once when the app is found closed (nothing listening on its port) and
+  `calendar_closed_end` (with the minutes) once when it answers again, not a line at every sync; any other failed
+  sync is logged each time as `calendar_failed`.
 - The due time is the app's deadline: a time (`deadlineWithTime`) when Roamies sets it. A deadline you set in the
   app as a day without a time is taken as that day at `calendar.dayEnd`. Roamies never sets the app's deadline
   reminder.
@@ -932,6 +958,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   drawing with this look as it does with the others (feature 24).
 - `showcase/roamies/10-dither.js`: JARVIS's points are kept in two arrays made once, not in a Map emptied on every
   frame, which made the overlay page grow by megabytes a second (feature 24).
+- `showcase/tauri/sidecar/leftovers.mjs` (new), `pi.mjs`: the extension a hand-off that can edit is started with, its
+  record, and ending the groups it records when pi stops (feature 24).
 - `showcase/tauri/sidecar/pi.mjs`, `sidekick.mjs`: pi's process group is ended with it, at quit and when the
   background process dies; the Claude Agent SDK's warning that our tools are allowed by name is noted once as
   `sdk_notice`, not logged as an error (feature 24).
@@ -954,7 +982,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/desktop.html`: loads `home.js`.
 - `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
-- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
+- `showcase/tauri/sidecar/test/pi.test.mjs`, `test/leftovers.test.mjs`, `test/pi-extension.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
   `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/home-page.test.mjs`,
   `test/looks-rest.test.mjs`, `test/page.mjs`, `test/rebuild.test.mjs`, `test/rebuild-run.test.mjs`, `test/live.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
   `package.json`: tests.

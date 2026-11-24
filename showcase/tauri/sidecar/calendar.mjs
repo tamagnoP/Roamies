@@ -212,7 +212,7 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
     const payload = body === undefined ? null : JSON.stringify(body);
     return new Promise((resolve, reject) => {
       // What went wrong, in plain words: each way of not getting an answer is said as what it is.
-      const fail = (why) => reject(new Down(`${why} ${HOW}`));
+      const fail = (why, closed = false) => reject(Object.assign(new Down(`${why} ${HOW}`), closed ? { closed: true } : {})); // closed: nothing listening
       const what = doing ? `when asked to ${doing}` : `(${method} ${target.split('?')[0].replace(/^\/tasks\/.+/, '/tasks/…')})`;
       const req = http.request({ host: SP.host, port, method, path: target, agent, headers: { ...(auth ? { Authorization: `Bearer ${auth}` } : {}), ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}) } }, (res) => {
         const parts = [];
@@ -230,7 +230,7 @@ export function createClient({ home = os.homedir(), port = SP.port, tokenFile = 
       });
       let slow = false;
       const timer = setTimeout(() => { slow = true; req.destroy(new Error('slow')); }, ms);
-      req.on('error', (e) => { clearTimeout(timer); fail(slow ? `Super Productivity didn't answer within ${ms / 1000} second${ms === 1000 ? '' : 's'} ${what}.` : e?.code === 'ECONNREFUSED' ? `Nothing is listening on port ${port}: Super Productivity is closed, or its local REST API is off.` : `The connection to Super Productivity failed ${what} (${scrub(e?.code ?? e?.message)}).`); });
+      req.on('error', (e) => { clearTimeout(timer); fail(slow ? `Super Productivity didn't answer within ${ms / 1000} second${ms === 1000 ? '' : 's'} ${what}.` : e?.code === 'ECONNREFUSED' ? `Nothing is listening on port ${port}: Super Productivity is closed, or its local REST API is off.` : `The connection to Super Productivity failed ${what} (${scrub(e?.code ?? e?.message)}).`, !slow && e?.code === 'ECONNREFUSED'); });
       req.end(payload ?? undefined);
     });
   }
@@ -327,7 +327,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       if (r.status !== 200) return { ok: false, why: `Super Productivity answered "are you there" with HTTP ${r.status}. ${HOW}` };
       if (r.body?.data?.rendererReady === false) return { ok: false, why: 'Super Productivity is open but says it isn\'t ready yet: it is probably still starting.' };
       return { ok: true, why: '' };
-    } catch (e) { if (e instanceof Down) return { ok: false, why: e.message }; throw e; }
+    } catch (e) { if (e instanceof Down) return { ok: false, why: e.message, closed: !!e.closed }; throw e; }
   }
   const there = async () => (await reach()).ok;
 
@@ -361,7 +361,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   async function run() {
     const lines = [], asks = [], says = {}; // says: a notice's line → its one short sentence, for the voice
     const up = await reach();
-    if (!up.ok) return { ok: false, reached: false, lines, asks, says, why: up.why };
+    if (!up.ok) return { ok: false, reached: false, closed: up.closed, lines, asks, says, why: up.why };
     let cal = get();
     if (!cal.started) return { ok: true, started: false, lines, asks, says };
     const s = settings(), dayEnd = s.calendar.dayEnd;
@@ -508,6 +508,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
    *  whether the sync worked, without a title. (text is kept for the callers and is always empty.) */
   let lastOk = false; // whether the last run reached the app: what is known of its calendar is only good then
   let toldWhy = null; // the failure the owner was last told about, so the timer doesn't say the same thing every minute
+  let closedAt = null; // Local-only build: since when nothing has been listening on the app's port (it is closed)
   function sync(from = 'timer') {
     return inTurn(async () => {
       let r, lost = [];
@@ -522,7 +523,11 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         r = { ok: false, reached: true, lines: [], asks: [], says: {}, why: `The sync stopped on an error in Roamies itself, not in Super Productivity: ${scrub(e?.message ?? e)}` };
       }
       r.lines.unshift(...lost.map((l) => l.text)); for (const l of lost) r.says[l.text] = l.say;
-      if (r.ok) toldWhy = null; else log('calendar_failed', { from, reached: !!r.reached }); // the reason names a to-do, so it isn't logged
+      // Local-only build (the owner, 2026-11-24): the app simply closed is logged once when that starts and once when
+      // it ends, not at every sync. Any other failure is logged each time; its reason names a to-do, so it isn't logged.
+      if (r.closed) { if (closedAt === null) { closedAt = now(); log('calendar_closed', { from }); } }
+      else if (closedAt !== null) { log('calendar_closed_end', { minutes: Math.round((now() - closedAt) / 60_000) }); closedAt = null; }
+      if (r.ok) toldWhy = null; else if (!r.closed) log('calendar_failed', { from, reached: !!r.reached });
       // A failure nobody asked about is said once, as what it is. The app simply being closed is not one: that is
       // said when something is asked of it. After the first yes it is said either way.
       if (!r.ok && (from === 'tool' ? r.named : r.reached || from === 'start') && r.why !== toldWhy) { /* from a tool: only what the tool isn't given */ toldWhy = r.why; r.lines.push(`I couldn't bring my to-do list and Super Productivity in step. ${r.why}`); r.says[r.lines.at(-1)] = 'I couldn\'t bring my to-do list and Super Productivity in step: the bubble says why.'; }

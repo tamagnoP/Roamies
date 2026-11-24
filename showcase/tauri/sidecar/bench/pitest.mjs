@@ -11,17 +11,21 @@ for (const d of [proj, dir, tools]) fs.mkdirSync(d, { recursive: true });
 const fake = path.join(tools, 'pi');
 fs.writeFileSync(fake, `#!/bin/sh
 # the last argument is the prompt: finish | hang | deaf, or real-finish | real-hang: the child is started the way the
-# real pi's bash tool starts a command (detached: a session and process group of its own), and outlives that tool call
-for a in "$@"; do p="$a"; done
+# real pi's bash tool starts a command (detached: a session and process group of its own), and outlives that tool call.
+# With -e (Roamies' extension, leftovers.mjs) the stand-in does what pi with it does: "ready" in the record, and the
+# command's shell appends its pid and the time before it starts anything.
+prev=""; ext=""; for a in "$@"; do p="$a"; [ "$prev" = "-e" ] && ext="$a"; prev="$a"; done
+rec=""; [ -n "$ext" ] && rec=$(/usr/bin/sed -n 's/^const RECORD = "\\(.*\\)";$/\\1/p' "$ext") && echo ready >> "$rec"
 case "$p" in
-  real-*) /usr/bin/perl -e 'use POSIX; setsid(); exec "/bin/sleep", "300"' & ;;
-  *) /bin/sleep 300 & ;;
+  real-*) /usr/bin/perl -e 'use POSIX; setsid(); if (length $ARGV[0]) { open(my $f, ">>", $ARGV[0]); print $f "$$ " . time() . "\\n"; close $f } my $c = fork(); if (!$c) { exec "/bin/sleep", "300" } open(my $g, ">", "child.pid"); print $g $c; close $g; exit 0' "$rec" & ;;
+  *) /bin/sleep 300 & echo $! > "$PWD/child.pid" ;;
 esac
-echo $! > "$PWD/child.pid"; echo $$ > "$PWD/pi.pid"
+echo $$ > "$PWD/pi.pid"
 echo '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"stopReason":"stop"}}'
 case "$p" in
   finish|real-finish) exit 0 ;;
   deaf) trap '' TERM; while :; do /bin/sleep 1; done ;;
+  real-hang) while :; do /bin/sleep 1; done ;;
   *) wait ;;
 esac
 `, { mode: 0o755 });

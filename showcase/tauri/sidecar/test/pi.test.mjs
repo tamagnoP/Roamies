@@ -17,6 +17,8 @@ fs.writeFileSync(fakePi, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2), prompt = args[args.length - 1];
 fs.appendFileSync(${JSON.stringify(path.join(home, 'calls.log'))}, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');
+// a hand-off that can edit comes with Roamies' extension (leftovers.mjs): loaded, it says it is ready in its record
+if (args.includes('-e')) fs.appendFileSync(JSON.parse(/const RECORD = (".*?");/.exec(fs.readFileSync(args[args.indexOf('-e') + 1], 'utf8'))[1]), 'ready\\n');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'session', version: 3, id: 'sess-1', cwd: process.cwd() });
 out({ type: 'agent_start' });
@@ -130,7 +132,9 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   assert.match(records().at(-1)[0].snapshot, /^refs\/roamies\/\d{4}-\d\d-\d\d_\d{6}$/);
   assert.match(records().at(-1)[0].undo, /restore --source=refs\/roamies\//);
   assert.match(pi.live(), /A snapshot from before pi's edits is kept as refs\/roamies\//);
-  assert.deepEqual(calls().at(-1).args, ['--mode', 'json', '--session', 'sess-1', '--', 'The column is called label']);
+  const a = calls().at(-1).args;
+  assert.deepEqual([...a.slice(0, 2), ...a.slice(4)], ['--mode', 'json', '--session', 'sess-1', '--', 'The column is called label']);
+  assert.equal(a[2], '-e'); assert.match(a[3], /\/roamies-pi-[^/]+\/roamies-leftovers\.ts$/, 'can edit: started with the extension'); assert.ok(!fs.existsSync(a[3]), 'its folder is removed after');
   assert.equal(pi.heard('send'), false, 'no bubble open: speech is not an answer');
 }
 { // talking while the Send bubble is open: the bubble closing is not a "no"; what's said decides
@@ -526,7 +530,7 @@ esac
   assert.equal(pi.c, '/usr/bin/sandbox-exec', 'inside the sandbox, as before');
   assert.deepEqual(pi.a.slice(2, 6), ['/bin/sh', '-lc', 'exec "$0" "$@"', fake], 'by the same command');
   const watch = spawns.find((x) => x.c === '/bin/sh' && x.a[1] === WATCH_SCRIPT);
-  assert.ok(watch && watch.a.length === 5 && watch.a[3] === String(process.pid) && /^\d+$/.test(watch.a[4]), 'a watcher with a fixed script and two numbers');
+  assert.ok(watch && watch.a.length === 6 && watch.a[3] === String(process.pid) && /^\d+$/.test(watch.a[4]) && /\/roamies-pi-[^/]+$/.test(watch.a[5]), 'a watcher with a fixed script, two numbers and the hand-off\'s folder');
   assert.deepEqual(watch.o.env, { PATH: '/usr/bin:/bin' });
   assert.equal(spawns.length, 2, 'and nothing else is started');
   r = await run('hang', 60, async (p) => { assert.equal(await p.tools.find((t) => t.name === 'stop_pi').execute({}, {}), 'Stopping pi.'); });
@@ -545,7 +549,8 @@ esac
   assert.equal(left, '', 'no watcher is left once its hand-off is over');
   // the pieces
   assert.equal(KILL_AFTER_MS, 2000);
-  assert.match(WATCH_SCRIPT, /^while kill -0 "\$1" 2>\/dev\/null && kill -0 -- "-\$2" 2>\/dev\/null; do sleep 1; done; kill -0 -- "-\$2" 2>\/dev\/null \|\| exit 0; kill -TERM -- "-\$2" 2>\/dev\/null; sleep 2; kill -KILL -- "-\$2" 2>\/dev\/null; exit 0$/);
+  assert.match(WATCH_SCRIPT, /^while kill -0 "\$1" 2>\/dev\/null && kill -0 -- "-\$2" 2>\/dev\/null; do sleep 1; done\nkill -0 "\$1" 2>\/dev\/null && exit 0\n/);
+  assert.ok(!/-E|\bps -[a-zA-Z]*e/.test(WATCH_SCRIPT) && WATCH_SCRIPT.includes('/bin/ps -x -o pid=,pgid=,etime= | /usr/bin/awk'), 'the watcher lists processes with fixed arguments, never their environment');
   assert.deepEqual(Object.keys(watchParent(0)), ['stop'], 'no group: no watcher');
   const g = endGroup({ pid: undefined, kill() {} }); assert.equal(g.alive(), false); await g.end();
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');

@@ -1134,6 +1134,24 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   await assert.rejects(shut.request('GET', '/tasks', undefined, 1000), /Error: Nothing is listening on port 1: Super Productivity is closed, or its local REST API is off\./);
   r = await createCalendar({ home, todos, port: 1, tokenFile, now: () => clock }).sync('timer');
   assert.match(r.why, /^Nothing is listening on port 1: Super Productivity is closed, or its local REST API is off\./);
+  // the app simply closed: logged once when that starts and once when it ends, not at every sync; other failures
+  // each time (the owner, 2026-11-24)
+  {
+    const spare = http.createServer(); await new Promise((ok) => spare.listen(0, '127.0.0.1', ok));
+    const p2 = spare.address().port; await new Promise((ok) => spare.close(ok)); // nothing listens there now
+    const seen = [], log = (kind, data) => { if (/^calendar_(closed|failed)/.test(kind)) seen.push([kind, data]); };
+    const c2 = createCalendar({ home, todos, port: p2, tokenFile, now: () => clock, log });
+    for (let i = 0; i < 3; i++) { await c2.sync('timer'); clock += 60_000; }
+    assert.deepEqual(seen, [['calendar_closed', { from: 'timer' }]], 'three syncs with the app closed: one line');
+    const back = http.createServer(server.listeners('request')[0]); await new Promise((ok) => back.listen(p2, '127.0.0.1', ok));
+    app.mode = 'other'; await c2.sync('timer'); app.mode = 'up';
+    assert.deepEqual(seen.slice(1), [['calendar_closed_end', { minutes: 3 }], ['calendar_failed', { from: 'timer', reached: false }]], 'it answers again: the end is logged, and a failure of another kind as before');
+    await c2.sync('timer'); await c2.sync('timer');
+    assert.equal(seen.length, 3, 'working: nothing more');
+    back.close(); back.closeAllConnections(); await c2.sync('timer');
+    for (let i = app.log.length - 1; i >= 0; i--) if (app.log[i].host === `127.0.0.1:${p2}`) app.log.splice(i, 1); // the stand-in's other port
+    assert.deepEqual(seen.at(-1), ['calendar_closed', { from: 'timer' }], 'closed again: one line again');
+  }
   // a fault in Roamies' own code is said as that
   const real = todos.all; todos.all = async () => { throw new TypeError('list is broken'); };
   r = await cal.sync('tool'); assert.equal(r.why, 'The sync stopped on an error in Roamies itself, not in Super Productivity: list is broken');
