@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Being built on `lean-running`: fixes 1 and 2 of 5 done and accepted (nothing drawn at rest; the cause of the page's growth removed); the natural voice's helper bounded (`kokoro.cacheMB`, `kokoro.memoryMB`); fix 5 done (the live state sent only when it changes, the fold point a setting, a fold plan that counts what is sent); fix 3 done but for the run against the real pi; what the page's jumps leave behind found; a page rebuild measured (fix 6 waits for the owner); next fix 4, the helper's hour, then the helper's sleep | `lean-running` |
+| 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). Next: the page rebuild without the orb moving (`rebuild-still`) | `local-only` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
