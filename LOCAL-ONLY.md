@@ -221,7 +221,8 @@ setup guide is open, the bubble waits until it closes.
   "speakNotices": true,
   "voiceEngine": "kokoro",
   "kokoro": { "python": "/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "mlx-community/Kokoro-82M-bf16",
-              "voice": "bm_george", "lang": "b", "speed": 1.05, "cacheMB": 0, "memoryMB": 400 },
+              "voice": "bm_george", "lang": "b", "speed": 1.05, "cacheMB": 0, "memoryMB": 400,
+              "sleepAfterMinutes": 0 },
   "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
                "humour": "dry and rare", "maxSentences": 2,
                "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."],
@@ -318,6 +319,7 @@ setup guide is open, the bubble waits until it closes.
   | `speed` | 1.05 | 0.5 to 2 | 1 is the voice's own pace. Read for each reply. |
   | `cacheMB` | 0 | 0 to 16384, whole | MB of freed memory MLX keeps for reuse while it makes a sentence. 0: none. Read at start. |
   | `memoryMB` | 400 | 100 to 16384, whole | MB MLX aims to stay under while it makes a sentence. It goes over when one step needs more. Below about 400 sentences take longer and the helper gets no smaller. Read at start. |
+  | `sleepAfterMinutes` | 0 | 0 to 1440, whole | Quiet minutes after which the helper is ended to give its memory back (see "The voice"). 0: never. Read at each check. |
 - `persona`: how Roamies speaks (see "The manner"). It changes nothing about what Roamies may do. Read for each
   request, so an edit counts from the next one. Each part that is missing or can't be used takes its default and is
   named in the start-up bubble.
@@ -940,6 +942,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/src-tauri/src/pipe.rs` (new), `main.rs`, `voice.rs`, `sidecar.rs`: what goes to the sidecar and
   to the voice helper is written by a thread of its own, so the app always answers a quit, even when a helper has
   stopped reading (feature 24).
+- `showcase/tauri/sidecar/kokorovoice.mjs`, `speaker.mjs`, `sidekick.mjs`, `pi.mjs`: the natural voice's helper
+  sleeps when quiet and is woken; a reply keeps one voice, its "one moment" line included (feature 24).
 - `showcase/tauri/sidecar/rebuild.mjs` (new), `sidekick.mjs`, `showcase/roamies/host.js`, `agent.js`,
   `10-dither.js`, `showcase/tauri/src-tauri/src/main.rs`: the overlay page made afresh after a quiet stretch; the
   page says when it is at rest at home; the shell makes the new page beside the old one and holds what comes for it
@@ -1007,6 +1011,16 @@ own `voices` folder.
   sentence, one bubble says so ("My natural voice isn't working (…), so I'm using the Mac's voice until you restart
   me.") and the Mac's voice speaks from that sentence on, until Roamies is restarted. While the helper is still
   loading at start-up, the Mac's voice speaks.
+- **One voice per reply.** A reply is spoken by the natural voice only if the helper is ready when the reply
+  starts, and then to its end; otherwise by the Mac's voice to its end, even if the helper becomes ready meanwhile.
+  A short "one moment" line kept in the other voice is said afresh in the reply's own. (Only a helper that fails in
+  the middle of a reply makes the rest of it the Mac's.)
+- **Asleep when quiet.** With `kokoro.sleepAfterMinutes` above 0 (0, the default, is never), the helper is ended
+  after that many minutes in which it was asked for no sentence and no reply in its voice was open, which gives its
+  650 to 700 MB back. Nothing is said or shown; the log has `kokoro_sleep`. It is started again (`kokoro_wake`) when
+  you press the talk keys, when an answer window opens, when a spoken request arrives, and 2 minutes before a
+  briefing is due. Until it is ready again, replies are spoken by the Mac's voice. A typed request and the app's own
+  lines (a nudge, a notice) don't wake it.
 - It ends when Roamies does: its input closes, it checks every 3 seconds that Roamies is still its parent, and at
   Quit it is killed after 2 seconds if it is still there.
 

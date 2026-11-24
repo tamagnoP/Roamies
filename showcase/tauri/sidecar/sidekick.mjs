@@ -43,7 +43,7 @@ import { createPi, forVoice, gateTools, homeFor, limitsFor, loadSettings, voiceF
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
-import { createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; // Local-only build (feature 16): the natural voice
+import { WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; // Local-only build (feature 16): the natural voice
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
@@ -184,7 +184,7 @@ const kokoro = createKokoro({
 });
 const KokoroReplyVoice = kokoroVoiceFor(kokoro, settingsNow);
 const speech = createSpeaker({
-  pickVoice: () => (kokoro.usable ? KokoroReplyVoice : null),
+  pickVoice: () => (kokoro.ready ? KokoroReplyVoice : null), // feature 24: a reply keeps one voice: the natural one only if its helper is ready when the reply starts
   beatPhrases: beatsNow(),
   emit: (m) => ui(m),
   log: (kind, data) => logLine(kind, data),
@@ -457,7 +457,7 @@ const flow = createFlow({
   speak: (text) => lineDone(text),
   // closing: the reply to "thanks" carries the form of address whatever the clock says
   announce: (text, { closing = false } = {}) => { addressClock.allow(closing); try { say(text, 'happy'); return lineDone(forVoice(text)); } finally { addressClock.allow(false); } },
-  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding) send({ type: 'listen', seconds, window, again }); },
+  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); } }, // feature 24: the natural voice wakes for the answer
   cancel: () => send({ type: 'listen_cancel' }),
   bubbles: () => [pi, answers],
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),
@@ -1582,6 +1582,10 @@ const startVoiceDownload = () => {
 };
 const PRIVACY = { microphone: 'Privacy_Microphone', speech: 'Privacy_SpeechRecognition' };
 function onVoice(m) {
+  // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken by the talk key, an answer
+  // window and a spoken request, so that it is ready by the time the reply is.
+  if (m.type === 'voice_state' && m.state === 'listening') kokoro.wake(m.window != null ? 'answer window' : 'talk key');
+  else if (m.type === 'voice' && m.text?.trim()) kokoro.wake('spoken request');
   if (m.type === 'voice_state') voiceState = String(m.state ?? 'idle'); // Local-only build: sync lines wait while the owner talks (calQuiet)
   // Local-only build (feature 22): m.window is the answer window the helper's session belongs to (none: a key press).
   if (m.type === 'voice_state') flow.voice(voiceState, m.window ?? null);
@@ -2089,6 +2093,8 @@ if (!config.onboarded) send({ type: 'onboarding' });
 // Local-only build: the briefings set up in ~/Documents/roamies-pi/settings.json ("briefings"). Checked once a minute;
 // given when nothing else is going on, once a day each.
 setInterval(() => {
+  // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken shortly before a briefing.
+  try { if (pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
   try {
     if (busy || queued || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
     const b = pi.briefing();

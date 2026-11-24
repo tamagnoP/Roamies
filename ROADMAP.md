@@ -639,6 +639,22 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    `bench/kokorocheck.py` (every 10 ms) gave 1,344 to 1,369 MB. The page: 85.5 MB at the start, 121 MB after the
    hour and the quiet minutes, 92 after WebKit's low-memory signal; highest 209 MB. Sidecar 76 to 106 MB. Nothing
    left when the sidecar's input closed.
+15. **The natural voice's helper sleeps when quiet** (2026-11-24). `kokoro.sleepAfterMinutes` (0, never, by
+   default; whole minutes up to 1440): after that long with no sentence asked for and no reply in its voice open,
+   the helper is ended (its input closed, killed after 2 s if still there), with no bubble; `kokoro_sleep` in the
+   log. It is started again (`kokoro_wake`) by the talk key, an answer window opening, a spoken request, and 2
+   minutes before a briefing is due; a typed request and the app's own lines don't wake it. A reply now keeps the
+   voice it started with: the natural voice only if the helper is ready when the reply starts (before, also while
+   it was loading, sentence by sentence), and a "one moment" line kept in the other voice is said afresh in the
+   reply's. Marks are untouched: a reply's voice is still LocalVoice underneath. Tests in `kokorovoice.test.mjs`
+   (asleep after the minutes and not before, never with a reply open, 0 never, woken and speaking again, a reply
+   started asleep stays the Mac's though the helper is ready before its second sentence, its mark after its audio,
+   the beat in the reply's voice, the wiring).
+   An hour in the harness (`bench/run.mjs`: bursts of five spoken requests 30 s apart with the talk key held 3 s
+   before each, ten quiet minutes after each burst, `sleepAfterMinutes` 5): asleep 4 times, 20.7 of 53.8 minutes
+   (38 %); the helper's memory averaged 409 MB over the run against 662 MB awake, so about 250 MB less on
+   average, and none while asleep. Waking took 8.4 to 9.7 s to the helper being ready, so the first reply after
+   each sleep (4 of 25) was spoken by the Mac's voice, wholly; the other 21 by the natural voice, wholly.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
@@ -1324,6 +1340,9 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 
 ## 6. Still to test
 
+- [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first
+  reply after a quiet stretch in the Mac's voice from start to end, the next ones in the natural voice; no bubble;
+  the answer window still opening only once the reply has finished playing; the helper woken before a briefing.
 - [ ] Feature 24, fix 6, on the installed build: after 15 quiet minutes at home with nothing on screen (once
   something has been shown), the log has `page_rebuild` and `page_rebuilt`, the overlay page's process is new (about
   72 MB), and nothing was seen: no blink, no entrance, no sound, no wave, JARVIS's globe as it was. Not while the

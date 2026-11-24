@@ -49,6 +49,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
   // while its helper is up, else nothing, which means the macOS voice), and the audio's rate comes from the voice.
   const voiceImpl = () => pickVoice?.() ?? FixedVoice;
   const beatRate = new Map(); // phrase → the rate its kept audio was made at
+  const beatVoice = new Map(); // Local-only build (feature 24): phrase → the voice its kept audio was made in
   let key = null, voice = DEFAULT_VOICE, pref = FISH_MODELS[0], model = pref, seq = 0, current = null, checking = null;
   // The pick and the cheaper ones after it (FISH_MODELS runs from priciest to free).
   const chain = () => FISH_MODELS.slice(Math.max(0, FISH_MODELS.indexOf(pref)));
@@ -72,12 +73,13 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
       for (const phrase of list) {
         if (key !== k || voice !== vo || beatPhrases !== list) break;
         if (beats.has(phrase) || bundled(vo, model)?.has(phrase)) continue; // shipped with the app
+        const Impl = voiceImpl();
         const chunks = await new Promise((done) => {
           const got = [];
-          const v = new (voiceImpl())({ key: k, voice: vo, model, onAudio: (pcm) => { beatRate.set(phrase, v.rate ?? RATE); got.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')); }, onEnd: () => done(got), onError: () => done(null) }).open();
+          const v = new Impl({ key: k, voice: vo, model, onAudio: (pcm) => { beatRate.set(phrase, v.rate ?? RATE); got.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')); }, onEnd: () => done(got), onError: () => done(null) }).open();
           v.say(phrase); v.end();
         });
-        if (chunks?.length && key === k && voice === vo && beatPhrases === list) beats.set(phrase, chunks);
+        if (chunks?.length && key === k && voice === vo && beatPhrases === list) { beats.set(phrase, chunks); beatVoice.set(phrase, Impl); }
       }
     })().finally(() => { warming = null; });
     return warming;
@@ -116,7 +118,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     if (!key) return null;
     stopAll();
     const id = `s${++seq}`, said = [];
-    let ended = false, tries = 0, v = null, heard = false, done = false, beat = false, t0 = Date.now();
+    let ended = false, tries = 0, v = null, heard = false, done = false, beat = false, t0 = Date.now(), Impl = null;
     const me = {
       id,
       say(s) { if (done) return; said.push(s); v.say(s); },
@@ -124,7 +126,8 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
       beat() {
         if (done || beat || said.length || heard) return false;
         beat = true;
-        const phrase = pickBeat(), shippedBeat = shipped()?.get(phrase), chunks = beats.get(phrase);
+        // Local-only build (feature 24): a beat kept in another voice than this reply's is said in this one instead.
+        const phrase = pickBeat(), shippedBeat = shipped()?.get(phrase), kept = beats.get(phrase), chunks = kept && (!beatVoice.has(phrase) || beatVoice.get(phrase) === Impl) ? kept : null;
         if (!shippedBeat && !chunks) { me.say(phrase); return true; }
         log('speech_beat', { id, ms: Date.now() - t0 });
         if (shippedBeat) emit({ kind: 'speech', id, rate: shippedBeat.rate, pcm: shippedBeat.pcm });
@@ -149,7 +152,8 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     };
     const connect = (m) => {
       tries++;
-      v = new (voiceImpl())({
+      Impl = voiceImpl();
+      v = new Impl({
         key, voice, model: m,
         onAudio: (pcm) => {
           if (done) return;

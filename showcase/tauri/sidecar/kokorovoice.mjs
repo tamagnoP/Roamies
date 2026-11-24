@@ -11,6 +11,10 @@
 //   says so (onDown), and every sentence from then on, the one in hand included, is spoken by the macOS voice.
 // - KokoroVoice is LocalVoice with one step replaced (a sentence → audio). The queue, the marks and the cutting are
 //   the same code, so "everything before this mark has been handed over" means what it meant before.
+// - Feature 24: after "kokoro.sleepAfterMinutes" without a sentence (0: never) the helper is ended to give its memory
+//   back, and started again when sidecar.mjs wakes it (the talk key, an answer window, a spoken request, shortly
+//   before a briefing). Asleep or waking, replies are spoken by the macOS voice; a reply keeps the voice it started
+//   with to its end, and the helper never sleeps while a reply in its voice is open. No bubble either way.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -24,6 +28,8 @@ export const SCRIPT = 'kokoro_server.py';
 export const OFFLINE = { HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_DATASETS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1', HF_HUB_DISABLE_IMPLICIT_TOKEN: '1', DO_NOT_TRACK: '1', NO_PROXY: '*' };
 export const START_FACTOR = 6; // the helper may take this many sentence time limits to load the model
 export const QUIT_KILL_MS = 2000; // after its input is closed at quit, the helper is killed if it is still there
+export const SLEEP_CHECK_MS = 30_000; // feature 24: how often the helper's quiet time is looked at
+export const WAKE_BEFORE_BRIEFING_MINUTES = 2; // feature 24: sidekick.mjs wakes it this long before a briefing is due
 // A failure's kind as the helper names it: one word (a Python error's class name). Anything else is not passed on,
 // so no sentence can travel in a failure message.
 const kindOf = (e) => (typeof e === 'string' && /^[A-Za-z]{1,40}$/.test(e) ? e : 'Error');
@@ -119,8 +125,9 @@ export function splitLong(text, max) {
 }
 
 /** The helper process and the one conversation with it. settings() → { kokoro, limits } as they stand now. */
-export function createKokoro({ settings, home = os.homedir(), script = path.join(path.dirname(fileURLToPath(import.meta.url)), SCRIPT), spawnImpl = spawn, sandboxExec = SANDBOX_EXEC, onDown = () => {}, onReady = () => {}, log = () => {}, profileFor = kokoroProfile, tmpRoot = os.tmpdir() }) {
-  let state = 'off'; // off → starting → ready; down is final for the session
+export function createKokoro({ settings, home = os.homedir(), script = path.join(path.dirname(fileURLToPath(import.meta.url)), SCRIPT), spawnImpl = spawn, sandboxExec = SANDBOX_EXEC, onDown = () => {}, onReady = () => {}, log = () => {}, profileFor = kokoroProfile, tmpRoot = os.tmpdir(), now = () => Date.now(), every = (fn, ms) => { const t = setInterval(fn, ms); t.unref?.(); return t; } }) {
+  let state = 'off'; // off → starting → ready (→ asleep → starting → ready …); down is final for the session
+  let lastUse = now(), holds = 0; // feature 24: when a sentence was last asked for or a reply's voice let go; replies' voices open now
   let child = null, tmp = null, buf = Buffer.alloc(0), seq = 0, current = null, startTimer = null, why = '', t0 = 0, rate = 24000, profile = '';
   const waiting = []; // sentences asked for while another is being made
   const limitMs = () => { try { return settings().limits.kokoroTimeoutSeconds * 1000; } catch { return 20_000; } };
@@ -142,6 +149,24 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     onDown(why);
   }
 
+  // Feature 24: asleep after "kokoro.sleepAfterMinutes" with nothing asked of it and no reply's voice open. Its input
+  // is closed (it ends by itself) and it is killed if it is still there shortly after, as at quit; nothing is said.
+  const sleepAfterMs = () => { try { const m = settings().kokoro.sleepAfterMinutes; return Number.isFinite(m) && m > 0 ? m * 60_000 : 0; } catch { return 0; } };
+  function sleep() {
+    const c = child, dirWas = tmp;
+    state = 'asleep'; child = null; tmp = null; buf = Buffer.alloc(0);
+    log('kokoro_sleep', { quietMinutes: Math.round((now() - lastUse) / 6000) / 10 });
+    if (!c) return;
+    try { c.stdin.end(); } catch { /* already closed */ }
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* gone */ } }, QUIT_KILL_MS);
+    t.unref?.();
+    c.once('close', () => { clearTimeout(t); try { fs.rmSync(dirWas, { recursive: true, force: true }); } catch { /* best effort */ } });
+  }
+  every(() => {
+    const ms = sleepAfterMs();
+    if (ms && state === 'ready' && !current && !waiting.length && holds === 0 && now() - lastUse >= ms) sleep();
+  }, SLEEP_CHECK_MS);
+
   function next() {
     if (current || state !== 'ready' || !waiting.length) return;
     current = waiting.shift();
@@ -151,7 +176,7 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
 
   function block(head, pcm) {
     if (head.ready === true && state === 'starting') {
-      state = 'ready'; rate = Number(head.rate) || 24000; clearTimeout(startTimer);
+      state = 'ready'; rate = Number(head.rate) || 24000; clearTimeout(startTimer); lastUse = now();
       log('kokoro_ready', { ms: Date.now() - t0, rate, voices: head.voices });
       onReady();
       return next();
@@ -215,6 +240,7 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
 
   /** One sentence as { pcm, rate }. Rejects when the helper isn't ready (err.notReady) or has gone down. */
   function make(text, { voice, speed }) {
+    lastUse = now();
     if (state !== 'ready') { const e = new Error('The natural voice isn\'t ready.'); e.notReady = state === 'starting' || state === 'off'; return Promise.reject(e); }
     return new Promise((resolve, reject) => { waiting.push({ id: ++seq, text, voice, speed, resolve, reject }); next(); });
   }
@@ -235,9 +261,24 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     child = null;
   }
 
+  /** Feature 24: started again if it is asleep (why: what woke it, for the log). Otherwise its quiet time starts
+   *  again. → whether it was asleep. */
+  function wake(why) {
+    lastUse = now();
+    if (state !== 'asleep') return false;
+    state = 'off';
+    log('kokoro_wake', { why: String(why ?? '') });
+    start();
+    return true;
+  }
+
   return {
-    start, make, stop,
+    start, make, stop, wake,
+    /** A reply's voice in this helper's voice is open: it doesn't sleep until it is let go (release). */
+    hold() { holds++; return true; },
+    release() { holds = Math.max(0, holds - 1); lastUse = now(); },
     get state() { return state; },
+    get asleep() { return state === 'asleep'; },
     get usable() { return state === 'starting' || state === 'ready'; },
     get ready() { return state === 'ready'; },
     get why() { return why; },
@@ -252,6 +293,12 @@ export class KokoroVoice extends LocalVoice {
   constructor({ engine, settings, ...rest }) {
     super(rest);
     this.engine = engine; this.settings = settings;
+    this.holding = !!engine.hold?.(); // feature 24: the helper doesn't sleep while this reply is open
+  }
+
+  close() {
+    if (this.holding) { this.holding = false; this.engine.release?.(); }
+    super.close();
   }
 
   /** A long sentence is queued as several pieces, each short enough to be made (and dropped) quickly. */

@@ -42,6 +42,7 @@ execFileSync(process.execPath, ['--input-type=module', '-e', `
   const d = JSON.parse(JSON.stringify(settingsDefaults(os.homedir())));
   d.voiceEngine = '${mode === 'kokoro' ? 'kokoro' : 'system'}';
   d.kokoro.model = '/tmp/lean/Kokoro-82M-bf16'; // the copy already on this Mac, by a link named for the model: the throwaway home has no download of its own
+  if (${Number(process.env.KOKORO_SLEEP ?? -1)} >= 0) d.kokoro.sleepAfterMinutes = ${Number(process.env.KOKORO_SLEEP ?? -1)}; // KOKORO_SLEEP=<minutes>: feature 24, the helper sleeps when quiet
   fs.writeFileSync(path.join(os.homedir(), 'Documents', 'roamies-pi', 'settings.json'), JSON.stringify(d, null, 2));
 `], { cwd: SIDECAR, env, stdio: ['ignore', 'inherit', 'inherit'] });
 fs.writeFileSync(path.join(home, '.gg', 'sidekick.json'), JSON.stringify({ provider: 'anthropic', model: 'claude-haiku-5-5', sound: true, allowActions: false, voice: true, onboarded: true, onboardStep: 0, filesAsked: true, muteWhileTalking: true, autoListen: false, setupVersion: 2, size: 'default', look: 'jarvis', introDone: true, replies: mode === 'kokoro' || mode === 'system' ? 'voice' : 'text' }));
@@ -69,6 +70,7 @@ log('page ready', info);
 // ---- the sidecar
 const tape = fs.createWriteStream(path.join(OUT, `${name}.tape.jsonl`));
 const kinds = {}; let audio = 0, replyEnds = 0, lastUi = 0;
+const speechRates = new Set(), voices = []; // the audio rates of the reply under way; per reply, which were heard
 sidecar = spawn(process.execPath, ['sidekick.mjs'], { cwd: SIDECAR, env, stdio: ['pipe', 'pipe', 'pipe'] });
 let errChars = 0; sidecar.stderr.on('data', (d) => { errChars += d.length; });
 for (const m of fromPage) sidecar.stdin.write(`${JSON.stringify(m)}\n`);
@@ -76,7 +78,7 @@ const ui = (msg) => {
   tape.write(`${JSON.stringify({ t: secs(), msg })}\n`);
   toHost({ host: msg });
   lastUi = Date.now();
-  if (msg.kind === 'speech' && msg.pcm) audio += (msg.pcm.length * 3 / 4) / 2 / (msg.rate || 44100);
+  if (msg.kind === 'speech' && msg.pcm) { audio += (msg.pcm.length * 3 / 4) / 2 / (msg.rate || 44100); speechRates.add(msg.rate || 44100); }
   if (msg.kind === 'agent' && (msg.e?.type === 'done' || msg.e?.type === 'error')) { replyEnds++; if (msg.e.type === 'error') log('agent error', String(msg.e.message).slice(0, 200)); }
 };
 readline.createInterface({ input: sidecar.stdout }).on('line', (line) => {
@@ -100,7 +102,7 @@ async function sample(label, extra = {}) {
   log(label, `web ${s.web} gpu ${s.gpu} sidecar ${s.sidecar} audio ${s.audio}s tokens ${s.tokens}`, JSON.stringify(s.children), page ? JSON.stringify(page) : '');
   return s;
 }
-const save = (more = {}) => fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ name, mode, N, info, kinds, sent: sent.reduce((o, s) => { o[s.type] = (o[s.type] ?? 0) + 1; return o; }, {}), samples, requests, errChars, ...more }, null, 1));
+const save = (more = {}) => fs.writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify({ name, mode, N, info, kinds, sent: sent.reduce((o, s) => { o[s.type] = (o[s.type] ?? 0) + 1; return o; }, {}), samples, requests, errChars, voices, ...more }, null, 1));
 
 await sleep(mode === 'kokoro' ? 30000 : 12000); // start-up: the page settles, the natural voice loads
 await sample('start');
@@ -119,8 +121,16 @@ for (let i = 0; i < N; i++) {
     await sleep(8000);
   } else {
     const before = replyEnds;
+    // TALK=<seconds>: the talk key held that long first, as the voice helper reports it (listening, then processing)
+    if (process.env.TALK) {
+      sidecar.stdin.write(`${JSON.stringify({ type: 'voice_state', state: 'listening' })}\n`);
+      await sleep(Number(process.env.TALK) * 1000);
+      sidecar.stdin.write(`${JSON.stringify({ type: 'voice_state', state: 'processing' })}\n`);
+    }
     const asked = secs();
+    speechRates.clear();
     sidecar.stdin.write(`${JSON.stringify({ type: 'voice', text: ASKS[i % ASKS.length] })}\n`);
+    if (process.env.TALK) sidecar.stdin.write(`${JSON.stringify({ type: 'voice_state', state: 'idle' })}\n`);
     const until = Date.now() + 60000;
     while (replyEnds === before && Date.now() < until) await sleep(100);
     if (replyEnds === before) { log('no reply to request', i + 1); break; }
@@ -131,7 +141,13 @@ for (let i = 0; i < N; i++) {
     await sleep(mode === 'text' ? 6000 : 3000);
     // PACE=<seconds>: one exchange every so many seconds, the pace of real use (the live runs: one in about 30 s)
     const pace = Number(process.env.PACE || 0) * 1000 - (secs() - asked) * 1000;
+    // which voice spoke the reply: the natural voice's audio is at 24 kHz, the macOS voice's at 44.1 kHz
+    voices.push({ reply: i + 1, t: asked, rates: [...speechRates] });
+    log(`reply ${i + 1} spoken at`, [...speechRates].join(', ') || 'nothing');
     if (pace > 0) await sleep(pace);
+    // BURST=<n>,<seconds>: after every n exchanges, that many seconds with nothing asked (the natural voice may sleep)
+    const [burst, gap] = String(process.env.BURST || '').split(',').map(Number);
+    if (burst > 0 && (i + 1) % burst === 0 && i + 1 < N) { log('quiet for', gap, 's'); await sleep(gap * 1000); }
   }
   await sample(`reply ${i + 1}`);
   save();

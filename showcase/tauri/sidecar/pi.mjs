@@ -16,6 +16,7 @@
 // between listed projects, after a yes; that choice is kept beside it, in state.json.
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
 import { CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, NEW_WORDS, NO_WORDS, SECOND_WORDS, THAT_WORDS, Unanswered, YES_WORDS, firstButton, heardLine, heardShape, only, plain, unfilled } from './answers.mjs';
+import { WAKE_BEFORE_BRIEFING_MINUTES } from './kokorovoice.mjs'; // feature 24: shown in settings.default.json
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -307,6 +308,8 @@ export const KOKORO = {
   // memoryMB: what MLX aims to stay under while it makes a sentence; it goes over when one step needs more.
   cacheMB: { default: 0, min: 0, max: 16384, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 16384 },
   memoryMB: { default: 400, min: 100, max: 16384, ok: (v) => Number.isInteger(v) && v >= 100 && v <= 16384 },
+  // Feature 24: minutes without a sentence after which the helper is ended to give its memory back (0: never).
+  sleepAfterMinutes: { default: 0, min: 0, max: 1440, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 1440 },
 };
 /** The parts of "persona": how Roamies speaks, and nothing about what it may do (persona.mjs). address may be "". */
 export const PERSONA = {
@@ -997,7 +1000,7 @@ export function codeReference() {
   const blocked = BLOCKED(h, dir);
   return {
     limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}), ...(v.zero ? { zero: v.zero } : {}) }])),
-    kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts' },
+    kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts', sleepAfterMinutes: { min: KOKORO.sleepAfterMinutes.min, max: KOKORO.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps', wakes: `on the talk key, an answer window, a spoken request, and ${WAKE_BEFORE_BRIEFING_MINUTES} minutes before a briefing; meanwhile the Mac's voice speaks` } },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],
     calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max } },

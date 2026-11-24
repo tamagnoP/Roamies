@@ -8,8 +8,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KokoroVoice, OFFLINE, QUIT_KILL_MS, SANDBOX_EXEC, createKokoro, helperEnv, kokoroProfile, modelPlace, pythonProblem, splitLong, voiceFor } from '../kokorovoice.mjs';
+import { KokoroVoice, OFFLINE, QUIT_KILL_MS, SANDBOX_EXEC, WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, helperEnv, kokoroProfile, modelPlace, pythonProblem, splitLong, voiceFor } from '../kokorovoice.mjs';
 import { createSpeaker } from '../speaker.mjs';
+import { LocalVoice } from '../localvoice.mjs';
 import { KOKORO, LIMITS, VOICE_ENGINES, loadSettings, settingsDefaults } from '../pi.mjs';
 import { settingsReference } from '../reference.mjs';
 
@@ -80,11 +81,12 @@ fs.writeFileSync(path.join(home, 'secret.txt'), 'private');
 
 const base = () => ({ kokoro: { python, model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400 }, limits: { kokoroTimeoutSeconds: 2, kokoroSentenceChars: 120 } });
 /** An engine on the stand-in helper. spawns: every start, as it was asked for; events: what was asked and what came back, in order. */
-function engine(mode = '', change = (s) => s) {
+function engine(mode = '', change = (s) => s, extra = {}) {
   const spawns = [], events = [], downs = [], logs = [];
   let ready = 0;
   const st = change(base());
   const k = createKokoro({
+    ...extra,
     settings: () => st, home, tmpRoot: dir,
     log: (kind, data) => logs.push([kind, data]),
     onDown: (why) => { downs.push(why); events.push('down'); },
@@ -404,18 +406,108 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   e.k.stop();
 }
 
+// ---- feature 24: the helper sleeps when quiet, wakes when asked, and a reply keeps one voice
+{
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  let t = 0;
+  const ticks = [];
+  const e = engine('', (st) => ({ ...st, kokoro: { ...st.kokoro, sleepAfterMinutes: 5 } }), { now: () => t, every: (fn, ms) => ticks.push([fn, ms]) });
+  assert.deepEqual(ticks.map(([, ms]) => ms), [30_000], 'its quiet time is looked at every 30 s');
+  const tick = (ms) => { for (const end = t + ms; t < end;) { t = Math.min(end, t + 30_000); for (const [fn] of ticks) fn(); } };
+  e.k.start(); await until(() => e.k.ready);
+  const first = e.k.pid;
+  const a = voice(e); a.v.say('One.'); a.v.end(); await a.done;
+  tick(4.5 * 60_000); assert.equal(e.k.state, 'ready', 'not before five quiet minutes');
+  tick(30_000); assert.equal(e.k.state, 'asleep', 'asleep after five');
+  assert.equal(e.k.ready, false); assert.equal(e.k.usable, false); assert.equal(e.k.pid, null);
+  await until(() => !alive(first));
+  assert.deepEqual(e.downs, [], 'no bubble: sleeping is not a failure');
+  assert.deepEqual(e.logs.filter(([k]) => k === 'kokoro_sleep'), [['kokoro_sleep', { quietMinutes: 5 }]]);
+  tick(60 * 60_000); assert.equal(e.spawns.length, 1, 'asleep, it stays asleep until woken');
+  // a sentence asked for while asleep is refused as not ready (the macOS voice speaks it) and doesn't wake it
+  await assert.rejects(e.k.make('Asleep.', { voice: 'bm_george', speed: 1 }), (x) => x.notReady === false);
+  assert.equal(e.k.state, 'asleep');
+
+  // woken: started again, ready, its beats made again, and it speaks in its own voice
+  assert.equal(e.k.wake('talk key'), true);
+  assert.equal(e.spawns.length, 2); assert.deepEqual(e.logs.find(([k]) => k === 'kokoro_wake'), ['kokoro_wake', { why: 'talk key' }]);
+  await until(() => e.k.ready);
+  assert.equal(e.ready(), 2, 'ready again: the beats are made again in its voice');
+  assert.notEqual(e.k.pid, first);
+  const b = voice(e); b.v.say('Two.'); b.v.end(); await b.done;
+  assert.equal(heard(b.got), 'Two.'); assert.deepEqual([...new Set(b.rates)], [24000]);
+  assert.equal(e.k.wake('spoken request'), false, 'awake: nothing to start');
+  assert.equal(e.spawns.length, 2);
+
+  // never while a reply in its voice is open, however long
+  const c = voice(e); c.v.say('Three.'); await until(() => c.got.length);
+  tick(60 * 60_000); assert.equal(e.k.state, 'ready', 'a reply in its voice is open: it stays awake');
+  c.v.end(); await c.done;
+  tick(4.5 * 60_000); assert.equal(e.k.state, 'ready', 'quiet counts from the end of that reply');
+  // woken while awake: its quiet time starts again
+  e.k.wake('answer window'); tick(4.5 * 60_000); assert.equal(e.k.state, 'ready', 'a wake while awake puts sleep off');
+  tick(30_000); assert.equal(e.k.state, 'asleep');
+
+  // a whole reply in one voice. Started while it is asleep: the macOS voice, to the end, even though the helper is
+  // woken and ready before the reply's second sentence. Its marks still come after its audio.
+  const out = [];
+  const Mac = class extends LocalVoice { constructor(o) { super({ ...o, sayBin: fakeSay, platform: 'darwin' }); } };
+  const Natural = class extends voiceFor(e.k, () => e.st) { constructor(o) { super({ ...o, sayBin: fakeSay, platform: 'darwin' }); } };
+  const sp = createSpeaker({ emit: (m) => out.push(m), FishVoiceImpl: Mac, pickVoice: () => (e.k.ready ? Natural : null), beatPhrases: ['Right away.'] });
+  sp.setKey('local');
+  const kinds = (from) => out.slice(from).filter((m) => m.kind === 'speech' && !m.stop).map((m) => (m.pcm ? `pcm@${m.rate}` : m.mark ? 'mark' : 'end'));
+  await until(() => sp.ready === 1); // the beat, kept in the macOS voice while it is asleep
+  let from = out.length;
+  const r1 = sp.start(); r1.say('Alpha.');
+  e.k.wake('spoken request'); await until(() => e.k.ready);
+  r1.say('Beta.'); r1.mark(); r1.end();
+  await until(() => out.slice(from).some((m) => m.end));
+  assert.deepEqual(kinds(from), ['pcm@44100', 'pcm@44100', 'mark', 'end'], 'started asleep: the macOS voice throughout, the mark after its audio');
+  // the beats are made again in its voice; a reply started now is in its voice throughout, beat included
+  sp.setBeats(['Right away.'], true); await until(() => sp.ready === 1); await sleep(50);
+  from = out.length;
+  const r2 = sp.start(); assert.equal(r2.beat(), true); r2.say('Gamma.'); r2.mark(); r2.end();
+  await until(() => out.slice(from).some((m) => m.end));
+  assert.deepEqual(kinds(from), ['pcm@24000', 'pcm@24000', 'mark', 'end'], 'started ready: its voice throughout');
+  // asleep again: a beat kept in its voice is not played in a macOS reply; it is said in the macOS voice
+  tick(5 * 60_000); assert.equal(e.k.state, 'asleep');
+  from = out.length;
+  const r3 = sp.start(); assert.equal(r3.beat(), true); r3.say('Delta.'); r3.end();
+  await until(() => out.slice(from).some((m) => m.end));
+  assert.deepEqual(kinds(from), ['pcm@44100', 'pcm@44100', 'end'], 'asleep: the beat in the macOS voice, then the reply in it');
+  // quit while asleep: nothing to end
+  e.k.stop(); assert.equal(e.k.state, 'stopped');
+
+  // 0 (the default): never
+  let t0 = 0; const ticks0 = [];
+  const z = engine('', (st) => ({ ...st, kokoro: { ...st.kokoro, sleepAfterMinutes: 0 } }), { now: () => t0, every: (fn) => ticks0.push(fn) });
+  z.k.start(); await until(() => z.k.ready);
+  for (let i = 0; i < 48 * 120; i++) { t0 += 30_000; for (const fn of ticks0) fn(); }
+  assert.equal(z.k.state, 'ready', '0: awake after two days of quiet'); z.k.stop();
+
+  // the wiring: what wakes it, and the voice a reply is given
+  const side = fs.readFileSync(path.join(here, '..', 'sidekick.mjs'), 'utf8');
+  assert.match(side, /if \(m\.type === 'voice_state' && m\.state === 'listening'\) kokoro\.wake\(m\.window != null \? 'answer window' : 'talk key'\);/, 'the talk key, and the answer window\'s listening');
+  assert.match(side, /else if \(m\.type === 'voice' && m\.text\?\.trim\(\)\) kokoro\.wake\('spoken request'\);/, 'a spoken request');
+  assert.match(side, /kokoro\.wake\('answer window'\); send\(\{ type: 'listen', seconds, window, again \}\);/, 'an answer window, as it opens');
+  assert.match(side, /if \(pi\.briefing\(new Date\(Date\.now\(\) \+ WAKE_BEFORE_BRIEFING_MINUTES \* 60_000\)\)\) kokoro\.wake\('briefing'\);/, 'shortly before a briefing');
+  assert.equal(WAKE_BEFORE_BRIEFING_MINUTES, 2);
+  assert.equal((side.match(/kokoro\.wake\(/g) ?? []).length, 4, 'and nothing else');
+}
+
 // ---- 1.8. the settings
 {
   const h = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kv-home-')));
   const file = path.join(h, 'Documents', 'roamies-pi', 'settings.json');
   const d = settingsDefaults(h);
   assert.equal(d.voiceEngine, 'kokoro'); assert.deepEqual(VOICE_ENGINES, ['kokoro', 'system']);
-  assert.deepEqual(d.kokoro, { python: '/opt/homebrew/anaconda3/envs/localai/bin/python', model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400 });
+  assert.deepEqual(d.kokoro, { python: '/opt/homebrew/anaconda3/envs/localai/bin/python', model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400, sleepAfterMinutes: 0 });
   assert.deepEqual([KOKORO.cacheMB.min, KOKORO.cacheMB.max, KOKORO.memoryMB.min, KOKORO.memoryMB.max], [0, 16384, 100, 16384]);
   assert.equal(d.limits.kokoroTimeoutSeconds, 20); assert.equal(d.limits.kokoroSentenceChars, 120);
   const ref = settingsReference(h);
   assert.deepEqual(ref.kokoro, d.kokoro); assert.equal(ref.voiceEngine, 'kokoro');
   assert.ok(ref.limits.kokoroTimeoutSeconds && ref.limits.kokoroSentenceChars && ref.reference.limitRanges.kokoroSentenceChars && ref.reference.kokoroRanges && ref.reference.voiceEngines, 'every new setting is in settings.default.json');
+  assert.deepEqual(ref.reference.kokoroRanges.sleepAfterMinutes, { min: 0, max: 1440, wholeNumber: true, zero: 'it never sleeps', wakes: 'on the talk key, an answer window, a spoken request, and 2 minutes before a briefing; meanwhile the Mac\'s voice speaks' });
   assert.deepEqual(ref.reference.kokoroRanges.cacheMB, { min: 0, max: 16384, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }); assert.deepEqual(ref.reference.kokoroRanges.memoryMB, { min: 100, max: 16384, wholeNumber: true });
   let s = loadSettings(h);
   assert.deepEqual(s.kokoro, d.kokoro); assert.equal(s.voiceEngine, 'kokoro'); assert.deepEqual(s.invalid, []);
@@ -423,22 +515,24 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   write({ voiceEngine: 'system', kokoro: { ...d.kokoro, voice: 'af_heart', speed: 0.9 } });
   s = loadSettings(h);
   assert.equal(s.voiceEngine, 'system'); assert.equal(s.kokoro.voice, 'af_heart'); assert.equal(s.kokoro.speed, 0.9); assert.deepEqual(s.invalid, []);
-  write({ voiceEngine: 'cloud', kokoro: { python: 'python', model: 'x', voice: '../../my-voice.wav', lang: 'english', speed: 9, cacheMB: -1, memoryMB: 50 }, limits: { ...d.limits, kokoroSentenceChars: 5 } });
+  write({ voiceEngine: 'cloud', kokoro: { python: 'python', model: 'x', voice: '../../my-voice.wav', lang: 'english', speed: 9, cacheMB: -1, memoryMB: 50, sleepAfterMinutes: 2.5 }, limits: { ...d.limits, kokoroSentenceChars: 5 } });
   s = loadSettings(h);
   assert.equal(s.voiceEngine, 'kokoro');
   assert.equal(s.kokoro.python, 'python', 'kept as written: it is refused when the voice is started, and said');
   assert.equal(s.kokoro.model, KOKORO.model.default); assert.equal(s.kokoro.voice, 'bm_george', 'a path is not a voice'); assert.equal(s.kokoro.lang, 'b'); assert.equal(s.kokoro.speed, 1.05); assert.equal(s.kokoro.cacheMB, 0); assert.equal(s.kokoro.memoryMB, 400);
   assert.equal(s.limits.kokoroSentenceChars, LIMITS.kokoroSentenceChars.default);
-  assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['kokoro.cacheMB', 'kokoro.lang', 'kokoro.memoryMB', 'kokoro.model', 'kokoro.speed', 'kokoro.voice', 'limits.kokoroSentenceChars', 'voiceEngine']);
+  assert.equal(s.kokoro.sleepAfterMinutes, 0, 'whole minutes only');
+  assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['kokoro.cacheMB', 'kokoro.lang', 'kokoro.memoryMB', 'kokoro.model', 'kokoro.sleepAfterMinutes', 'kokoro.speed', 'kokoro.voice', 'limits.kokoroSentenceChars', 'voiceEngine']);
+  write({ kokoro: { ...d.kokoro, sleepAfterMinutes: 20 } }); assert.equal(loadSettings(h).kokoro.sleepAfterMinutes, 20); assert.deepEqual(loadSettings(h).invalid, []);
   write({ kokoro: { python: d.kokoro.python } });
-  assert.deepEqual(loadSettings(h).missing, ['kokoro.model', 'kokoro.voice', 'kokoro.lang', 'kokoro.speed', 'kokoro.cacheMB', 'kokoro.memoryMB']);
+  assert.deepEqual(loadSettings(h).missing, ['kokoro.model', 'kokoro.voice', 'kokoro.lang', 'kokoro.speed', 'kokoro.cacheMB', 'kokoro.memoryMB', 'kokoro.sleepAfterMinutes']);
   fs.rmSync(h, { recursive: true, force: true });
   // "system" starts nothing; anything else than a Mac starts nothing
   const side = fs.readFileSync(path.join(here, '..', 'sidekick.mjs'), 'utf8');
   assert.match(side, /if \(MAC\) \{ try \{ if \(settingsNow\(\)\.voiceEngine === 'kokoro'\) kokoro\.start\(\); \}/);
   assert.equal((side.match(/kokoro\.start\(\)/g) ?? []).length, 1, 'the one place the helper is started');
   assert.match(side, /else if \(id === 'quit'\) \{ pi\.stopAll\(\); kokoro\.stop\(\);/, 'it is stopped when Roamies quits');
-  assert.match(side, /pickVoice: \(\) => \(kokoro\.usable \? KokoroReplyVoice : null\)/);
+  assert.match(side, /pickVoice: \(\) => \(kokoro\.ready \? KokoroReplyVoice : null\)/, 'feature 24: the natural voice for a reply only if its helper is ready when the reply starts');
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

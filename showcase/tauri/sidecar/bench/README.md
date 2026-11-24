@@ -11,7 +11,7 @@ Build the two helper programs once: `./build.sh`. A copy of the page to measure 
 | --- | --- |
 | `sample.sh <out.jsonl>` | Every 5 s, the memory of each process of a running Roamies: time, kind, size. |
 | `align.mjs <samples> <activity log>` | Lines the samples up with the activity log by time and kind of event. |
-| `run.mjs <kokoro\|system\|text\|bubbles> [replies] [quiet s]` (`CARD=5`: the list card up in every fifth exchange; `DRAW=3`: every third answer draws two cards first, or calls the tools in `TOOLS` in turn; `VARY=1`: answers of varied length; `PACE=30`: one exchange every 30 s; `EVERY=5`: a reading every 5 s) | A fixed script of replies through the real sidecar and the page in `host`; memory after each, request sizes. |
+| `run.mjs <kokoro\|system\|text\|bubbles> [replies] [quiet s]` (`CARD=5`: the list card up in every fifth exchange; `DRAW=3`: every third answer draws two cards first, or calls the tools in `TOOLS` in turn; `VARY=1`: answers of varied length; `PACE=30`: one exchange every 30 s; `EVERY=5`: a reading every 5 s; `TALK=3`: the talk key held 3 s before each request; `BURST=5,600`: ten quiet minutes after every five exchanges; `KOKORO_SLEEP=5`: `kokoro.sleepAfterMinutes`; which voice spoke each reply is noted) | A fixed script of replies through the real sidecar and the page in `host`; memory after each, request sizes. |
 | `replay.mjs <tape> <dist> <name>` | Plays the messages recorded by a run into another copy of the page. |
 | `inject.mjs <what> <times> [dist]` | One kind of thing shown over and over (`list`, `say`, `active`: a card up and the character thinking, `saycard`, ...). |
 | `rate.sh <what> <dist> [times]` | `inject.mjs` with a reading every 4 s and the rate of growth. |
