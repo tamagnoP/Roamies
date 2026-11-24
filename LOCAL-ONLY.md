@@ -86,8 +86,9 @@ or named an app) is a rule in its instructions, which the model follows but the 
    **What the record lets pi do.** pi's commands can append to the record, so a command could name a group that
    is not pi's, with a start time that matches, and Roamies would end it. That gives pi nothing new: the sandbox
    (`(allow default)`, with no `signal` rule) already lets pi's commands send any signal to any of your
-   processes, Roamies' included, and read the process list. The record only lets them ask Roamies to do what they
-   can do themselves.
+   processes, Roamies' included, and read the process list with each process's start time. `/bin/ps` itself
+   doesn't run inside the sandbox (below), but `pgrep` and the system call `ps` reads the list with do. The record
+   only lets them ask Roamies to do what they can do themselves.
 
 **Modes.** "Read only" starts pi with `--tools read,grep,find,ls`, so it cannot change anything. "Can edit" starts
 it with its normal tools (read, bash, edit, write). The mode is in the Send bubble.

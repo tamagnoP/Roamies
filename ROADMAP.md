@@ -1009,6 +1009,7 @@ Every numbered feature still to build is in section 3. What is left here is park
 | Write access to more than one project per task | Not needed | Writes stay in the current project and its subfolders. |
 | Local model for Roamies | Set aside as the everyday model; viable offline | The large model was too slow (decisions log, 2026-11-11), and Claude stays. A small model, Gemma 4 E2B, was measured from 2026-11-16 and is the choice for offline mode (23). |
 | Hard lock on `settings.json` (`chflags uchg`) | Known, not used | Optional extra; the code change and sandbox are the real protection. |
+| Hardening: pi's signals limited to what pi started | Not built; to be designed together (the owner, 2026-11-24) | The sandbox (`(allow default)`, no `signal` rule) doesn't stop pi's commands from signalling the owner's other processes, Roamies' included. A rule limiting signals to what pi started would fix that, but then the leftovers record (`leftovers.mjs`), which pi's commands can append to, would be a way round it, and the watcher's script (`WATCH_SCRIPT` in `pi.mjs`) would need the same exclusions as the sidecar (it does not leave Roamies' own groups alone). |
 
 ## 5. Decisions log
 
