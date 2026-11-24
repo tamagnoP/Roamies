@@ -631,6 +631,14 @@ activity log by `bench/align.mjs` (time and kind of event; the tool's name from 
    0.2 s, three times out of three, nothing of ours left 5 s later. That copy has no voice helper, so the voice
    pipe was checked by the Rust test only. This removes the one cause the code showed; it is not proof of what
    happened on 21 November. Not type-checked for Windows (`cargo xwin` is not on this Mac).
+14. **The hour-long helper run after the change** (2026-11-24, the harness as in item 4: 120 spoken replies at one
+   every 30 s, the list card in every fifth, a drawing in every third, a reading every 5 s, five quiet minutes; the
+   helper bounded as in item 3). The Kokoro helper: 926 readings, resting 672 to 680 MB in every five minutes of
+   the hour, highest 1,099 MB (before the change: 3,461), 24 readings above 800 MB and 4 above 1,000, none above
+   1,500; 677 MB after the quiet minutes, so nothing built up. Readings every 5 s miss the briefest highs;
+   `bench/kokorocheck.py` (every 10 ms) gave 1,344 to 1,369 MB. The page: 85.5 MB at the start, 121 MB after the
+   hour and the quiet minutes, 92 after WebKit's low-memory signal; highest 209 MB. Sidecar 76 to 106 MB. Nothing
+   left when the sidecar's input closed.
 
 #### Plan (approved by the owner on 2026-11-21: fixes 1 to 5; fix 6 only if the targets are missed, and asked first)
 
