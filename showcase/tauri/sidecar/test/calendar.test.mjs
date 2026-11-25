@@ -543,7 +543,7 @@ hand('Lab meeting', { dueWithTime: at(14, 11), timeEstimate: 30 * M }); await ca
 assert.match(cal.dayNote(), /^\nTheir to-do list now:\nTo-do list, in outline: \d+ open: \d+ due today, \d+ due this week, \d+ overdue, \d+ without a date\.( \d+ done today\.)?\nPlanned for today: 15:05 to 16:05 "Plan: b" \[c\d+\]\.\n1 other stretch of today is taken in Super Productivity by tasks that aren't on the to-do list\.\nThis outline is all you are given of the list: [^\n]*\nSay it in a sentence or two\.$/);
 clock = at(30, 8); assert.match(cal.dayNote(), /\nNothing is planned for today\.\nThis outline/); clock = at(14, 8);
 assert.match(unstarted.dayNote(), /\nNothing is planned for today\.\nThis outline/);
-assert.match(side, /b\.kind === 'morning' \? `\$\{b\.note\}\$\{cal\.dayNote\(\)\}` : b\.note/);
+assert.match(side, /b\.kind === 'morning' \? `\$\{b\.note\}\$\{cal\.dayNote\(\)\}\$\{daily\.morningNote\(\)\}` : b\.note/); // feature 18: and the count of to-dos that need a new time
 // they work while pi is busy, like the to-do list
 for (const n of ['schedule_block', 'move_block', 'unschedule_block', 'show_day', 'plan_day', 'sync_todos']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), n);
 

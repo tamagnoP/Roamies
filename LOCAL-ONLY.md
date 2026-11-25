@@ -312,7 +312,9 @@ setup guide is open, the bubble waits until it closes.
   tools, rules and confirmations, stopping at the first one that fails or is refused.
 - `briefings`: times, as `"HH:MM"`, for a morning rundown (your to-dos, and what pi was asked yesterday) and an
   end-of-day summary (what pi was asked that day; since feature 18 it writes no note: the daily note replaces the
-  "Daily log <date>" notes, which stay as they are). Each is given once a day, when Roamies is idle: the
+  "Daily log <date>" notes, which stay as they are). Feature 18: the morning one writes the day's Plan, counts the
+  to-dos that need a new time (without naming them) and is followed by the questions about them; the evening one
+  first writes the day's review when there is a review time and today has none yet. Each is given once a day, when Roamies is idle: the
   morning one within four hours of its time (`limits.morningBriefingWindowHours`), the evening one any time after it. Leave a time out to switch it off.
 - `sandbox`: `true` unless you write `false`. Switch it off only if it breaks pi; the Send bubble then warns on
   every hand-off (see "The sandbox pi runs in").
@@ -713,7 +715,8 @@ after.
 - **Log.** A line when a to-do is finished, whether in Roamies or in Super Productivity (seen at the next check,
   every 30 seconds), and when a note is taken (`[[its title]]`). A Log line after another section starts a new
   `## Log`.
-- **Review.** At `calendar.reviewAt` (18:00), or when you say "review my day" (or another phrase in
+- **Review.** At `calendar.reviewAt` (18:00), by the evening briefing when that comes first (not when `reviewAt` is
+  `""`), or when you say "review my day" (or another phrase in
   `reference.dailyNote.reviewPhrases`) on its own. It lists each planned to-do as **done**, **missed** (its time is
   over) or **still open today** (its time is still ahead). Two sentences worded by code follow, then the missed ones
   again under **Needs a new time**. Roamies then says the counts. A second review adds `## Review update (HH:MM)`

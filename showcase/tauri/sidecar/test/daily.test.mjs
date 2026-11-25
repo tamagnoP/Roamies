@@ -217,7 +217,9 @@ for (const [said, want] of [
     say: async (t) => { said.push(t); },
   };
   const note2 = (k = '2026-11-26') => fs.readFileSync(path.join(v2, `${k}.md`), 'utf8');
+  assert.equal(d2.reviewWithBriefing(), true, 'an evening briefing now would write the review first');
   d2.review();
+  assert.equal(d2.reviewWithBriefing(), false, 'once a day');
   assert.ok(note2().includes('### Needs a new time\n- Draft abstract (09:00 to 10:00)\n- Email Bo (due 11:00)\n- Order reagents (due 12:00)\n- Book bench (due 13:00)\n'));
   script = ['tomorrow at 10', 'drop it', 'leave it'];
   assert.deepEqual(await d2.ask('review', io), { asked: 3, left: 1 }, 'limits.reviewQuestions (3) at most, oldest first');
@@ -240,17 +242,21 @@ for (const [said, want] of [
   assert.equal(d2.morningDue(), true);
   d2.ensure();
   assert.ok(note2('2026-11-27').includes('## Plan\n- 10:00 to 11:00 Draft abstract\n\n### Needs a new time\n- Old thing (was Tuesday 24 November, 10:00)\n- Order reagents (was Thursday 26 November, 12:00)\n- Book bench (was Thursday 26 November, 13:00)\n- Call Ana (was Thursday 26 November, 20:00)\n'));
+  assert.equal(d2.morningNote(), '\n4 to-dos on the list need a new time: every time they had has passed. The app asks about each one itself right after you speak: mention how many in one short sentence, don\'t name them, and don\'t ask about them yourself.', 'the morning briefing counts them, never names them');
   asked.length = 0; said.length = 0; script = ['the 30th', { kind: 'leave' }];
   assert.deepEqual(await d2.ask('morning', io), { asked: 3, left: 1 });
   assert.deepEqual(asked.map((o) => o.placeholder), ['Old thing needs a new time: it was Tuesday 24 November, 10:00. When will you do it?', 'Order reagents needs a new time: it was Thursday 26 November, 12:00. When will you do it?', 'Book bench needs a new time: it was Thursday 26 November, 13:00. When will you do it?']);
   assert.deepEqual(moved.at(-1), ['n1', { day: new Date(2026, 10, 30) }]);
   assert.ok(note2('2026-11-27').endsWith('## Log\n- 09:00 Rescheduled: Old thing → due Monday 30 November\n'));
-  assert.equal(d2.morningDue(), false, 'once a day'); assert.equal(d2.morningAsked(), true);
+  assert.equal(d2.morningDue(), false, 'once a day'); assert.equal(d2.morningAsked(), true); assert.equal(d2.morningNote(), '', 'asked already: the briefing doesn\'t count them');
   // With a morning briefing set, the briefing asks: the end of an exchange doesn't, until its window has passed.
   const f2 = path.join(home2, 'Documents', 'roamies-pi', 'settings.json'), set2 = JSON.parse(fs.readFileSync(f2, 'utf8'));
   fs.writeFileSync(f2, JSON.stringify({ ...set2, briefings: { morning: '10:00' } }));
   now2 = at(28, 8); assert.equal(d2.morningDue(), false, 'the briefing is still to come');
   now2 = at(28, 14, 30); assert.equal(d2.morningDue(), true, 'its window (4 hours) has passed without it');
+  assert.equal(d2.reviewWithBriefing(), true);
+  fs.writeFileSync(f2, JSON.stringify({ ...set2, calendar: { ...(set2.calendar ?? {}), reviewAt: '' } }));
+  assert.equal(d2.reviewWithBriefing(), false, 'reviewAt "": only when asked, not by the evening briefing either');
   // At most limits.reviewQuestions: a setting.
   fs.writeFileSync(f2, JSON.stringify({ ...set2, limits: { ...set2.limits, reviewQuestions: 1 } }));
   asked.length = 0; said.length = 0; script = ['leave it'];
@@ -294,6 +300,8 @@ assert.match(side, /afterExchange: \{ due: \(\) => daily\.morningDue\(\), run: \
 assert.match(side, /\.then\(\(\) => \(b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'after the morning briefing');
 assert.match(side, /say\(r\.line, 'happy'\); await lineDone\(forVoice\(r\.line\)\);\n\s*await dailyAsk\('review'\);/, 'after the review');
 assert.match(side, /reschedule: \(id, when\) => cal\.reschedule\(id, when\)/);
+assert.match(side, /const first = b\.kind === 'evening' && daily\.reviewWithBriefing\(\) \? dayReview\('briefing'\) : Promise\.resolve\(\);\n\s*first\.then/, 'the evening briefing writes the review first');
+assert.match(side, /\$\{b\.note\}\$\{cal\.dayNote\(\)\}\$\{daily\.morningNote\(\)\}/, 'the morning briefing counts the to-dos that need a new time');
 assert.ok(!/enqueue\(`[^`]*daily\./.test(side) && !/enqueue\([^`)]*daily\./.test(side), 'nothing of the daily note is sent as a request');
 const src = fs.readFileSync(new URL('../daily.mjs', import.meta.url), 'utf8');
 assert.ok(!/oneShot|enqueue|fetch\(|http/.test(src), 'daily.mjs makes no request');

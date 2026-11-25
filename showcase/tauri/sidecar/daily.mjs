@@ -7,8 +7,10 @@
 //   - Log: a line when a to-do is finished (seen at each check, whether it was ticked in Roamies or in Super
 //     Productivity) and when a note is taken. A Log line that comes after another section starts a new "## Log".
 //   - Review: each planned to-do as done, missed or still open today, the missed ones again under "Needs a new
-//     time", and two sentences worded here. Written at "calendar.reviewAt", or when the owner asks for it. A second
-//     review adds "## Review update (HH:MM)" with only what changed.
+//     time", and two sentences worded here. Written at "calendar.reviewAt", by the evening briefing when that comes
+//     first, or when the owner asks for it. A second review adds "## Review update (HH:MM)" with only what changed.
+//   - The morning briefing writes the Plan, and its note for the model counts the to-dos that need a new time
+//     (morningNote), without naming them.
 //   - Questions: after the review, each missed to-do is asked about ("When will you do it?"), and in the morning each
 //     one that needs a new time: after the morning briefing, or at the end of the first exchange of the day when
 //     there is no briefing. "limits.reviewQuestions" at most each time, oldest first; one line says how many are
@@ -402,5 +404,20 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   }
 
   const morningAsked = () => { try { return !!get().days[today().key]?.morning; } catch { return true; } };
-  return { tick, noted, ensure, review, reviewDue, questions, morningDue, morningAsked, ask, today, planFor, state: get };
+  /** For the morning briefing's note: how many to-dos need a new time, counted, never named (the app asks about
+   *  them itself after the briefing). '' when there are none, or they were asked about already today. */
+  function morningNote() {
+    try {
+      const t0 = today();
+      if (get().days[t0.key]?.morning) return '';
+      const n = questions('morning', t0).length;
+      return n ? `\n${plural(n, 'to-do')} on the list ${n === 1 ? 'needs' : 'need'} a new time: every time ${n === 1 ? 'it' : 'they'} had has passed. The app asks about ${n === 1 ? 'it' : 'each one'} itself right after you speak: mention how many in one short sentence, don't name ${n === 1 ? 'it' : 'them'}, and don't ask about ${n === 1 ? 'it' : 'them'} yourself.` : '';
+    } catch { return ''; }
+  }
+  /** Whether the evening briefing writes the review first: there is a review time ("" is only when asked) and today
+   *  has no review yet. */
+  function reviewWithBriefing() {
+    try { const t0 = today(); return t0.s.calendar.reviewAt !== null && !get().days[t0.key]?.review; } catch { return false; }
+  }
+  return { tick, noted, ensure, review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, today, planFor, state: get };
 }

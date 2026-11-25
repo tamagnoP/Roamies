@@ -2174,7 +2174,9 @@ setInterval(() => {
     pi.briefing.done(b.kind);
     if (b.kind === 'morning') dailyDo('plan', () => daily.ensure()); // feature 18: the morning briefing writes the day's Plan
     logLine('briefing', { kind: b.kind });
-    cal.sync('briefing').catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`).then(() => (b.kind === 'morning' && !daily.morningAsked() ? dailyAsk('morning') : null)).catch((e) => console.error('briefing', e))); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
+    // Feature 18: the evening briefing writes the day's review first (said by the app), when today has none yet.
+    const first = b.kind === 'evening' && daily.reviewWithBriefing() ? dayReview('briefing') : Promise.resolve();
+    first.then(() => cal.sync('briefing')).catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}${daily.morningNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`).then(() => (b.kind === 'morning' && !daily.morningAsked() ? dailyAsk('morning') : null)).catch((e) => console.error('briefing', e))); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs) and counts the to-dos that need a new time (daily.mjs)
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the
