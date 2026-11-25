@@ -261,6 +261,7 @@ console.log('store tests: all passed');
   assert.ok(L.today[0].overdue && !L.today[1].overdue, 'overdue flagged');
   assert.ok(L.today[2].done, 'done shown struck');
   assert.ok(typeof L.today[2].doneAt === 'number' && L.today[0].doneAt === null, 'feature 18: when it was done, for the daily note');
+  assert.ok(L.today.every((i) => typeof i.createdAt === 'number'), 'feature 18: when it was made, for the handover');
   assert.equal(L.today[1].kind, 'reminder');
   // Next day: finished entries from yesterday are deleted; open ones stay, whatever their age.
   const removed = await S7.clearFinished(t + 24 * H);

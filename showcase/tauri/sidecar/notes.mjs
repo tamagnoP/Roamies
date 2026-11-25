@@ -5,16 +5,23 @@
 //
 // What the tools can do: make a note, add to the end of one, search the notes, read one. They can't change or delete
 // what's already written, and can't touch anything outside the vault: a title is only ever a file name inside it.
+//
+// Feature 18, task pages: a to-do can have a page of its own, "Tasks/<title>.md", made the first time a note is
+// linked to it (write_note with task, or link_note). The page lists its notes, one line each; notes_for finds them
+// from both sides (the page's links, and the notes that link to the page), so links added by hand count too. Which
+// page is which to-do's is kept in state.json ("taskPages"). Two to-dos with one title get "Title (2)".
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { limitsFor, loadSettings } from './pi.mjs';
+import { limitsFor, loadSettings, readState, writeState } from './pi.mjs';
 
 // The sizes and counts are settings ("limits" in settings.json): noteMaxChars, the characters written or read in one
 // go; notesSearched, the notes looked through in a search; noteTitleOnlyBytes, over which a note is searched by its
 // title only.
-export const NOTE_TOOLS = ['write_note', 'search_notes', 'read_note'];
+export const NOTE_TOOLS = ['write_note', 'search_notes', 'read_note', 'link_note', 'notes_for'];
+export const TASKS_FOLDER = 'Tasks'; // feature 18: where the task pages are
+export const KEEP_PAGES = 500; // the to-do → page entries kept in state.json, the newest
 
 /** A title as a file name: no folders, no leading dots, none of the characters Obsidian or the file system refuse. */
 export function noteName(title) {
@@ -26,6 +33,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const stamp = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const tilde = (p, home) => (p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
+const oneLine = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
 
 /** Feature 18: the one way anything is written in the vault (notes, daily notes, task pages). A file is made, or
  *  added to at its end; nothing is ever written over, renamed or deleted. A link is never followed, in a folder on
@@ -92,11 +100,79 @@ function endsWithNewline(file, size) {
   return b[0] === 10;
 }
 
-export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now(), onNote = () => {} } = {}) {
+/** Feature 18: the task pages. todos(): the to-dos and reminders, [{ id, text, kind, status }]. Only a to-do (kind
+ *  "commitment") has a page. */
+export function createTaskPages({ home = os.homedir(), userName = 'the user', todos = () => [], now = () => Date.now() } = {}) {
+  const vault = createVault({ home, userName });
+  const dir = () => loadSettings(home).dir;
+  const map = () => { const m = readState(dir()).taskPages; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; };
+  function save(m) {
+    const keys = Object.keys(m);
+    for (const k of keys.slice(0, Math.max(0, keys.length - KEEP_PAGES))) delete m[k];
+    writeState(dir(), { ...readState(dir()), taskPages: m });
+  }
+  const rel = (name) => `${TASKS_FOLDER}/${name}.md`;
+  /** The to-do an id means, or null. */
+  const todo = (id) => { const all = todos(); return (Array.isArray(all) ? all : []).find((t) => t && t.id === id) ?? null; };
+  /** The page's name, when the to-do has one that is still in the vault. */
+  const pageOf = (id) => { const n = map()[id]; return typeof n === 'string' && vault.read(rel(n)) !== null ? n : null; };
+  /** The to-do's title, linked to its page when it has one (for the daily note). */
+  const link = (id, text) => { const n = pageOf(id); return n ? `[[${TASKS_FOLDER}/${n}|${oneLine(text)}]]` : oneLine(text); };
+  /** The to-do's page, made if it has none: its name. A name taken by another page or by a file already there gets
+   *  the next number. */
+  function make(id) {
+    const t = todo(id);
+    if (!t) throw new Error(`There's no to-do with the id "${id}". list_commitments gives the ids.`);
+    if (t.kind !== 'commitment') throw new Error('That is a reminder, and only to-dos have a page for their notes.');
+    const was = pageOf(id);
+    if (was) return was;
+    const base = noteName(t.text) || 'To-do', taken = new Set(Object.entries(map()).filter(([k]) => k !== id).map(([, v]) => String(v).toLowerCase()));
+    for (let i = 1; i < 100; i++) {
+      const name = i === 1 ? base : `${base.slice(0, 94).trim()} (${i})`;
+      if (taken.has(name.toLowerCase())) continue;
+      if (vault.create(rel(name), `---\ntodo: ${id}\ncreated: ${stamp(new Date(now()))}\n---\n\n# ${oneLine(t.text)}\n\nThe notes about this to-do. Roamies adds a line for each note linked to it; links added by hand count too.\n\n## Notes\n`)) {
+        save({ ...map(), [id]: name });
+        return name;
+      }
+    }
+    throw new Error('I couldn\'t find a free name for the to-do\'s page in the vault.');
+  }
+  /** The note titles the page links to. */
+  function listed(id) {
+    const n = pageOf(id), text = n ? vault.read(rel(n)) ?? '' : '';
+    return [...text.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)].map((m) => m[1].trim().split('/').pop()).filter(Boolean);
+  }
+  /** Links a note to the to-do: a line on its page (made if needed). → { page, made, already }. */
+  function add(id, title) {
+    const had = pageOf(id), page = make(id);
+    if (listed(id).some((t) => t.toLowerCase() === title.toLowerCase())) return { page, made: !had, already: true };
+    vault.append(rel(page), `- [[${title}]] (${stamp(new Date(now()))})\n`);
+    return { page, made: !had, already: false };
+  }
+  return { todo, pageOf, link, make, listed, add, rel };
+}
+
+export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now(), onNote = () => {}, todos = () => [] } = {}) {
   // onNote(title): a note was made or added to (feature 18: its line in the daily note's Log).
   const told = (title) => { try { onNote(title); } catch (e) { console.error('daily note', e); } };
   const box = createVault({ home, userName });
   const vault = () => box.root();
+  const pages = createTaskPages({ home, userName, todos, now });
+  /** Feature 18: a task page or a daily note: kept by the app, not one of the notes. */
+  const kept = (n) => { const top = n.rel.split(path.sep)[0]; return n.rel.includes(path.sep) && (top === TASKS_FOLDER || top === loadSettings(home).dailyFolder); };
+  /** The to-do a note is about must be one (checked before anything is written). */
+  function checkTask(task) {
+    if (task == null || task === '') return null;
+    const t = pages.todo(String(task));
+    if (!t) throw new Error(`There's no to-do with the id "${task}". list_commitments gives the ids.`);
+    if (t.kind !== 'commitment') throw new Error('That is a reminder, and only to-dos have a page for their notes. Save the note without task.');
+    return t.id;
+  }
+  function linked(task, name) {
+    const r = pages.add(task, name);
+    log('task_page', { made: r.made, linked: !r.already });
+    return r;
+  }
 
   /** Every note in the vault: { title, file, rel, mtime }. Folders starting with a dot (.obsidian, .trash) are skipped. */
   function all(dir) {
@@ -136,18 +212,19 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
   const tools = [
     {
       name: 'write_note',
-      description: `Save a note in ${userName}'s Obsidian vault as a Markdown file, only when they ask to note, write down or save an idea. title is the note's name (a few plain words, no folders). content is Markdown in ${userName}'s own words and meaning: tidy it, don't pad it or add ideas of your own. Link to related notes with [[Their Title]], using titles search_notes found (or a new title worth a note of its own). A new title makes a new note. append true adds to the end of an existing note under the date; without it an existing note is never touched. Notes can't be changed or deleted from here.`,
-      parameters: z.object({ title: z.string(), content: z.string(), append: z.boolean().optional() }),
+      description: `Save a note in ${userName}'s Obsidian vault as a Markdown file, only when they ask to note, write down or save an idea. title is the note's name (a few plain words, no folders). content is Markdown in ${userName}'s own words and meaning: tidy it, don't pad it or add ideas of your own. Link to related notes with [[Their Title]], using titles search_notes found (or a new title worth a note of its own). A new title makes a new note. append true adds to the end of an existing note under the date; without it an existing note is never touched. task: the id of the to-do the note is about (from today's plan or list_commitments), only when ${userName} says it is about that to-do; the note is then linked to the to-do's page in the vault. Notes can't be changed or deleted from here.`,
+      parameters: z.object({ title: z.string(), content: z.string(), append: z.boolean().optional(), task: z.string().optional() }),
       executionMode: 'sequential',
-      execute: async ({ title, content, append }) => {
+      execute: async ({ title, content, append, task }) => {
         const name = noteName(title);
         if (!name) throw new Error('The note needs a title: a few plain words.');
         const body = String(content ?? '').trim();
         if (!body) throw new Error('The note is empty.');
         const most = limitsFor(home).noteMaxChars;
         if (body.length > most) throw new Error(`That's over ${most} characters. Split it into a few notes that link to each other.`);
+        const todoId = checkTask(task);
         const dir = vault(), when = stamp(new Date(now()));
-        const there = all(dir).find((n) => n.title.toLowerCase() === name.toLowerCase());
+        const there = all(dir).find((n) => n.title.toLowerCase() === name.toLowerCase() && !kept(n));
         if (there) {
           if (!append) throw new Error(`A note called "${there.title}" already exists. Add to it with append true, or pick another title.`);
           try { box.append(path.relative(dir, there.file).split(path.sep).join('/'), `\n## ${when}\n\n${body}\n`); } catch (e) {
@@ -156,12 +233,15 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
           }
           log('note_append', { chars: body.length });
           told(there.title);
+          if (todoId) { linked(todoId, there.title); return `Added to the note "${there.title}", linked to its to-do's page.`; }
           return `Added to the note "${there.title}".`;
         }
+        const page = todoId ? pages.make(todoId) : null;
         // Never writes over a file that appeared meanwhile.
-        if (!box.create(`${name}.md`, `---\ncreated: ${when}\n---\n\n${body}\n`)) throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
+        if (!box.create(`${name}.md`, `---\ncreated: ${when}\n${page ? `task: "[[${TASKS_FOLDER}/${page}]]"\n` : ''}---\n\n${body}\n`)) throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
         log('note_new', { chars: body.length });
         told(name);
+        if (todoId) { linked(todoId, name); return `Saved the note "${name}" in the vault, linked to its to-do's page.`; }
         return `Saved the note "${name}" in the vault.`;
       },
     },
@@ -203,6 +283,42 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
         return `# ${note.title}\n\n${body.length > most ? `${body.slice(0, most)}\n[Cut off: the note is longer than this.]` : body}`;
       },
     },
+    {
+      name: 'link_note',
+      description: `Link a note already in ${userName}'s vault to one of their to-dos, when they ask: a line on the to-do's page in the vault (made the first time). title is the note's title as search_notes gave it; task is the to-do's id (from today's plan or list_commitments). The note itself is not changed.`,
+      parameters: z.object({ title: z.string(), task: z.string() }),
+      executionMode: 'sequential',
+      execute: async ({ title, task }) => {
+        const todoId = checkTask(task);
+        if (!todoId) throw new Error('Which to-do? Give its id (list_commitments has them).');
+        const { note, error } = find(all(vault()).filter((n) => !kept(n)), title);
+        if (error) throw new Error(error);
+        const r = linked(todoId, note.title);
+        return r.already ? `"${note.title}" is already linked to that to-do.` : `Linked the note "${note.title}" to the to-do's page.`;
+      },
+    },
+    {
+      name: 'notes_for',
+      description: `The notes in ${userName}'s vault about one of their to-dos: the ones on its page, and the ones that link to the page (links added by hand count too). task is the to-do's id. Titles only; read_note gives a note.`,
+      parameters: z.object({ task: z.string() }),
+      execute: async ({ task }) => {
+        const todoId = checkTask(task);
+        if (!todoId) throw new Error('Which to-do? Give its id (list_commitments has them).');
+        const page = pages.pageOf(todoId);
+        if (!page) return 'No note is linked to that to-do yet.';
+        const notes = all(vault()).filter((n) => !kept(n)), byTitle = new Map(notes.map((n) => [n.title.toLowerCase(), n]));
+        const found = new Map();
+        for (const t of pages.listed(todoId)) { const n = byTitle.get(t.toLowerCase()); if (n) found.set(n.title.toLowerCase(), n); }
+        // A link to the page by its bare name counts only when no note outside the pages has that name.
+        const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const to = new RegExp(`\\[\\[(?:${esc(TASKS_FOLDER)}/${esc(page)}${byTitle.has(page.toLowerCase()) ? '' : `|${esc(page)}`})(?:[|#\\]])`, 'i');
+        for (const n of notes) if (!found.has(n.title.toLowerCase()) && to.test(text(n))) found.set(n.title.toLowerCase(), n);
+        log('notes_for', { notes: found.size });
+        if (!found.size) return 'No note is linked to that to-do yet.';
+        const list = [...found.values()].sort((a, b) => b.mtime - a.mtime);
+        return `${list.length} note${list.length === 1 ? '' : 's'} about that to-do:\n${list.slice(0, 20).map((n) => `- ${n.title}${path.dirname(n.rel) === '.' ? '' : ` (in ${path.dirname(n.rel)})`}`).join('\n')}${list.length > 20 ? `\n…and ${list.length - 20} more.` : ''}`;
+      },
+    },
   ];
 
   /** A line for the model's live state. */
@@ -210,5 +326,5 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
     try { const dir = vault(); const n = all(dir).length; return `- Notes vault: ${tilde(dir, fs.realpathSync(home))} (${n} note${n === 1 ? '' : 's'}).`; } catch (e) { return `- Notes vault: not usable (${e.message}).`; }
   }
 
-  return { tools, live };
+  return { tools, live, pages };
 }

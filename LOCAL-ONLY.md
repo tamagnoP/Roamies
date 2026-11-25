@@ -687,6 +687,18 @@ only make a file that isn't there or add to the end of one that is, on a line of
 renames or deletes anything. It refuses a path with an empty part, a part that starts with a dot, or `..`. It also
 refuses a folder or file that is a link, and anything that would land outside the vault.
 
+**Task pages** (feature 18). A to-do can have a page of its own in the vault, `Tasks/<its title>.md`.
+- It is made the first time a note is linked to the to-do: "note this down for the slides to-do" (`write_note`
+  with the to-do's id), or "link my note on X to that to-do" (`link_note`). Reminders have no page.
+- The page lists its notes, one line each. Linking an existing note changes only the page, never the note; a new
+  note made for a to-do has the page in its front matter (`task: "[[Tasks/…]]"`).
+- Two to-dos with the same title get `Title (2)`, `Title (3)`. A page you delete is made again at the next link.
+- "Which notes do I have for that to-do?" (`notes_for`) finds the notes the page links to and the notes that link
+  to the page, including links you add by hand. Task pages and daily notes are not counted as notes.
+- Which page belongs to which to-do is kept in `state.json` under `taskPages`.
+- What reaches the AI: the to-do's id it passes, and the note titles `notes_for` finds. A page's text and the
+  to-do's title are not sent.
+
 ## The daily note
 
 Feature 18. Roamies keeps one note per day in the vault: `Daily/YYYY-MM-DD.md` (the `dailyFolder` setting). Code
@@ -1003,7 +1015,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 
 - `showcase/tauri/sidecar/pi.mjs` (new): the hand-off, the Send approval, the sandbox, the background job, the record, projects,
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
-- `showcase/tauri/sidecar/notes.mjs` (new): the notes vault.
+- `showcase/tauri/sidecar/notes.mjs` (new): the notes vault, its one writer, and the task pages (feature 18).
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler
@@ -1011,7 +1023,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/flow.mjs` (new): the exchange, the answer window, pending questions, `show_pending`.
 - `showcase/tauri/sidecar/store.mjs`: two functions added: `renameCommitment`, so a title changed in the app reaches
   the list, and `makeCommitment`, which turns a reminder into a to-do. `listItems` also gives `doneAt` for a finished
-  item (feature 18).
+  item and `createdAt` (feature 18).
 - `showcase/tauri/sidecar/daily.mjs` (new): the daily note (feature 18).
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
@@ -1026,7 +1038,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   instructions in place of upstream's opening, personality line, voice cues and beats; the form of address on the
   app's own lines.
 - `showcase/tauri/sidecar/tools.mjs`: `fetch_url` removed.
-- `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging.
+- `showcase/tauri/sidecar/speaker.mjs`, `draw.mjs`, `activity.mjs`, `safety.mjs`: voice, no card lookups, labels, logging
+  (`write_note`'s to-do id is logged, its text never).
   `speaker.mjs` also has marks (the overlay reports when a line has finished playing) and `hush` (stops what is
   playing without ending the reply's voice). Which voice a reply uses is asked at each reply, the audio's rate
   comes from the voice, and the beats can be replaced (`setBeats`).

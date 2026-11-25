@@ -63,13 +63,13 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/sidekick.mjs` | Main sidecar file: prompts, turn handling, menu, voice wiring. Upstream's, with marked edits. |
 | `showcase/tauri/sidecar/pi.mjs` | Ours. Hand-off to pi, Send approval, background job, records, settings loader, `gateTools`. |
 | `showcase/tauri/sidecar/leftovers.mjs` | Ours. The extension pi is given for a hand-off that can edit, its record, and ending the process groups it records when pi stops. |
-| `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools, and the vault's one writer (`createVault`). |
+| `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools, the vault's one writer (`createVault`), and the task pages (`createTaskPages`). |
 | `showcase/tauri/sidecar/daily.mjs` | Ours. Feature 18: the daily note (Plan, Log, Review), built by code; nothing of it goes to the model. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
-| `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, `makeCommitment`, `reminded` in `addCommitment`, and `doneAt` in `listItems`. |
+| `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, `makeCommitment`, `reminded` in `addCommitment`, and `doneAt` and `createdAt` in `listItems`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |
 | `showcase/tauri/sidecar/kokorovoice.mjs` | Ours. The natural voice: the Kokoro helper, its sandbox profile, the fallback to `say`. |

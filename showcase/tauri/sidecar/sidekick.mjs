@@ -389,7 +389,7 @@ const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('se
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
-const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title) => dailyDo('note', () => daily.noted(title)) });
+const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title) => dailyDo('note', () => daily.noted(title)), todos: () => todoItems() }); // Local-only build (feature 18): the to-dos, for their pages
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
@@ -410,10 +410,11 @@ const cal = createCalendar({
 });
 // Local-only build (feature 18): the daily note (daily.mjs). It reads the to-do list (with when each was finished) and
 // the blocks the calendar side knows; it never makes a request to the model.
-const daily = createDaily({
-  home: HOME, userName, log: (kind, data) => logLine(kind, data), blocks: () => cal.blocks(),
-  todos: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, kind: c.kind ?? 'commitment', status: 'open', due: c.due ?? null, doneAt: null })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, kind: i.kind, status: 'done', due: i.due ?? null, doneAt: i.doneAt ?? null }))]; },
-});
+function todoItems() {
+  const L = listItems();
+  return [...openCommitments().map((c) => ({ id: c.id, text: c.text, kind: c.kind ?? 'commitment', status: 'open', due: c.due ?? null, doneAt: null, createdAt: c.createdAt ?? null })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, kind: i.kind, status: 'done', due: i.due ?? null, doneAt: i.doneAt ?? null, createdAt: i.createdAt ?? null }))];
+}
+const daily = createDaily({ home: HOME, userName, log: (kind, data) => logLine(kind, data), blocks: () => cal.blocks(), todos: () => todoItems() });
 // A failure of the daily note is logged once for each reason, never with a title, and never stops anything else.
 let dailyFailed = '';
 function dailyDo(what, fn) {

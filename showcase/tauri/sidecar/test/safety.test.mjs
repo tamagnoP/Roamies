@@ -185,6 +185,8 @@ console.log('safety tests: passed');
   assert.equal(r.steps[0].field, 'Email', 'which field is kept; what went in is not');
   assert.deepEqual(redactArgs('write_file', { path: '~/a.txt', content: 'hello' }), { path: '~/a.txt', content: '[5 chars]' });
   assert.deepEqual(redactArgs('open', { target: 'Safari' }), { target: 'Safari' });
+  assert.deepEqual(redactArgs('write_note', { title: 'Ideas', content: 'secret plan', task: 'c1' }), { title: 'Ideas', append: undefined, task: 'c1', content: '[11 chars]' }, 'feature 18: the to-do id is logged, the text never');
+  assert.deepEqual(redactArgs('write_note', { title: 'Ideas', content: 'abc' }), { title: 'Ideas', append: undefined, content: '[3 chars]' });
   // Regression: a model sent act_in_app's steps as one string; logging it threw "(args.steps ?? []).map is not a
   // function" and the whole request died instead of the tool answering that steps must be a list.
   assert.deepEqual(redactArgs('act_in_app', { target: 'Safari', steps: '[{"do":"type","text":"hunter2"}]' }), { target: 'Safari', steps: '[string, 32 chars]' }, 'steps as a string: its size only, never what was typed');
