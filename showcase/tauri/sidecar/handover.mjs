@@ -227,11 +227,12 @@ export function createHandover({ home = os.homedir(), userName = 'the user', log
   const pad = (n) => String(n).padStart(2, '0');
   const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const HOW = { todo: 'its to-do is done', ticked: 'ticked in the note', words: 'you said so', yes: 'you said yes' };
-  /** Closes an open item: it goes from state.json, and one line is logged in today's note. → the item, or null. */
+  /** Closes an open item: it goes from state.json, and one line, ticked, is logged in today's note (earlier notes
+   *  are never rewritten). → the item, or null. */
   function close(id, how) {
     const item = edit((h) => { const i = h.items.findIndex((x) => x.id === id); return i < 0 ? null : h.items.splice(i, 1)[0]; });
     if (!item) return null;
-    try { note([`- ${hm(now())} ${how === 'go' ? 'Let go' : 'Closed'}: ${oneLine(item.text)}${how === 'go' ? '' : ` (${HOW[how]})`}`]); } catch (e) { log('open_item_note_failed', { kind: e?.constructor?.name ?? 'Error' }); }
+    try { note([`- [x] ${hm(now())} ${how === 'go' ? 'Let go' : 'Closed'}: ${oneLine(item.text)}${how === 'go' ? '' : ` (${HOW[how]})`}`]); } catch (e) { log('open_item_note_failed', { kind: e?.constructor?.name ?? 'Error' }); }
     log('open_item_closed', { how, open: get().items.length });
     return item;
   }

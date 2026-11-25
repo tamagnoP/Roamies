@@ -106,13 +106,14 @@ await notes2.tools.find((t) => t.name === 'write_note').execute({ title: 'told o
 await assert.rejects(notes2.tools.find((t) => t.name === 'write_note').execute({ title: 'Told once', content: 'z' }));
 assert.deepEqual(told, ['Told once', 'Told once'], 'made and added to; a refused one is not told');
 
-// ---- Feature 18: task pages, "Tasks/<title>.md", made when the first note is linked
+// ---- Feature 18: task pages, "Tasks/<title>.md", made when the first note is linked (as agreed on 2026-11-21)
 {
-  const todos = [{ id: 'c1', text: 'Send slides', kind: 'commitment', status: 'open' }, { id: 'c2', text: 'Send  slides', kind: 'commitment', status: 'open' }, { id: 'r1', text: 'Stretch', kind: 'reminder', status: 'open' }];
-  const logs = [];
-  const n3 = createNotes({ home, userName: 'Tiago', now: () => clock, todos: () => todos, log: (k, d) => logs.push([k, d]) });
+  const todos = [{ id: 'c1', text: 'Send slides', kind: 'commitment', status: 'open', due: new Date(2026, 10, 13, 17).getTime() }, { id: 'c2', text: 'Send  slides', kind: 'commitment', status: 'open' }, { id: 'r1', text: 'Stretch', kind: 'reminder', status: 'open' }];
+  const logs = [], told3 = [];
+  const n3 = createNotes({ home, userName: 'Tiago', now: () => clock, todos: () => todos, log: (k, d) => logs.push([k, d]), onNote: (t, task) => told3.push([t, task]) });
   const t3 = (n) => n3.tools.find((t) => t.name === n);
   const pagesState = () => JSON.parse(fs.readFileSync(path.join(home, 'Documents', 'roamies-pi', 'state.json'), 'utf8')).taskPages;
+  const day12 = '[[Daily/2026-11-12|Thursday 12 November]]';
   assert.deepEqual(n3.tools.map((t) => t.name), NOTE_TOOLS);
   assert.equal(await t3('notes_for').execute({ task: 'c1' }), 'No note is linked to that to-do yet.');
   // "Tasks" is a link (above): no page is made through it, and the note isn't written either.
@@ -120,21 +121,32 @@ assert.deepEqual(told, ['Told once', 'Told once'], 'made and added to; a refused
   assert.ok(!fs.existsSync(path.join(vault, 'Slide ideas.md'))); assert.deepEqual(fs.readdirSync(path.join(home, 'elsewhere')).filter((f) => f.endsWith('.md')), ['B.md']);
   fs.unlinkSync(path.join(vault, 'Tasks'));
   await assert.rejects(t3('write_note').execute({ title: 'Slide ideas', content: 'x', task: 'nope' }), /no to-do with the id "nope"/);
-  await assert.rejects(t3('write_note').execute({ title: 'Slide ideas', content: 'x', task: 'r1' }), /only to-dos have a page/);
   assert.ok(!fs.existsSync(path.join(vault, 'Slide ideas.md')) && !fs.existsSync(path.join(vault, 'Tasks')), 'checked before anything is written');
+  // A new note for a to-do: the page is made, with the title and due time; the note links the page and the day.
   assert.equal(await t3('write_note').execute({ title: 'Slide ideas', content: 'Open with the result.', task: 'c1' }), 'Saved the note "Slide ideas" in the vault, linked to its to-do\'s page.');
-  assert.equal(read('Slide ideas.md'), '---\ncreated: 2026-11-12 14:30\ntask: "[[Tasks/Send slides]]"\n---\n\nOpen with the result.\n');
-  assert.equal(read('Tasks/Send slides.md'), '---\ntodo: c1\ncreated: 2026-11-12 14:30\n---\n\n# Send slides\n\nThe notes about this to-do. Roamies adds a line for each note linked to it; links added by hand count too.\n\n## Notes\n- [[Slide ideas]] (2026-11-12 14:30)\n');
-  assert.deepEqual(pagesState(), { c1: 'Send slides' });
-  // Another to-do with the same title: "(2)". A note already there is linked by its page alone: the note is unchanged.
+  assert.equal(read('Slide ideas.md'), '---\ncreated: 2026-11-12 14:30\ntask: "[[Tasks/Send slides]]"\nday: "[[Daily/2026-11-12]]"\n---\n\nOpen with the result.\n');
+  assert.equal(read('Tasks/Send slides.md'), `---\ntodo: c1\ncreated: 2026-11-12 14:30\n---\n\n# Send slides\n\nDue 2026-11-13 17:00. Roamies adds a line here for each note linked to this to-do and for each day it was planned, worked on or finished; links added by hand count too.\n\n- ${day12}: note [[Slide ideas]]\n`);
+  assert.deepEqual(pagesState(), { c1: { name: 'Send slides', title: 'Send slides' } });
+  assert.deepEqual(told3, [['Slide ideas', 'c1']], 'the daily note\'s Log files the note under its to-do');
+  // Another to-do with the same title: "(2)". A note already there gets one line at its end, linking the page and the day.
   const before = read('Papers/Stringer 2021.md');
   assert.equal(await t3('link_note').execute({ title: 'stringer', task: 'c2' }), 'Linked the note "Stringer 2021" to the to-do\'s page.');
-  assert.equal(read('Papers/Stringer 2021.md'), before);
+  assert.equal(read('Papers/Stringer 2021.md'), `${before}\nFor [[Tasks/Send slides (2)|Send slides]], ${day12}.\n`);
   assert.ok(read('Tasks/Send slides (2).md').startsWith('---\ntodo: c2\n'));
-  assert.deepEqual(pagesState(), { c1: 'Send slides', c2: 'Send slides (2)' });
   assert.equal(await t3('link_note').execute({ title: 'Stringer 2021', task: 'c2' }), '"Stringer 2021" is already linked to that to-do.');
   assert.equal(await t3('write_note').execute({ title: 'cellpose thresholds', content: 'For the slides.', append: true, task: 'c2' }), 'Added to the note "Cellpose thresholds", linked to its to-do\'s page.');
+  assert.ok(read('Cellpose thresholds.md').endsWith(`\n## 2026-11-12 14:30\n\nFor the slides.\n\nFor [[Tasks/Send slides (2)|Send slides]], ${day12}.\n`));
   await assert.rejects(t3('link_note').execute({ title: 'Send slides', task: 'c1' }), /no note called/, 'a page is not one of the notes');
+  // A reminder has a page too.
+  await t3('write_note').execute({ title: 'Stretch routine', content: 'Neck, then back.', task: 'r1' });
+  assert.ok(read('Tasks/Stretch.md').includes('\n# Stretch\n\nA reminder. Roamies adds a line here for each note linked to this reminder'));
+  // The days: planned or finished (daily.mjs), once a day each; a new title adds a line and keeps the page.
+  assert.equal(n3.pages.day('c1', 'planned'), true); assert.equal(n3.pages.day('c1', 'planned'), false, 'once');
+  assert.equal(n3.pages.day('c3', 'planned'), false, 'no page: nothing');
+  todos[0].text = 'Send the slides';
+  n3.pages.day('c1', 'done', '2026-11-13');
+  assert.ok(read('Tasks/Send slides.md').endsWith(`- ${day12}: note [[Slide ideas]]\n- ${day12}: planned\n- ${day12}: renamed "Send the slides"\n- [[Daily/2026-11-13|Friday 13 November]]: done\n`));
+  assert.equal(pagesState().c1.name, 'Send slides'); assert.equal(n3.pages.renames(), false, 'once');
   // notes_for: the page's links, and the notes that link to the page, by hand too. Daily notes don't count.
   fs.writeFileSync(path.join(vault, 'By hand.md'), 'See [[Send slides (2)|the slides]].\n');
   fs.writeFileSync(path.join(vault, 'Other.md'), 'See [[Tasks/Send slides]] and [[Send slides]].\n');
@@ -144,13 +156,13 @@ assert.deepEqual(told, ['Told once', 'Told once'], 'made and added to; a refused
   assert.match(for1, /^3 notes about that to-do:\n/); for (const t of ['Slide ideas', 'Other', 'Random forest features']) assert.ok(for1.includes(`- ${t}\n`) || for1.endsWith(`- ${t}`), t);
   assert.ok(!for1.includes('2026-11-12'), 'a daily note is not one of the notes');
   assert.match(for2, /^3 notes about that to-do:\n/); for (const t of ['By hand', 'Cellpose thresholds', 'Stringer 2021 (in Papers)']) assert.ok(for2.includes(`- ${t}`), t);
-  // A page deleted by hand is made again at the next link.
+  // A page deleted by hand is made again at the next link, named for the title it has now.
   fs.rmSync(path.join(vault, 'Tasks', 'Send slides.md'));
   assert.equal(await t3('notes_for').execute({ task: 'c1' }), 'No note is linked to that to-do yet.');
   await t3('link_note').execute({ title: 'Other', task: 'c1' });
-  assert.ok(read('Tasks/Send slides.md').endsWith('## Notes\n- [[Other]] (2026-11-12 14:30)\n'));
-  assert.equal(n3.pages.link('c1', 'Send slides'), '[[Tasks/Send slides|Send slides]]'); assert.equal(n3.pages.link('r1', 'Stretch'), 'Stretch');
-  for (const [k, d] of logs) assert.ok(!/slide|stringer|other|cellpose/i.test(JSON.stringify(d)), `${k}: counts only`);
+  assert.ok(read('Tasks/Send the slides.md').endsWith(`\n\n- ${day12}: note [[Other]]\n`));
+  assert.equal(n3.pages.link('c1', 'Send the slides'), '[[Tasks/Send the slides|Send the slides]]'); assert.equal(n3.pages.link('c9', 'Gone'), 'Gone');
+  for (const [k, d] of logs) assert.ok(!/slide|stringer|other|cellpose|stretch/i.test(JSON.stringify(d)), `${k}: counts only`);
 }
 
 // A vault set outside the home folder is refused.

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { WHEN_HINT, createDaily, dayWindow, isReviewAsk, noteDay, parseWhen, timeOn } from '../daily.mjs';
 import { SECOND, createAnswers } from '../answers.mjs';
 import { createFlow } from '../flow.mjs';
+import { createTaskPages } from '../notes.mjs';
 import { loadSettings, readState } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'daily-home-')));
@@ -285,6 +286,25 @@ for (const [said, want] of [
   due = false; flow.start(); flow.closing('thanks'); await new Promise((r) => setTimeout(r, 20));
   assert.equal(ran, 1, 'only when they are due');
   fs.rmSync(home3, { recursive: true, force: true });
+}
+
+// ---- the task pages: a line for each day a to-do with a page was planned or finished; a note filed under its to-do
+{
+  const home4 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'daily-pages-')));
+  let now4 = at(26, 8);
+  const T4 = [{ id: 'p1', text: 'Draft abstract', kind: 'commitment', status: 'open', due: at(26, 16), doneAt: null }, { id: 'p2', text: 'No page', kind: 'commitment', status: 'open', due: at(26, 12), doneAt: null }];
+  const pages = createTaskPages({ home: home4, todos: () => T4, now: () => now4 });
+  const d4 = createDaily({ home: home4, todos: () => T4.map((t) => ({ ...t })), now: () => now4, pages });
+  pages.make('p1');
+  d4.ensure();
+  Object.assign(T4[0], { status: 'done', doneAt: at(26, 15) }); now4 = at(26, 15, 1); d4.tick();
+  d4.noted('Abstract ideas', 'p1'); d4.noted('Loose idea');
+  const page = fs.readFileSync(path.join(home4, 'Documents', 'roamies-vault', 'Tasks', 'Draft abstract.md'), 'utf8');
+  assert.ok(page.endsWith('- [[Daily/2026-11-26|Thursday 26 November]]: planned\n- [[Daily/2026-11-26|Thursday 26 November]]: done\n'), page);
+  const n4 = fs.readFileSync(path.join(home4, 'Documents', 'roamies-vault', 'Daily', '2026-11-26.md'), 'utf8');
+  assert.ok(n4.endsWith('- 15:00 Done: Draft abstract\n- 15:01 Note: [[Abstract ideas]] (for [[Tasks/Draft abstract|Draft abstract]])\n- 15:01 Note: [[Loose idea]]\n'), n4);
+  assert.ok(!fs.existsSync(path.join(home4, 'Documents', 'roamies-vault', 'Tasks', 'No page.md')), 'a page is made only by linking a note');
+  fs.rmSync(home4, { recursive: true, force: true });
 }
 
 // ---- "review my day", said alone, is the app's

@@ -189,7 +189,10 @@ const span = (x) => (x.block ? `${hm(x.at)} to ${hm(x.end)}` : `due ${hm(x.at)}`
  * io.reschedule(id, { start } | { day }) gives the to-do its new time (calendar.mjs) → { ok, line }, io.say(text)
  * says a line and resolves when it has been said.
  */
-export function createDaily({ home = os.homedir(), userName = 'the user', todos = () => [], blocks = () => ({}), log = () => {}, now = () => Date.now() } = {}) {
+export function createDaily({ home = os.homedir(), userName = 'the user', todos = () => [], blocks = () => ({}), log = () => {}, now = () => Date.now(), pages = null } = {}) {
+  // pages: the task pages (notes.mjs): link(id, title) for a to-do's title linked to its page, day(id, what, key)
+  // for a line on its page when it is planned or finished that day.
+  const onPage = (id, what, key) => { try { pages?.day(id, what, key); } catch (e) { log('daily_page_failed', { kind: e?.constructor?.name ?? 'Error' }); } };
   const vault = createVault({ home, userName });
   const settings = () => loadSettings(home);
 
@@ -260,6 +263,7 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     const p = planFor(t0), text = planText(t0, p);
     if (!vault.create(t0.rel, head(t0) + text)) vault.append(t0.rel, `\n${text}`);
     editDay(t0.key, (d) => { d.plan = hm(now()); remember(d, p.planned); });
+    for (const { t } of p.planned) if (t.status === 'open') onPage(t.id, 'planned', t0.key);
     log('daily_plan', { planned: p.planned.length, needs: p.needs.length, coming: p.coming.length });
     return t0;
   }
@@ -305,16 +309,17 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     const p = planFor(t0);
     if (fresh.length) {
       logLines(t0, fresh.map((t) => `- ${hm(t.doneAt)} Done: ${oneLine(t.text)}`));
+      for (const t of fresh) onPage(t.id, 'done', t0.key);
       log('daily_log', { what: 'done', lines: fresh.length });
     }
     editDay(t0.key, (d) => { d.done = { ...(d.done ?? {}) }; for (const t of fresh) d.done[t.id] = { title: oneLine(t.text), at: t.doneAt }; remember(d, p.planned.filter(({ t }) => t.status === 'open')); });
     return fresh.length;
   }
 
-  /** A note was taken: its line in the Log, linked. */
-  function noted(title) {
-    const t0 = today();
-    logLines(t0, [`- ${hm(now())} Note: [[${oneLine(title)}]]`]);
+  /** A note was taken: its line in the Log, linked, and filed under its to-do when it is about one. */
+  function noted(title, task = null) {
+    const t0 = today(), t = task ? (todos() ?? []).find((x) => x?.id === task) : null;
+    logLines(t0, [`- ${hm(now())} Note: [[${oneLine(title)}]]${t ? ` (for ${pages ? pages.link(t.id, t.text) : oneLine(t.text)})` : ''}`]);
     editDay(t0.key, (d) => { d.noted = (d.noted ?? 0) + 1; });
     log('daily_log', { what: 'note', lines: 1 });
   }

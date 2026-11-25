@@ -695,11 +695,15 @@ only make a file that isn't there or add to the end of one that is, on a line of
 renames or deletes anything. It refuses a path with an empty part, a part that starts with a dot, or `..`. It also
 refuses a folder or file that is a link, and anything that would land outside the vault.
 
-**Task pages** (feature 18). A to-do can have a page of its own in the vault, `Tasks/<its title>.md`.
-- It is made the first time a note is linked to the to-do: "note this down for the slides to-do" (`write_note`
-  with the to-do's id), or "link my note on X to that to-do" (`link_note`). Reminders have no page.
-- The page lists its notes, one line each. Linking an existing note changes only the page, never the note; a new
-  note made for a to-do has the page in its front matter (`task: "[[Tasks/…]]"`).
+**Task pages** (feature 18, as agreed on 2026-11-21). A to-do or a reminder can have a page of its own in the
+vault, `Tasks/<its title>.md`.
+- It is made the first time a note is linked to it: "note this down for the slides to-do" (`write_note` with the
+  to-do's id), or "link my note on X to that to-do" (`link_note`). One with no notes has no page.
+- The page holds the title and the due time if it had one, then a line for each note linked and each day the to-do
+  was planned or finished, each linking that day's daily note. A new title adds a line; nothing is renamed.
+- A new note made for a to-do has the page and the day in its front matter (`task:`, `day:`). A note linked, or
+  added to for a to-do, gets one line at its end linking the page and the day. The daily note's Log files the note
+  under its to-do.
 - Two to-dos with the same title get `Title (2)`, `Title (3)`. A page you delete is made again at the next link.
 - "Which notes do I have for that to-do?" (`notes_for`) finds the notes the page links to and the notes that link
   to the page, including links you add by hand. Task pages and daily notes are not counted as notes.
@@ -767,8 +771,8 @@ after.
 - **Open items.** Each new "Left open" line becomes an open item, kept in `state.json` under `handover` with its
   day. A line that matches an open item makes nothing: the same words (small words aside), all of one's words in
   the other's, or at least 70 % of their words shared. The AI lists only new lines; the open items are carried
-  from one handover to the next by code. An item is closed, with one line in that day's Log (`Closed: … (how)`),
-  when:
+  from one handover to the next by code. An item is closed, with one ticked line in that day's Log
+  (`- [x] HH:MM Closed: … (how)`; earlier notes are not rewritten), when:
   - the to-do or reminder it is about is done;
   - you tick its box in one of the last 14 daily notes in Obsidian (read every 5 minutes at most);
   - you say it's dealt with (`item_dealt_with`). It closes at once only when your own words in that message say so:
@@ -778,7 +782,7 @@ after.
     says which item it closed.
 
   After `limits.openItemAskDays` (7) days, the evening review asks about the item: "… has been open since …. Keep
-  it open?". "Keep it" asks again after as many days; "Let it go" closes it with a `Let go` line. At most
+  it open?". "Keep it" asks again after as many days; "Let it go" closes it with a ticked `Let go` line. At most
   `limits.reviewQuestions` each time, oldest first; no answer ends the round and changes nothing.
 - Only to-dos count in the Plan, the Log and the Review. Reminders and timers appear only in the handover's part
   one; pi's work never appears (it stays in the records folder).

@@ -6,15 +6,18 @@
 // What the tools can do: make a note, add to the end of one, search the notes, read one. They can't change or delete
 // what's already written, and can't touch anything outside the vault: a title is only ever a file name inside it.
 //
-// Feature 18, task pages: a to-do can have a page of its own, "Tasks/<title>.md", made the first time a note is
-// linked to it (write_note with task, or link_note). The page lists its notes, one line each; notes_for finds them
-// from both sides (the page's links, and the notes that link to the page), so links added by hand count too. Which
-// page is which to-do's is kept in state.json ("taskPages"). Two to-dos with one title get "Title (2)".
+// Feature 18, task pages: a to-do or reminder can have a page of its own, "Tasks/<title>.md", made the first time a
+// note is linked to it (write_note with task, or link_note). The page has a line for each note linked and each day
+// it was planned, worked on or finished, linking that day's daily note; a linked note gets a line linking the page
+// and the day. notes_for finds the notes from both sides (the page's links, and the notes that link to the page),
+// so links added by hand count too. Which page is which to-do's is kept in state.json ("taskPages"). Two to-dos with
+// one title get "Title (2)"; a new title adds a line, since nothing is renamed in the vault.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { limitsFor, loadSettings, readState, writeState } from './pi.mjs';
+import { noteDay, ymd } from './daily.mjs';
 
 // The sizes and counts are settings ("limits" in settings.json): noteMaxChars, the characters written or read in one
 // go; notesSearched, the notes looked through in a search; noteTitleOnlyBytes, over which a note is searched by its
@@ -100,61 +103,101 @@ function endsWithNewline(file, size) {
   return b[0] === 10;
 }
 
-/** Feature 18: the task pages. todos(): the to-dos and reminders, [{ id, text, kind, status }]. Only a to-do (kind
- *  "commitment") has a page. */
+/** Feature 18: the task pages, as agreed on 2026-11-21. todos(): the to-dos and reminders, [{ id, text, kind, status,
+ *  due }]. A page holds the title, the due time when it had one, and a line for each note linked and each day the
+ *  to-do was planned, worked on (a note linked) or finished, each linking to that day's daily note; a new title adds
+ *  a line, since nothing is renamed in the vault. */
 export function createTaskPages({ home = os.homedir(), userName = 'the user', todos = () => [], now = () => Date.now() } = {}) {
   const vault = createVault({ home, userName });
-  const dir = () => loadSettings(home).dir;
-  const map = () => { const m = readState(dir()).taskPages; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; };
+  const settings = () => loadSettings(home);
+  const dir = () => settings().dir;
+  /** to-do id → { name, title }: the page's name, and the title it last had. */
+  function map() {
+    const m = readState(dir()).taskPages, out = {};
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return out;
+    for (const [k, v] of Object.entries(m)) { if (typeof v === 'string') out[k] = { name: v, title: v }; else if (v && typeof v.name === 'string') out[k] = { name: v.name, title: String(v.title ?? v.name) }; }
+    return out;
+  }
   function save(m) {
     const keys = Object.keys(m);
     for (const k of keys.slice(0, Math.max(0, keys.length - KEEP_PAGES))) delete m[k];
     writeState(dir(), { ...readState(dir()), taskPages: m });
   }
   const rel = (name) => `${TASKS_FOLDER}/${name}.md`;
-  /** The to-do an id means, or null. */
+  /** The to-do or reminder an id means, or null. */
   const todo = (id) => { const all = todos(); return (Array.isArray(all) ? all : []).find((t) => t && t.id === id) ?? null; };
   /** The page's name, when the to-do has one that is still in the vault. */
-  const pageOf = (id) => { const n = map()[id]; return typeof n === 'string' && vault.read(rel(n)) !== null ? n : null; };
+  const pageOf = (id) => { const n = map()[id]?.name; return typeof n === 'string' && vault.read(rel(n)) !== null ? n : null; };
   /** The to-do's title, linked to its page when it has one (for the daily note). */
   const link = (id, text) => { const n = pageOf(id); return n ? `[[${TASKS_FOLDER}/${n}|${oneLine(text)}]]` : oneLine(text); };
+  /** A day's daily note, linked: the day of a moment, as the daily note counts days (calendar.dayTurnsAt). */
+  function dayLink(key = null) {
+    const s = settings(), k = key ?? ymd(noteDay(now(), s.calendar.dayTurnsAt)), [y, m, d] = k.split('-').map(Number);
+    return `[[${s.dailyFolder}/${k}|${new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '')}]]`;
+  }
   /** The to-do's page, made if it has none: its name. A name taken by another page or by a file already there gets
    *  the next number. */
   function make(id) {
     const t = todo(id);
     if (!t) throw new Error(`There's no to-do with the id "${id}". list_commitments gives the ids.`);
-    if (t.kind !== 'commitment') throw new Error('That is a reminder, and only to-dos have a page for their notes.');
     const was = pageOf(id);
     if (was) return was;
-    const base = noteName(t.text) || 'To-do', taken = new Set(Object.entries(map()).filter(([k]) => k !== id).map(([, v]) => String(v).toLowerCase()));
+    const base = noteName(t.text) || 'To-do', taken = new Set(Object.entries(map()).filter(([k]) => k !== id).map(([, v]) => v.name.toLowerCase()));
+    const when = new Date(now()), due = typeof t.due === 'number' ? new Date(t.due) : null;
     for (let i = 1; i < 100; i++) {
       const name = i === 1 ? base : `${base.slice(0, 94).trim()} (${i})`;
       if (taken.has(name.toLowerCase())) continue;
-      if (vault.create(rel(name), `---\ntodo: ${id}\ncreated: ${stamp(new Date(now()))}\n---\n\n# ${oneLine(t.text)}\n\nThe notes about this to-do. Roamies adds a line for each note linked to it; links added by hand count too.\n\n## Notes\n`)) {
-        save({ ...map(), [id]: name });
+      if (vault.create(rel(name), `---\ntodo: ${id}\ncreated: ${stamp(when)}\n---\n\n# ${oneLine(t.text)}\n\n${t.kind === 'reminder' ? 'A reminder. ' : ''}${due ? `Due ${stamp(due)}. ` : ''}Roamies adds a line here for each note linked to this ${t.kind === 'reminder' ? 'reminder' : 'to-do'} and for each day it was planned, worked on or finished; links added by hand count too.\n\n`)) {
+        save({ ...map(), [id]: { name, title: oneLine(t.text) } });
         return name;
       }
     }
     throw new Error('I couldn\'t find a free name for the to-do\'s page in the vault.');
   }
-  /** The note titles the page links to. */
+  /** The note titles the page links to (its day links aside). */
   function listed(id) {
-    const n = pageOf(id), text = n ? vault.read(rel(n)) ?? '' : '';
-    return [...text.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)].map((m) => m[1].trim().split('/').pop()).filter(Boolean);
+    const n = pageOf(id), text = n ? vault.read(rel(n)) ?? '' : '', daily = `${settings().dailyFolder}/`;
+    return [...text.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)].map((m) => m[1].trim()).filter((t) => t && !t.startsWith(daily) && !t.startsWith(`${TASKS_FOLDER}/`)).map((t) => t.split('/').pop());
+  }
+  /** A line on the page, once. */
+  function line(page, text) {
+    if ((vault.read(rel(page)) ?? '').split('\n').includes(text)) return false;
+    vault.append(rel(page), `${text}\n`);
+    return true;
   }
   /** Links a note to the to-do: a line on its page (made if needed). → { page, made, already }. */
   function add(id, title) {
+    renames();
     const had = pageOf(id), page = make(id);
     if (listed(id).some((t) => t.toLowerCase() === title.toLowerCase())) return { page, made: !had, already: true };
-    vault.append(rel(page), `- [[${title}]] (${stamp(new Date(now()))})\n`);
+    line(page, `- ${dayLink()}: note [[${title}]]`);
     return { page, made: !had, already: false };
   }
-  return { todo, pageOf, link, make, listed, add, rel };
+  /** A day the to-do was planned or finished (daily.mjs): a line on its page, once a day each, when it has a page. */
+  function day(id, what, key = null) {
+    const page = pageOf(id);
+    if (!page) return false;
+    renames();
+    return line(page, `- ${dayLink(key)}: ${what}`);
+  }
+  /** A to-do whose title changed keeps its page: a line with the new title. */
+  function renames() {
+    const m = map(); let changed = false;
+    for (const [id, e] of Object.entries(m)) {
+      const t = todo(id), now_ = t ? oneLine(t.text) : null;
+      if (!now_ || now_ === e.title || vault.read(rel(e.name)) === null) continue;
+      line(e.name, `- ${dayLink()}: renamed "${now_}"`);
+      m[id] = { ...e, title: now_ }; changed = true;
+    }
+    if (changed) save(m);
+    return changed;
+  }
+  return { todo, pageOf, link, dayLink, make, listed, add, day, renames, rel };
 }
 
 export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now(), onNote = () => {}, todos = () => [] } = {}) {
-  // onNote(title): a note was made or added to (feature 18: its line in the daily note's Log).
-  const told = (title) => { try { onNote(title); } catch (e) { console.error('daily note', e); } };
+  // onNote(title, task): a note was made or added to, for a to-do or not (feature 18: its line in the daily note's Log).
+  const told = (title, task = null) => { try { onNote(title, task); } catch (e) { console.error('daily note', e); } };
   const box = createVault({ home, userName });
   const vault = () => box.root();
   const pages = createTaskPages({ home, userName, todos, now });
@@ -165,7 +208,6 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
     if (task == null || task === '') return null;
     const t = pages.todo(String(task));
     if (!t) throw new Error(`There's no to-do with the id "${task}". list_commitments gives the ids.`);
-    if (t.kind !== 'commitment') throw new Error('That is a reminder, and only to-dos have a page for their notes. Save the note without task.');
     return t.id;
   }
   function linked(task, name) {
@@ -212,7 +254,7 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
   const tools = [
     {
       name: 'write_note',
-      description: `Save a note in ${userName}'s Obsidian vault as a Markdown file, only when they ask to note, write down or save an idea. title is the note's name (a few plain words, no folders). content is Markdown in ${userName}'s own words and meaning: tidy it, don't pad it or add ideas of your own. Link to related notes with [[Their Title]], using titles search_notes found (or a new title worth a note of its own). A new title makes a new note. append true adds to the end of an existing note under the date; without it an existing note is never touched. task: the id of the to-do the note is about (from today's plan or list_commitments), only when ${userName} says it is about that to-do; the note is then linked to the to-do's page in the vault. Notes can't be changed or deleted from here.`,
+      description: `Save a note in ${userName}'s Obsidian vault as a Markdown file, only when they ask to note, write down or save an idea. title is the note's name (a few plain words, no folders). content is Markdown in ${userName}'s own words and meaning: tidy it, don't pad it or add ideas of your own. Link to related notes with [[Their Title]], using titles search_notes found (or a new title worth a note of its own). A new title makes a new note. append true adds to the end of an existing note under the date; without it an existing note is never touched. task: the id of the to-do or reminder the note is about (from today's plan or list_commitments), only when ${userName} says it is about it; the note is then linked to its page in the vault. Notes can't be changed or deleted from here.`,
       parameters: z.object({ title: z.string(), content: z.string(), append: z.boolean().optional(), task: z.string().optional() }),
       executionMode: 'sequential',
       execute: async ({ title, content, append, task }) => {
@@ -227,20 +269,21 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
         const there = all(dir).find((n) => n.title.toLowerCase() === name.toLowerCase() && !kept(n));
         if (there) {
           if (!append) throw new Error(`A note called "${there.title}" already exists. Add to it with append true, or pick another title.`);
-          try { box.append(path.relative(dir, there.file).split(path.sep).join('/'), `\n## ${when}\n\n${body}\n`); } catch (e) {
+          const page = todoId ? pages.make(todoId) : null;
+          try { box.append(path.relative(dir, there.file).split(path.sep).join('/'), `\n## ${when}\n\n${body}\n${page ? `\nFor ${pages.link(todoId, pages.todo(todoId).text)}, ${pages.dayLink()}.\n` : ''}`); } catch (e) {
             if (e instanceof VaultRefused) throw new Error(`"${there.title}" is a link to somewhere else, or in a folder that is, so I left it alone.`);
             throw e;
           }
           log('note_append', { chars: body.length });
-          told(there.title);
+          told(there.title, todoId);
           if (todoId) { linked(todoId, there.title); return `Added to the note "${there.title}", linked to its to-do's page.`; }
           return `Added to the note "${there.title}".`;
         }
         const page = todoId ? pages.make(todoId) : null;
         // Never writes over a file that appeared meanwhile.
-        if (!box.create(`${name}.md`, `---\ncreated: ${when}\n${page ? `task: "[[${TASKS_FOLDER}/${page}]]"\n` : ''}---\n\n${body}\n`)) throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
+        if (!box.create(`${name}.md`, `---\ncreated: ${when}\n${page ? `task: "[[${TASKS_FOLDER}/${page}]]"\nday: "${pages.dayLink().replace(/\|[^\]]*\]\]$/, ']]')}"\n` : ''}---\n\n${body}\n`)) throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
         log('note_new', { chars: body.length });
-        told(name);
+        told(name, todoId);
         if (todoId) { linked(todoId, name); return `Saved the note "${name}" in the vault, linked to its to-do's page.`; }
         return `Saved the note "${name}" in the vault.`;
       },
@@ -285,7 +328,7 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
     },
     {
       name: 'link_note',
-      description: `Link a note already in ${userName}'s vault to one of their to-dos, when they ask: a line on the to-do's page in the vault (made the first time). title is the note's title as search_notes gave it; task is the to-do's id (from today's plan or list_commitments). The note itself is not changed.`,
+      description: `Link a note already in ${userName}'s vault to one of their to-dos or reminders, when they ask: a line on its page in the vault (made the first time), and a line at the end of the note linking the page and the day. title is the note's title as search_notes gave it; task is the to-do's id (from today's plan or list_commitments).`,
       parameters: z.object({ title: z.string(), task: z.string() }),
       executionMode: 'sequential',
       execute: async ({ title, task }) => {
@@ -294,12 +337,15 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
         const { note, error } = find(all(vault()).filter((n) => !kept(n)), title);
         if (error) throw new Error(error);
         const r = linked(todoId, note.title);
-        return r.already ? `"${note.title}" is already linked to that to-do.` : `Linked the note "${note.title}" to the to-do's page.`;
+        if (r.already) return `"${note.title}" is already linked to that to-do.`;
+        // The note carries a link to the page and to the day, added at its end (it is never changed otherwise).
+        try { box.append(path.relative(vault(), note.file).split(path.sep).join('/'), `\nFor ${pages.link(todoId, pages.todo(todoId).text)}, ${pages.dayLink()}.\n`); } catch (e) { if (!(e instanceof VaultRefused)) throw e; }
+        return `Linked the note "${note.title}" to the to-do's page.`;
       },
     },
     {
       name: 'notes_for',
-      description: `The notes in ${userName}'s vault about one of their to-dos: the ones on its page, and the ones that link to the page (links added by hand count too). task is the to-do's id. Titles only; read_note gives a note.`,
+      description: `The notes in ${userName}'s vault about one of their to-dos or reminders: the ones on its page, and the ones that link to the page (links added by hand count too). task is the to-do's id. Titles only; read_note gives a note.`,
       parameters: z.object({ task: z.string() }),
       execute: async ({ task }) => {
         const todoId = checkTask(task);
