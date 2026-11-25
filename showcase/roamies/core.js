@@ -706,6 +706,13 @@
           ctx.restore();
         }
       }
+      // Local-only build (feature 24, fix 6): what this frame showed of the character (where it is drawn, whether the
+      // canvas was painted), for the new page's report that it has drawn it (host.js) and for measuring (measure.js).
+      if (R.frameHooks?.length) {
+        const a = list.find((o) => o.c.agent)?.c;
+        const f = { drew: shown && !same, at: a && !a.hidden ? a.drawnAt ?? [a.mover.x, a.mover.y] : null, presence: a?.agent?.presence ?? null };
+        for (const h of R.frameHooks) h(f);
+      }
       // Nothing on screen (drawn natively, or off it): just the bookkeeping, 30 times a second, off the display clock.
       if (!shown && !list.some((o) => o.c.mover.dragging)) { nap = setTimeout(() => { nap = 0; requestAnimationFrame(frame); }, 33); return; }
       // Local-only build: everyone at rest at home and the canvas already showing exactly this: stop here (see rested).

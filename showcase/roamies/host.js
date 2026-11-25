@@ -14,7 +14,7 @@
   // Local-only build: a change (the Dock moved, another screen) starts the frame loop again if it was stopped, so a
   // Sidekick resting at home moves to where home is now (core.js, agent.js).
   let safeWas = '';
-  window.__roamieSafe = (s) => { Roamie.setSafe?.(s); const now = JSON.stringify(s ?? null); if (now !== safeWas) { safeWas = now; Roamie.wake?.(); } };
+  window.__roamieSafe = (s) => { Roamie.measure?.row('safe', +s?.top || 0, +s?.left || 0, +s?.bottom || 0, +s?.right || 0, +s?.ox || 0, +s?.oy || 0); Roamie.setSafe?.(s); const now = JSON.stringify(s ?? null); if (now !== safeWas) { safeWas = now; Roamie.wake?.(); } };
   // macOS: the voice helper can draw the cursor-form sidekick while it just follows the cursor (agent.js nativeStep,
   // voice/buddy.swift). Not available (Windows, helper not running): the page keeps drawing it.
   let buddyOff = /Mac/.test(navigator.platform) ? 0 : Infinity;
@@ -415,6 +415,7 @@
 
   window.__roamieHost = (m) => {
     Roamie.wake?.(); // the frame loop naps while the sidekick is hidden
+    if (typeof m?.kind === 'string') Roamie.measure?.row('msg', m.kind); // Local-only build (feature 24, fix 6): its kind only
     // Local-only build: a mark asks when everything said so far has finished playing. The player answers once its last
     // sample has sounded (voice-out.js); the sidecar opens the microphone only on that answer, never on a guess.
     if (m.kind === 'speech' && m.mark && !Roamie.voiceOut) { send({ type: 'speech_mark', mark: m.mark }); return; }
@@ -444,7 +445,7 @@
     }
     if (m.kind === 'greet') { getAgent().act('wave'); return; }
     // Local-only build (feature 24, fix 6): this page replaces one that was at rest: no entrance, no greeting.
-    if (m.kind === 'settle') { getAgent().settle?.({ spin: m.spin }); return; }
+    if (m.kind === 'settle') { getAgent().settle?.({ spin: m.spin, hold: m.hold }); return; }
     if (m.kind === 'intro') { getAgent().intro(m.x, m.text); return; }
     if (m.kind === 'esc') { onEsc(); return; }
     if (m.kind === 'summon') {
@@ -502,6 +503,21 @@
     const rest = atRest();
     if (rest !== restWas) { restWas = rest; send(rest ? { type: 'page_rest', on: true, keep: getAgent().keep } : { type: 'page_rest', on: false }); }
   }, 150);
+
+  // Local-only build (feature 24, fix 6): the page tells the shell once it has drawn the character, and where (CSS px):
+  // the first frame that painted it on screen, two display frames on, so it has been put on screen. During a rebuild
+  // the shell closes the old windows then; otherwise it notes nothing. Measuring (measure.js) goes to the sidecar.
+  if (Roamie.measure) Roamie.measure.send = send;
+  window.__roamieMeasure = (ms) => Roamie.measure?.start(ms);
+  let drawnAt = null;
+  (Roamie.frameHooks ??= []).push((f) => {
+    if (drawnAt || !f.drew || !f.at || !['shown', 'in'].includes(f.presence)) return;
+    drawnAt = f.at.slice();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      Roamie.measure?.row('drawn', drawnAt[0], drawnAt[1]);
+      invoke('page_drawn', { x: drawnAt[0], y: drawnAt[1] }).catch(() => {});
+    }));
+  });
 
   // Start hidden in auto mode and tell the brain we're listening. It replies with the sound setting,
   // and a greeting wave unless the setup guide is about to open.

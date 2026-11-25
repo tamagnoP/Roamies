@@ -47,7 +47,7 @@ import { WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, voiceFor as kokoroVoiceFor 
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
-import { createPageRebuild } from './rebuild.mjs'; // Local-only build (feature 24, fix 6): the overlay page rebuilt after a quiet stretch
+import { createPageRebuild, SETTLE_HOLD_SECONDS } from './rebuild.mjs'; // Local-only build (feature 24, fix 6): the overlay page rebuilt after a quiet stretch
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 
@@ -490,7 +490,8 @@ for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.
 pageRebuild = createPageRebuild({
   minutes: () => limitsFor(HOME).pageRebuildQuietMinutes,
   quiet: () => calQuiet() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase,
-  rebuild: () => send({ type: 'rebuild_overlays' }),
+  rebuild: ({ measure }) => send({ type: 'rebuild_overlays', measure }),
+  measure: () => loadSettings(HOME).measurePageRebuild,
   log: (kind, data) => logLine(kind, data),
 });
 setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
@@ -1997,7 +1998,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'size', size: sizeNow() });
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
-    if (keep) ui({ kind: 'settle', ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
+    if (keep) ui({ kind: 'settle', hold: SETTLE_HOLD_SECONDS, ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
     else if (config.onboarded) ui({ kind: 'greet' });
     uiReady = true; offerSettingsNotice(); offerKokoroNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
@@ -2005,6 +2006,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   else if (m.type === 'snap') areaSnap();
   else if (m.type === 'write_tap') onWriteTap();
   // Local-only build (feature 22): the overlay reports that everything before this mark has finished playing.
+  else if (m.type === 'measure') pageRebuild?.measured(m); // Local-only build (feature 24, fix 6): "measurePageRebuild", numbers only
   else if (m.type === 'page_rest') pageRebuild?.page(m.on === true, Number.isFinite(m.keep?.spin) ? { spin: m.keep.spin } : null); // Local-only build (feature 24, fix 6)
   else if (m.type === 'speech_mark') { const done = played.get(m.mark); played.delete(m.mark); done?.(); }
   else if (m.type === 'auto_listen') {

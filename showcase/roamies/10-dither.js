@@ -555,6 +555,9 @@
         // Local-only build (feature 24, fix 6): the turn of JARVIS's globe, so a new page shows it as the old one did.
         get spin() { return jst.spin; },
         set spin(v) { if (Number.isFinite(v)) jst.spin = v; },
+        // Local-only build (feature 24, fix 6): straight onto (x, y), body, tail and hands together, with no glide (a new
+        // page correcting its home spot in its first seconds).
+        teleport: (x, y) => teleport(x, y),
         // From the cursor form's arrow tip to the body point (the pen draws with the tip), and the size the user picked.
         get tip() { return [AX * P, AY * P]; },
         get userForm() { return userForm; },
@@ -598,6 +601,8 @@
         press: (x, y) => plug?.press?.(x, y),
         wheel: (dy) => plug?.wheel?.(dy),
         get form() { return form; },
+        // Local-only build (feature 24, fix 6): the body's centre as drawn, with the offset of the gesture it is making.
+        get drawnAt() { return [m.x + ox, m.y + oy]; },
         // The user's size. While a drawing holds it as its cursor, it changes back to this one when it's let go.
         setForm(f) { userForm = ['small', 'cursor'].includes(f) ? f : 'default'; if (!plug?.ghost?.()) swapForm(userForm); },
         ghost: () => !!plug?.ghost?.(),

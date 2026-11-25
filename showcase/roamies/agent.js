@@ -140,9 +140,31 @@
     // it is cursor-sized). away: dragged off home, until it next goes back. dismissed: sent away with the summon
     // key, until it's next shown. calm: seconds it has been still at rest. look: its gaze easing back to straight ahead.
     // quiet (feature 24, fix 6): the next time it comes on screen by itself, it is there at once, without an entrance.
-    const den = { on: false, at: 'bottom-left', r: 0, away: false, intro: false, dismissed: false, gone: 0, calm: 0, look: [0, 0], was: false, quiet: false };
+    // hold, holdUntil (feature 24, fix 6): for hold seconds after a new page has settled (the page's clock, which runs
+    // while the frame loop is stopped), a change of the home spot puts it there at once instead of letting it glide. was: what the home spot was last worked out from, and where.
+    const den = { on: false, at: 'bottom-left', r: 0, away: false, intro: false, dismissed: false, gone: 0, calm: 0, look: [0, 0], was: false, quiet: false, hold: 3, holdUntil: -1, spotWas: null };
     const homing = () => den.on && !!R.homeSpot && k.userForm !== 'cursor';
-    const homeSpot = () => R.homeSpot(den.at, bounds(), den.r || k.R, R.origin);
+    // Local-only build (feature 24, fix 6): each change of the home spot is measured with its cause (measure.js).
+    const homeSpot = () => {
+      const r = den.r || k.R, o = R.origin ?? { x: 0, y: 0 }, at = typeof den.at === 'string' ? den.at : `${den.at?.x},${den.at?.y}`;
+      const p = R.homeSpot(den.at, bounds(), r, o);
+      const now0 = { x: p[0], y: p[1], w: W, h: H, top: SAFE.top, bottom: SAFE.bottom, left: SAFE.left, right: SAFE.right, radius: r, ox: o.x, oy: o.y, at };
+      const was = den.spotWas;
+      if (R.measure?.on && (!was || was.x !== p[0] || was.y !== p[1])) {
+        const cause = was ? ['w', 'h', 'top', 'bottom', 'left', 'right', 'radius', 'ox', 'oy', 'at'].filter((n) => was[n] !== now0[n]).map((n) => ({ w: 'width', h: 'height', at: 'setting' })[n] ?? n).join('+') || 'none' : 'first';
+        R.measure.row('home', was?.x ?? null, was?.y ?? null, p[0], p[1], cause, r, W, H, SAFE.top, SAFE.bottom);
+      }
+      den.spotWas = now0;
+      return p;
+    };
+    // The newest size, edges and radius, before the first frame has had them (a new page's settle comes straight
+    // after its settings).
+    let envNow = null;
+    const fresh = () => {
+      const e = envNow ?? R.tiles?.find((t) => t.creature.agent)?.env;
+      if (e) { W = e.w; H = e.h; SAFE = e.safe ?? R.safe; }
+      if (k.form === k.userForm) den.r = k.R;
+    };
 
     // Station: the sidekick keeps a home spot and idles around it. When the cursor works nearby it
     // scoots to the closest spot that's clear of the cursor; dropping it somewhere makes that home.
@@ -351,6 +373,14 @@
       const p = pickSpot(cx, cy, station.x, station.y);
       setStation(p[0], p[1]);
       return p;
+    };
+    // Local-only build (feature 24, fix 6): a new page taking over: on its final home spot at once, worked out from the
+    // newest size, edges and radius, and held there for den.hold seconds (update, below).
+    const settleNow = () => {
+      fresh();
+      const [x, y] = spot();
+      k.appear(null, x, y, true); den.quiet = false; den.holdUntil = performance.now() + den.hold * 1000;
+      R.measure?.row('place', x, y, 'settle');
     };
     const ensureShown = () => {
       den.dismissed = false; R.wake?.(); // Local-only build: something to do, so the frame loop runs again (core.js)
@@ -963,12 +993,13 @@
       // A page made to take over from one where it was resting: it is at home at once, without an entrance or a
       // sound, with JARVIS's globe turned as it was (keep.spin).
       get keep() { return { spin: k.spin }; },
+      // hold: the seconds after this in which a change of the home spot puts it there at once (the sidecar's).
       settle: (keep) => {
         R.wake?.();
         if (Number.isFinite(keep?.spin)) k.spin = keep.spin;
+        if (Number.isFinite(keep?.hold) && keep.hold >= 0) den.hold = keep.hold;
         if (!homing() || visible() || den.dismissed) { den.quiet = true; return; }
-        const [x, y] = spot();
-        k.appear(null, x, y, true); den.quiet = false;
+        settleNow();
       },
       setAuto: (on, idle) => { presence.auto = !!on; if (idle) presence.idle = idle; presence.lastActive = now; },
       get visible() { return visible(); },
@@ -1149,7 +1180,7 @@
     const self = {
       ...plugin,
       update: (dt, env) => {
-        now += dt; W = env.w; H = env.h; SAFE = env.safe ?? R.safe;
+        now += dt; W = env.w; H = env.h; SAFE = env.safe ?? R.safe; envNow = env;
         pen.reduced = !!env.reduced;
         // Local-only build: the home position.
         if (k.form === k.userForm) den.r = k.R;
@@ -1177,7 +1208,7 @@
         // Local-only build: at home it's on screen all the time. It never leaves for being idle, and comes (back) on
         // by itself: at the start, and after the overlay has changed screens.
         den.gone = hm && k.presence === 'hidden' && !den.dismissed ? den.gone + dt : 0;
-        if (den.gone > 0.4) { den.gone = 0; const [x, y] = spot(); k.appear(den.quiet ? null : entrance(), x, y, den.quiet); den.quiet = false; }
+        if (den.gone > 0.4) { den.gone = 0; if (den.quiet) settleNow(); else { const [x, y] = spot(); k.appear(entrance(), x, y); } }
         if (presence.auto && !hm) {
           const hover = env.mouse?.active && Math.hypot(env.mouse.x - m.x, env.mouse.y - m.y) < k.R * 1.5;
           const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;
@@ -1233,8 +1264,10 @@
             const [hx, hy] = homeSpot();
             if (station.x !== hx || station.y !== hy || station.byCursor) setStation(hx, hy);
             const far = Math.hypot(m.x - hx, m.y - hy);
+            // Feature 24, fix 6: a new page's first seconds: straight there, however near or far.
+            if (performance.now() < den.holdUntil && far > 0.5) { k.teleport(hx, hy); R.measure?.row('place', hx, hy, 'at_once'); }
             // Far off: the quick trip upstream uses to cross the screen, which ends near the spot. The last few px: a plain glide.
-            if (far > k.R * 0.4) { m.goTo(hx, hy); station.moving = true; station.rush = far > k.R * 6; station.flee = 0; }
+            else if (far > k.R * 0.4) { m.goTo(hx, hy); station.moving = true; station.rush = far > k.R * 6; station.flee = 0; }
             else if (far > 6 && m.mode !== 'go') m.goTo(hx, hy);
           }
           if (station.moving && Math.hypot(m.x - station.x, m.y - station.y) < k.R * 0.4) { station.moving = station.rush = false; m.mode = 'rest'; m.rest = 0.6; }

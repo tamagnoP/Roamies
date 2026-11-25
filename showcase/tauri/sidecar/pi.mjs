@@ -17,6 +17,7 @@
 // While pi is working, Roamies' other tools are refused (gateTools): it can talk, keep the to-do list, or stop pi.
 import { CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, NEW_WORDS, NO_WORDS, SECOND_WORDS, THAT_WORDS, Unanswered, YES_WORDS, firstButton, heardLine, heardShape, only, plain, unfilled } from './answers.mjs';
 import { WAKE_BEFORE_BRIEFING_MINUTES } from './kokorovoice.mjs'; // feature 24: shown in settings.default.json
+import { MEASURE_SECONDS, SETTLE_HOLD_SECONDS } from './rebuild.mjs'; // feature 24, fix 6: shown in settings.default.json
 import { CHFLAGS, EXTENSION, PS, PS_ARGS, RECORD, START_SLACK, endedNotice, offNotice, prepareLeftovers } from './leftovers.mjs'; // feature 24
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -328,7 +329,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -379,6 +380,7 @@ const CLEAN = {
   autoListenQuestions: when((v) => typeof v === 'boolean'),
   closingReply: when(full),
   speakNotices: when((v) => typeof v === 'boolean'),
+  measurePageRebuild: when((v) => typeof v === 'boolean'),
   voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
   kokoro: when(isObj),
   persona: when(isObj),
@@ -490,7 +492,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -1096,6 +1098,7 @@ export function codeReference() {
     pendingQuestions: { keptIn: PATHS.state, kinds: ['handoff', 'project', 'start', 'overlap', 'plan', 'sort', 'deleted', 'day', 'same', 'near', 'adopt', 'offer'], onceEach: 'The same question is pending once: asked again, the new one takes the old one\'s place. An answer clears every copy.', sameQuestion: { handoff: 'the same prompt, for the same folder, in the same mode', project: 'the same project', start: 'there is only one', overlap: 'the same to-do', plan: 'the same day', sort: 'there is only one', deleted: 'the same to-do', day: 'the same block: the same to-do, or the same title when it has no to-do yet', same: 'the same to-do that is already booked', near: 'the same title, asked about the same to-do', adopt: 'there is only one', offer: 'the same to-do' } },
     dontSendWords: [...DONT_WORDS],
     spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open', betweenTwoDays: 'a question between two days ("next friday") is answered by the day of the month ("the 20th", "Friday the twentieth"), by "the first one" or "the later one", or by a no word for neither', moveOrSecond: { move: [...MOVE_WORDS], second: [...SECOND_WORDS], rule: 'a block asked for by the title of an open to-do that already has a block: these phrases, alone, say whether it moves or a second to-do is made; a no word changes nothing' }, thatOrNew: { that: [...THAT_WORDS], new: [...NEW_WORDS], rule: 'a block asked for by a title that holds the title of an open to-do, or is held by it, as whole words: these phrases, alone, say whether it is that to-do or a new task; a no word changes nothing' }, titleMatch: 'a title is matched with an open to-do ignoring capitals, the spaces around it and a leading "the". A title that is not the same but holds an open to-do\'s title as whole words, or is held by it, is asked about; titles of fewer than two words never match that way' },
+    pageRebuild: { settleHoldSeconds: SETTLE_HOLD_SECONDS, settle: 'the new page puts the character on its home spot at once, with no entrance and no glide; for settleHoldSeconds after that, a change of the home spot moves it there at once too', oldWindowsGo: 'once the new page reports that it has drawn the character, or 10 seconds after it has its settings if it never does', measureSeconds: MEASURE_SECONDS, measured: 'with measurePageRebuild on: from the rebuild until measureSeconds after the old windows have gone, both windows\' position, size and visibility, their events (created, moved, resized, focus, close, destroyed), the character\'s drawn position in every frame on both pages, the page\'s edges and size, and every change of the home spot with its cause; numbers only, in the activity log (~/.gg/sidekick/logs) as rebuild_measure' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },
     paths: { folder: dir, settings: PATHS.settings, reference: PATHS.reference, state: PATHS.state, records: `${PATHS.log}/`, defaultProject: `${PATHS.workspace}/`, longPrompt: PATHS.pending },
   };

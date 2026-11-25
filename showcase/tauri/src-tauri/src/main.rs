@@ -98,9 +98,10 @@ fn to_sidecar(app: &AppHandle, msg: &Value) {
 }
 
 /// Local-only build (feature 24, fix 6): the overlay page being rebuilt after a quiet stretch (the sidecar's
-/// rebuild.mjs). The new windows are made beside the old ones, which stay on screen until the new page shows the
-/// character in their place. Meanwhile what goes to the overlays is held, and handed to the new page once it has
-/// its settings (the sidecar ends them with "settle"); the old windows get nothing more. gen: the windows' generation.
+/// rebuild.mjs). The new windows are made beside the old ones, which stay on screen until the new page reports that
+/// it has drawn the character in their place (page_drawn). Meanwhile what goes to the overlays is held, and handed to
+/// the new page once it has its settings (the sidecar ends them with "settle"); the old windows get nothing more.
+/// gen: the windows' generation.
 struct Rebuild {
     held: Vec<Value>,
     gen: usize,
@@ -109,9 +110,77 @@ static REBUILD: Mutex<Option<Rebuild>> = Mutex::new(None);
 /// The old overlay windows of a rebuild, until they are closed.
 static RETIRING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// How long a new page has to take its settings before what was held goes to it anyway, and how long the old
-/// windows stay after it has (two or three frames of the new page drawing the character).
+/// windows stay after that at most, if the new page never reports that it has drawn the character.
 const REBUILD_WAIT: Duration = Duration::from_secs(10);
-const RETIRE_AFTER: Duration = Duration::from_millis(500);
+const DRAWN_WAIT: Duration = Duration::from_secs(10);
+
+/// Local-only build (feature 24, fix 6): measuring around a rebuild, when the sidecar asks for it ("measurePageRebuild").
+/// until: when it stops; secs: how long it goes on after the old windows have gone. Rows go to the sidecar, which
+/// logs them: [time (ms since 1970), event, window label, numbers...], positions and sizes in screen points.
+struct Measure {
+    until: Instant,
+    secs: u64,
+}
+static MEASURE: Mutex<Option<Measure>> = Mutex::new(None);
+
+fn measuring() -> bool {
+    MEASURE.lock().unwrap().as_ref().is_some_and(|m| Instant::now() < m.until)
+}
+
+fn epoch_ms() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
+}
+
+fn measure_rows(app: &AppHandle, rows: Vec<Value>) {
+    if measuring() && !rows.is_empty() {
+        to_sidecar(app, &json!({ "type": "measure", "src": "shell", "rows": rows }));
+    }
+}
+
+/// A window's frame in screen points, and whether it is visible: [x, y, width, height, visible].
+fn frame_of(w: &WebviewWindow) -> Option<[f64; 5]> {
+    let (p, z, s) = (w.outer_position().ok()?, w.inner_size().ok()?, w.scale_factor().ok()?);
+    let v = if w.is_visible().unwrap_or(false) { 1.0 } else { 0.0 };
+    Some([p.x as f64 / s, p.y as f64 / s, z.width as f64 / s, z.height as f64 / s, v])
+}
+
+/// While measuring: every overlay window's frame, logged when it changes (and once at the start), every 16 ms.
+fn measure_frames(app: AppHandle) {
+    thread::spawn(move || {
+        let mut last: std::collections::HashMap<String, [f64; 5]> = std::collections::HashMap::new();
+        while measuring() {
+            let mut rows = Vec::new();
+            for (label, w) in app.webview_windows() {
+                if !is_overlay(&label) {
+                    continue;
+                }
+                if let Some(f) = frame_of(&w) {
+                    if last.get(&label) != Some(&f) {
+                        rows.push(json!([epoch_ms(), "frame", label, f[0], f[1], f[2], f[3], f[4]]));
+                        last.insert(label, f);
+                    }
+                }
+            }
+            measure_rows(&app, rows);
+            thread::sleep(Duration::from_millis(16));
+        }
+    });
+}
+
+/// A window event of an overlay, as a measuring row (None: not one that is measured). scale: the window's screen's.
+fn event_row(label: &str, e: &tauri::WindowEvent, scale: f64) -> Option<Value> {
+    use tauri::WindowEvent as E;
+    let t = epoch_ms();
+    Some(match e {
+        E::Moved(p) => json!([t, "moved", label, p.x as f64 / scale, p.y as f64 / scale]),
+        E::Resized(z) => json!([t, "resized", label, z.width as f64 / scale, z.height as f64 / scale]),
+        E::Focused(f) => json!([t, "focus", label, *f]),
+        E::CloseRequested { .. } => json!([t, "close_requested", label]),
+        E::Destroyed => json!([t, "destroyed", label]),
+        E::ScaleFactorChanged { scale_factor, .. } => json!([t, "scale", label, *scale_factor]),
+        _ => return None,
+    })
+}
 
 /// What becomes of a message for the overlays while a rebuild is under way.
 #[derive(Debug, PartialEq)]
@@ -135,17 +204,34 @@ fn retiring(label: &str) -> bool {
     RETIRING.lock().unwrap().iter().any(|l| l == label)
 }
 
-/// The sidecar asks for a new overlay page. Made on the screen the character is on now.
-fn rebuild_overlays(app: &AppHandle) {
+/// The sidecar asks for a new overlay page. Made on the screen the character is on now. measure: seconds to measure
+/// for after the old windows have gone (0: none).
+fn rebuild_overlays(app: &AppHandle, measure: u64) {
     if REBUILD.lock().unwrap().is_some() {
         return;
     }
     let old: Vec<String> = app.webview_windows().into_keys().filter(|l| is_overlay(l)).collect();
     let on = SIDEKICK_OVERLAY.lock().unwrap().clone().and_then(|l| app.get_webview_window(&l)).and_then(|w| w.current_monitor().ok().flatten()).map(|m| *m.position());
     let gen = GENERATION.load(Ordering::Relaxed);
+    // Measuring: at most until the old windows have certainly gone, then measure seconds more (retire_old).
+    let longest = Duration::from_secs(measure) + REBUILD_WAIT + DRAWN_WAIT;
+    if measure > 0 {
+        *MEASURE.lock().unwrap() = Some(Measure { until: Instant::now() + longest, secs: measure });
+        let mut rows = vec![json!([epoch_ms(), "rebuild", SIDEKICK_OVERLAY.lock().unwrap().clone().unwrap_or_default()])];
+        for l in &old {
+            if let Some(w) = app.get_webview_window(l) {
+                let _ = w.eval(format!("window.__roamieMeasure&&__roamieMeasure({})", longest.as_millis()));
+                if let Some(f) = frame_of(&w) {
+                    rows.push(json!([epoch_ms(), "old", l, f[0], f[1], f[2], f[3], f[4]]));
+                }
+            }
+        }
+        measure_rows(app, rows);
+        measure_frames(app.clone());
+    }
     *RETIRING.lock().unwrap() = old;
     *REBUILD.lock().unwrap() = Some(Rebuild { held: Vec::new(), gen });
-    if make_overlays(app, on).is_err() {
+    if make_overlays(app, on, if measure > 0 { longest.as_millis() as u64 } else { 0 }).is_err() {
         REBUILD.lock().unwrap().take();
         RETIRING.lock().unwrap().clear();
         return;
@@ -162,24 +248,67 @@ fn rebuild_overlays(app: &AppHandle) {
     });
 }
 
-/// The new page has its settings (or did not take them in time): what was held goes to it, the old windows go.
+/// The new page has its settings (or did not take them in time): what was held goes to it. The old windows go once
+/// the new page reports that it has drawn the character (page_drawn), or DRAWN_WAIT from now if it never does.
 fn end_rebuild(app: &AppHandle) {
     let Some(r) = REBUILD.lock().unwrap().take() else { return };
     for m in &r.held {
         to_overlays(app, m);
     }
+    let old = RETIRING.lock().unwrap().clone();
     let app2 = app.clone();
     thread::spawn(move || {
-        thread::sleep(RETIRE_AFTER);
+        thread::sleep(DRAWN_WAIT);
         let app3 = app2.clone();
         let _ = app2.run_on_main_thread(move || {
-            for label in std::mem::take(&mut *RETIRING.lock().unwrap()) {
-                if let Some(w) = app3.get_webview_window(&label) {
-                    let _ = w.destroy();
-                }
+            if !old.is_empty() && *RETIRING.lock().unwrap() == old {
+                measure_rows(&app3, vec![json!([epoch_ms(), "drawn_late", ""])]);
+                retire_old(&app3);
             }
         });
     });
+}
+
+/// The old windows of a rebuild go. Measuring goes on for its seconds from now, in the new page too.
+fn retire_old(app: &AppHandle) {
+    let old = std::mem::take(&mut *RETIRING.lock().unwrap());
+    if old.is_empty() {
+        return;
+    }
+    let mut rows = Vec::new();
+    for label in &old {
+        if let Some(w) = app.get_webview_window(label) {
+            rows.push(json!([epoch_ms(), "retire", label]));
+            let _ = w.destroy();
+        }
+    }
+    measure_rows(app, rows);
+    let secs = MEASURE.lock().unwrap().as_mut().filter(|m| Instant::now() < m.until).map(|m| {
+        m.until = Instant::now() + Duration::from_secs(m.secs);
+        m.secs
+    });
+    if let Some(secs) = secs {
+        for (label, w) in app.webview_windows() {
+            if is_overlay(&label) {
+                let _ = w.eval(format!("window.__roamieMeasure&&__roamieMeasure({})", secs * 1000));
+            }
+        }
+    }
+}
+
+/// Local-only build (feature 24, fix 6): a page has drawn its character on screen, at (x, y) in its CSS px. During a
+/// rebuild, the new page's report (the sidekick's window, when there is one) is what lets the old windows go.
+#[tauri::command]
+fn page_drawn(app: AppHandle, window: WebviewWindow, x: f64, y: f64) {
+    let label = window.label().to_string();
+    measure_rows(&app, vec![json!([epoch_ms(), "page_drawn", label, x, y])]);
+    if retiring(&label) || REBUILD.lock().unwrap().is_some() || RETIRING.lock().unwrap().is_empty() {
+        return;
+    }
+    let sidekick = SIDEKICK_OVERLAY.lock().unwrap().clone();
+    if sidekick.is_none_or(|s| s == label) {
+        retire_old(&app);
+    }
 }
 
 fn to_overlays(app: &AppHandle, msg: &Value) {
@@ -1169,7 +1298,7 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
             w.destroy()?;
         }
     }
-    make_overlays(app, None)?;
+    make_overlays(app, None, 0)?;
     for m in &held {
         to_overlays(app, m);
     }
@@ -1177,8 +1306,8 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// The overlay windows, one per screen that has a character. on: the screen the sidekick goes on (its top-left
-/// corner), when not the first.
-fn make_overlays(app: &AppHandle, on: Option<tauri::PhysicalPosition<i32>>) -> tauri::Result<()> {
+/// corner), when not the first. measure: milliseconds the new pages measure for from their first line (0: none).
+fn make_overlays(app: &AppHandle, on: Option<tauri::PhysicalPosition<i32>>, measure: u64) -> tauri::Result<()> {
     let gen = GENERATION.fetch_add(1, Ordering::Relaxed);
     let mut monitors = app.available_monitors()?;
     if let Some(i) = on.and_then(|p| monitors.iter().position(|m| *m.position() == p)) {
@@ -1201,6 +1330,8 @@ fn make_overlays(app: &AppHandle, on: Option<tauri::PhysicalPosition<i32>>) -> t
         #[cfg(target_os = "linux")]
         let (init, size) = (format!("{init}window.ROAMIE_LINUX={:?};", linux::session().name()), tauri::LogicalSize::new(size.width, size.height - 1.0));
         let label = format!("overlay-{gen}-{i}");
+        // Local-only build (feature 24, fix 6): the page knows its window, and measures from its first line if asked.
+        let init = if measure > 0 { format!("{init}window.ROAMIE_LABEL={label:?};window.ROAMIE_MEASURE={measure};") } else { format!("{init}window.ROAMIE_LABEL={label:?};") };
         if mine.iter().any(|id| id == "\"sidekick\"") {
             *SIDEKICK_OVERLAY.lock().unwrap() = Some(label.clone());
         }
@@ -1219,6 +1350,22 @@ fn make_overlays(app: &AppHandle, on: Option<tauri::PhysicalPosition<i32>>) -> t
             .inner_size(size.width, size.height)
             .initialization_script(init)
             .build()?;
+        // Local-only build (feature 24, fix 6): measuring: the window as made, and its events.
+        if measuring() {
+            if let Some(f) = frame_of(&w) {
+                measure_rows(app, vec![json!([epoch_ms(), "created", w.label(), f[0], f[1], f[2], f[3], f[4]])]);
+            }
+        }
+        {
+            let (app2, l2) = (app.clone(), w.label().to_string());
+            w.on_window_event(move |e| {
+                if measuring() {
+                    if let Some(row) = event_row(&l2, e, scale) {
+                        measure_rows(&app2, vec![row]);
+                    }
+                }
+            });
+        }
         w.set_ignore_cursor_events(true)?;
         #[cfg(target_os = "macos")]
         full_frame_rate(&w);
@@ -1579,7 +1726,7 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
         Some("watch_clicks") => to_voice(app, &json!({ "cmd": "watch_clicks", "on": msg.get("on").and_then(Value::as_bool) == Some(true) })),
         Some("quit") => app.exit(0),
         // Local-only build (feature 24, fix 6): a new overlay page after a quiet stretch.
-        Some("rebuild_overlays") => rebuild_overlays(app),
+        Some("rebuild_overlays") => rebuild_overlays(app, msg.get("measure").and_then(Value::as_u64).unwrap_or(0).min(60)),
         Some("onboard") => {
             if let Some(m) = msg.get("msg") {
                 to_onboarding(app, m);
@@ -1698,7 +1845,7 @@ fn main() {
         .manage(TalkChord(Mutex::new(vec!["control".into(), "option".into()])))
         .manage(VoiceModel(Mutex::new(None)))
         .manage(PermGuide(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![buddy, ink_wait, set_hot, set_hit_rects, sidecar_send, set_typing, perm_status, perm_request, perm_guide, screen_check, open_settings, onboarding_finish, guide_close, panel_hide, esc_watch, relaunch, focus_guide, guide_aside, drag_window])
+        .invoke_handler(tauri::generate_handler![buddy, ink_wait, set_hot, set_hit_rects, sidecar_send, page_drawn, set_typing, perm_status, perm_request, perm_guide, screen_check, open_settings, onboarding_finish, guide_close, panel_hide, esc_watch, relaunch, focus_guide, guide_aside, drag_window])
         .on_menu_event(|app, e| match e.id.as_ref() {
             "quit" => app.exit(0),
             "restart" => spawn_sidecar(app),
@@ -1791,6 +1938,19 @@ mod tests {
             assert_eq!(rebuilding(&json!({ "kind": k })), Rebuilding::Hold, "{k}");
         }
         assert_eq!(rebuilding(&json!({})), Rebuilding::Hold);
+    }
+
+    // Local-only build (feature 24, fix 6): measuring: an overlay's window events as rows, in screen points.
+    #[test]
+    fn window_events_are_measured_in_points() {
+        use tauri::WindowEvent as E;
+        let row = |e: &E| event_row("overlay-2-0", e, 2.0).map(|r| r.as_array().unwrap()[1..].to_vec());
+        assert_eq!(row(&E::Moved(tauri::PhysicalPosition::new(0, 66))), Some(vec![json!("moved"), json!("overlay-2-0"), json!(0.0), json!(33.0)]));
+        assert_eq!(row(&E::Resized(tauri::PhysicalSize::new(2880, 1800))), Some(vec![json!("resized"), json!("overlay-2-0"), json!(1440.0), json!(900.0)]));
+        assert_eq!(row(&E::Focused(true)), Some(vec![json!("focus"), json!("overlay-2-0"), json!(true)]));
+        assert_eq!(row(&E::Destroyed), Some(vec![json!("destroyed"), json!("overlay-2-0")]));
+        assert_eq!(row(&E::ThemeChanged(tauri::Theme::Dark)), None);
+        assert!(event_row("overlay-2-0", &E::Destroyed, 2.0).unwrap()[0].as_f64().unwrap() > 1.7e12, "ms since 1970");
     }
 
     #[test]

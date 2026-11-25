@@ -250,6 +250,7 @@ setup guide is open, the bubble waits until it closes.
   "autoListenQuestions": true,
   "closingReply": "Any time.",
   "speakNotices": true,
+  "measurePageRebuild": false,
   "voiceEngine": "kokoro",
   "kokoro": { "python": "/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "mlx-community/Kokoro-82M-bf16",
               "voice": "bm_george", "lang": "b", "speed": 1.05, "cacheMB": 0, "memoryMB": 400,
@@ -336,6 +337,14 @@ setup guide is open, the bubble waits until it closes.
   block placed or dropped, a conflict resolved, a task deleted in the app) is said as well as shown when you are
   not in a spoken exchange. `false` leaves those bubbles silent there. Inside an exchange everything shown is said
   either way.
+- `measurePageRebuild`: `true` or `false` (`false` unless you set it). With `true`, each fresh page after a quiet
+  stretch (see "Where the character sits") is measured, numbers only, into the activity log
+  (`~/.gg/sidekick/logs`) as `rebuild_measure` lines: from the moment it is asked for until 6 seconds after the old
+  page has gone, both windows' position, size and visibility and their events (made, moved, resized, focus, close,
+  gone), the character's drawn position in every frame on both pages, each page's size and screen edges, the
+  messages each page gets (their kind only), and every change of the character's home spot with what changed
+  (width, height, an edge, its radius, the setting). Times are milliseconds since 1970, positions screen points or
+  the page's own pixels. Nothing else is recorded and nothing leaves the Mac.
 - `voiceEngine`: `"kokoro"` (the natural voice, see "The voice") or `"system"` (the Mac's own voice; no Python is
   started). Read when Roamies starts.
 - `kokoro`: for the natural voice. Each part that is missing or can't be used takes its default and is named in the
@@ -464,8 +473,12 @@ the pointer, followed it, and hopped out of its way; in these two sizes it now d
   card, drawing, list or field), nothing is being said or heard, no question is on screen or waiting for its answer
   in an answer window, nothing is being made, and nothing is waiting to be shown; and something was shown or
   spoken since the last time. The new page is made beside the old one, on the same display; the character appears
-  in it at home at once, with no entrance, sound or greeting, and JARVIS's globe turned as it was; the old page goes
-  half a second later. Anything for the overlay that comes meanwhile (a bubble, a notice, the listening bubble) is
+  in it at its home spot at once, with no entrance, sound or greeting, and JARVIS's globe turned as it was. The spot
+  is worked out from the page's newest size, screen edges and character size (before 2026-11-25 it could use the
+  default size's radius for one frame and then glide to the small size's spot), and for 3 seconds a change of the
+  spot moves it there at once rather than gliding. The old page goes once the new page reports that it has drawn
+  the character on screen (and where), or 10 seconds after the new page has its settings if it never does; before
+  2026-11-25 it went half a second after the settings. Anything for the overlay that comes meanwhile (a bubble, a notice, the listening bubble) is
   held by the app and shown on the new page once it is ready; if the new page doesn't report ready within 10
   seconds, it is handed over then. 0 switches this off. The log has `page_rebuild` and `page_rebuilt` (with the
   milliseconds it took), sizes only. A question kept in `state.json` for later does not hold it off: it is asked
@@ -984,7 +997,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/rebuild.mjs` (new), `sidekick.mjs`, `showcase/roamies/host.js`, `agent.js`,
   `10-dither.js`, `showcase/tauri/src-tauri/src/main.rs`: the overlay page made afresh after a quiet stretch; the
   page says when it is at rest at home; the shell makes the new page beside the old one and holds what comes for it
-  meanwhile; the character comes on in it at once, without an entrance (feature 24).
+  meanwhile; the character comes on in it at once, without an entrance (feature 24). `core.js`, `measure.js` (new),
+  `desktop.html`: the new page reports when it has drawn the character, and the old page goes then; settle uses the
+  newest size and holds the spot for its first seconds; the `measurePageRebuild` measuring (feature 24, 2026-11-25).
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
   with buttons stays on screen as it is while you talk; reports marks; shows the "Heard" line.
 - `showcase/desktop.html`: loads `home.js`.

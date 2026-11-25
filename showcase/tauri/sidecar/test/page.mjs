@@ -55,7 +55,7 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
   const ctx = vm.createContext(win);
   const run = (f) => vm.runInContext(fs.readFileSync(new URL(`roamies/${f}`, ROOT), 'utf8'), ctx, { filename: f });
   // desktop.html's order, less what only draws cards, sounds and drawings
-  for (const f of ['core.js', 'glass.js', 'home.js', 'agent.js', 'agent-tools.js', 'jarvis.js', 'people.js', '10-dither.js', '12-sidekick.js']) run(f);
+  for (const f of ['core.js', 'measure.js', 'glass.js', 'home.js', 'agent.js', 'agent-tools.js', 'jarvis.js', 'people.js', '10-dither.js', '12-sidekick.js']) run(f);
   win.Roamie.setSafe(safe);
   win.Roamie.bootDesktop(canvas);
   run('host.js');
