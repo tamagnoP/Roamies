@@ -673,6 +673,11 @@ These are the only files Roamies touches itself. In code, a title is only ever a
 existing note is never written over, and nothing is changed or deleted. What it reads from your notes to answer you
 becomes part of the conversation with your AI provider.
 
+Everything Roamies writes in the vault goes through one writer in `notes.mjs` (`createVault`, feature 18). It can
+only make a file that isn't there or add to the end of one that is, on a line of its own. It never writes over,
+renames or deletes anything. It refuses a path with an empty part, a part that starts with a dot, or `..`. It also
+refuses a folder or file that is a link, and anything that would land outside the vault.
+
 ## To-dos in Super Productivity
 
 Roamies' to-do list is mirrored in Super Productivity, through that app's local REST API (Settings > Misc > Enable

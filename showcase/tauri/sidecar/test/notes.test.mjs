@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createNotes, noteName } from '../notes.mjs';
+import { VaultRefused, createNotes, createVault, noteName } from '../notes.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-home-')));
 const vault = path.join(home, 'Documents', 'roamies-vault');
@@ -60,6 +60,43 @@ fs.writeFileSync(path.join(home, 'outside.txt'), 'private');
 fs.symlinkSync(path.join(home, 'outside.txt'), path.join(vault, 'Linked.md'));
 await assert.rejects(tool('write_note').execute({ title: 'Linked', content: 'x', append: true }), /already in the vault/);
 assert.equal(fs.readFileSync(path.join(home, 'outside.txt'), 'utf8'), 'private');
+
+// Feature 18: the one writer of the vault. It makes a file or adds to its end, and nothing else.
+const box = createVault({ home, userName: 'Tiago' });
+assert.equal(box.create('Daily/2026-11-26.md', '# Thursday\n'), true, 'its folder is made');
+assert.equal(box.create('Daily/2026-11-26.md', 'over it'), false, 'a file that is there is never written over');
+assert.equal(read('Daily/2026-11-26.md'), '# Thursday\n');
+assert.equal(box.append('Daily/2026-11-26.md', '- 10:00 Done: x\n'), true);
+fs.appendFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'typed by hand, no newline');
+assert.equal(box.append('Daily/2026-11-26.md', '- 11:00 Done: y\n'), true);
+assert.equal(read('Daily/2026-11-26.md'), '# Thursday\n- 10:00 Done: x\ntyped by hand, no newline\n- 11:00 Done: y\n', 'what was typed by hand stays, and an added line starts on a line of its own');
+assert.equal(box.append('Daily/missing.md', 'x'), false, 'adding to a file that is not there makes nothing');
+assert.ok(!fs.existsSync(path.join(vault, 'Daily', 'missing.md')));
+assert.equal(box.read('Daily/2026-11-26.md').startsWith('# Thursday'), true); assert.equal(box.read('Daily/none.md'), null);
+for (const bad of ['../escape.md', 'Daily/../../escape.md', '.obsidian/x.md', 'Daily/.hidden.md', '/etc/x.md', 'Daily//x.md', 'Daily/x.txt', 'a\\b.md']) {
+  assert.throws(() => box.create(bad, 'x'), VaultRefused, bad);
+}
+assert.ok(!fs.existsSync(path.join(home, 'escape.md')) && !fs.existsSync(path.join(home, 'Documents', 'escape.md')));
+// A folder or a file that is a link is never followed.
+fs.mkdirSync(path.join(home, 'elsewhere'));
+fs.symlinkSync(path.join(home, 'elsewhere'), path.join(vault, 'Tasks'));
+assert.throws(() => box.create('Tasks/A.md', 'x'), VaultRefused); assert.deepEqual(fs.readdirSync(path.join(home, 'elsewhere')), []);
+assert.equal(box.read('Tasks/A.md'), null);
+fs.writeFileSync(path.join(home, 'elsewhere', 'B.md'), 'private');
+fs.symlinkSync(path.join(home, 'elsewhere', 'B.md'), path.join(vault, 'Daily', 'B.md'));
+assert.throws(() => box.append('Daily/B.md', 'x'), VaultRefused); assert.equal(box.create('Daily/B.md', 'x'), false);
+assert.equal(fs.readFileSync(path.join(home, 'elsewhere', 'B.md'), 'utf8'), 'private'); assert.equal(box.read('Daily/B.md'), null);
+fs.writeFileSync(path.join(vault, 'Plain'), 'a file, not a folder');
+assert.throws(() => box.create('Plain/x.md', 'x'), VaultRefused);
+// write_note goes through it: a note in a linked folder is not added to.
+fs.mkdirSync(path.join(home, 'elsewhere', 'Sub')); fs.writeFileSync(path.join(home, 'elsewhere', 'Sub', 'Far.md'), 'far');
+fs.symlinkSync(path.join(home, 'elsewhere', 'Sub'), path.join(vault, 'Sub'));
+assert.equal(await tool('write_note').execute({ title: 'Far', content: 'x', append: true }), 'Saved the note "Far" in the vault.', 'a linked folder is not looked in: a note of its own is made');
+assert.ok(fs.existsSync(path.join(vault, 'Far.md')));
+assert.equal(fs.readFileSync(path.join(home, 'elsewhere', 'Sub', 'Far.md'), 'utf8'), 'far');
+fs.mkdirSync(path.join(vault, 'Papers', 'Deep'), { recursive: true }); fs.writeFileSync(path.join(vault, 'Papers', 'Deep', 'Inner.md'), 'inner');
+assert.equal(await tool('write_note').execute({ title: 'Inner', content: 'more', append: true }), 'Added to the note "Inner".', 'a note in a real folder is added to');
+assert.ok(read('Papers/Deep/Inner.md').endsWith('inner\n\n## 2026-11-12 14:30\n\nmore\n'));
 
 // A vault set outside the home folder is refused.
 fs.writeFileSync(path.join(home, 'Documents', 'roamies-pi', 'settings.json'), JSON.stringify({ vault: '/tmp' }));

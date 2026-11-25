@@ -27,15 +27,74 @@ const stamp = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
 const tilde = (p, home) => (p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
-export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now() } = {}) {
+/** Feature 18: the one way anything is written in the vault (notes, daily notes, task pages). A file is made, or
+ *  added to at its end; nothing is ever written over, renamed or deleted. A link is never followed, in a folder on
+ *  the way or as the file itself, and nothing is written outside the vault. rel: a path inside the vault,
+ *  "Folder/Name.md"; no part of it may be empty, start with a dot, or hold a slash. */
+export class VaultRefused extends Error {}
+export function createVault({ home = os.homedir(), userName = 'the user' } = {}) {
   /** The vault folder, made if it's missing. It has to be a real folder inside the home folder. */
-  function vault() {
+  function root() {
     const dir = loadSettings(home).vault;
     fs.mkdirSync(dir, { recursive: true });
     const real = fs.realpathSync(dir), realHome = fs.realpathSync(home);
     if (real === realHome || !real.startsWith(realHome + path.sep)) throw new Error(`The notes vault (${dir}) has to be a folder inside the home folder. ${userName} sets it as "vault" in ~/Documents/roamies-pi/settings.json.`);
     return real;
   }
+  const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+  /** The file a path means, its folders made as needed. Refused: a part that isn't a plain name, a folder or file
+   *  that is a link, a folder that is a file. */
+  function place(rel, { make = true } = {}) {
+    const parts = String(rel ?? '').split('/');
+    if (!parts.length || parts.some((p) => !p || p.startsWith('.') || /[\\\0]/.test(p)) || !/\.md$/i.test(parts.at(-1))) throw new VaultRefused(`"${rel}" isn't a note's place in the vault.`);
+    const top = root();
+    let dir = top;
+    for (const part of parts.slice(0, -1)) {
+      const next = path.join(dir, part);
+      let st = null;
+      try { st = fs.lstatSync(next); } catch { /* not there yet */ }
+      if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new VaultRefused(`"${part}" in the vault is a link or a file, so I left it alone.`);
+      if (!st) { if (!make) return null; fs.mkdirSync(next); }
+      dir = next;
+    }
+    if (!fs.realpathSync(dir).startsWith(top)) throw new VaultRefused(`"${rel}" is outside the vault.`);
+    return path.join(dir, parts.at(-1));
+  }
+  return {
+    root, place,
+    /** Makes a file that isn't there. → false when something by that name is already there (it is left alone). */
+    create(rel, text) {
+      const file = place(rel);
+      try { fs.writeFileSync(file, text, { flag: 'wx' }); return true; } catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+    },
+    /** Adds to the end of a file that is there, on a line of its own. → false when it isn't there. */
+    append(rel, text) {
+      const file = place(rel);
+      let st;
+      try { st = fs.lstatSync(file); } catch { return false; }
+      if (st.isSymbolicLink() || !st.isFile()) throw new VaultRefused(`"${rel}" is a link or a folder, so I left it alone.`);
+      const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_APPEND | (fs.constants.O_NOFOLLOW ?? 0));
+      try { fs.writeSync(fd, `${st.size && !endsWithNewline(file, st.size) ? '\n' : ''}${text}`); } finally { fs.closeSync(fd); }
+      return true;
+    },
+    /** A file's text, or null when it isn't there (or is a link). */
+    read(rel) {
+      let file;
+      try { file = place(rel, { make: false }); } catch { return null; }
+      if (!file || isLink(file)) return null;
+      try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+    },
+  };
+}
+function endsWithNewline(file, size) {
+  const fd = fs.openSync(file, 'r'), b = Buffer.alloc(1);
+  try { fs.readSync(fd, b, 0, 1, size - 1); } finally { fs.closeSync(fd); }
+  return b[0] === 10;
+}
+
+export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now() } = {}) {
+  const box = createVault({ home, userName });
+  const vault = () => box.root();
 
   /** Every note in the vault: { title, file, rel, mtime }. Folders starting with a dot (.obsidian, .trash) are skipped. */
   function all(dir) {
@@ -89,17 +148,15 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
         const there = all(dir).find((n) => n.title.toLowerCase() === name.toLowerCase());
         if (there) {
           if (!append) throw new Error(`A note called "${there.title}" already exists. Add to it with append true, or pick another title.`);
-          if (fs.lstatSync(there.file).isSymbolicLink()) throw new Error(`"${there.title}" is a link to somewhere else, so I left it alone.`);
-          const old = text(there);
-          fs.appendFileSync(there.file, `${old.endsWith('\n') || !old ? '' : '\n'}\n## ${when}\n\n${body}\n`);
+          try { box.append(path.relative(dir, there.file).split(path.sep).join('/'), `\n## ${when}\n\n${body}\n`); } catch (e) {
+            if (e instanceof VaultRefused) throw new Error(`"${there.title}" is a link to somewhere else, or in a folder that is, so I left it alone.`);
+            throw e;
+          }
           log('note_append', { chars: body.length });
           return `Added to the note "${there.title}".`;
         }
-        // 'wx': never writes over a file that appeared meanwhile.
-        try { fs.writeFileSync(path.join(dir, `${name}.md`), `---\ncreated: ${when}\n---\n\n${body}\n`, { flag: 'wx' }); } catch (e) {
-          if (e.code === 'EEXIST') throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
-          throw e;
-        }
+        // Never writes over a file that appeared meanwhile.
+        if (!box.create(`${name}.md`, `---\ncreated: ${when}\n---\n\n${body}\n`)) throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
         log('note_new', { chars: body.length });
         return `Saved the note "${name}" in the vault.`;
       },
