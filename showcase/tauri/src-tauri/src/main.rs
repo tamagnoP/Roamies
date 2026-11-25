@@ -9,6 +9,7 @@ mod pipe;
 mod sidecar;
 #[cfg(target_os = "macos")]
 mod snapshot;
+mod stand;
 mod tap;
 mod voice;
 
@@ -27,7 +28,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 
 use pipe::PipeWriter;
 use sidecar::spawn_sidecar;
-use voice::{init_hotkeys, set_esc, set_hotkey, start_voice, stop_voice, to_voice, voice_binary};
+use voice::{init_hotkeys, set_esc, set_hotkey, set_stand, start_voice, stop_voice, to_voice, voice_binary};
 
 static GENERATION: AtomicUsize = AtomicUsize::new(0);
 /// The overlay window the sidekick lives in. It moves to whichever screen the cursor is on.
@@ -1747,6 +1748,17 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
                 if mods.len() == 2 {
                     *app.state::<TalkChord>().0.lock().unwrap() = mods.clone();
                     to_voice(app, &json!({ "cmd": "chord", "mods": mods }));
+                }
+            }
+            // Local-only build (feature 33): the stand-down shortcut, and the phrase as words with its small words.
+            if let Some(st) = msg.get("stand") {
+                let words = |k: &str| st.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect::<Vec<_>>()).unwrap_or_default();
+                set_stand(words("phrase"), words("fill"));
+                if let Some(accel) = st.get("shortcut").and_then(Value::as_str) {
+                    if let Err(e) = set_hotkey(3, accel) {
+                        eprintln!("stand-down shortcut {accel}: {e}");
+                        to_sidecar(app, &json!({ "type": "keybind_error", "which": "stand", "accel": accel, "error": e }));
+                    }
                 }
             }
             // The type-to-ask pair; none sent (Wayland) switches the tap off.

@@ -49,6 +49,7 @@ import { WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, voiceFor as kokoroVoiceFor 
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
+import { createStandDown, isStandDown, standFill, standSummary, standWords } from './standdown.mjs'; // Local-only build (feature 33): stand down
 import { createPageRebuild, SETTLE_HOLD_SECONDS } from './rebuild.mjs'; // Local-only build (feature 24, fix 6): the overlay page rebuilt after a quiet stretch
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
@@ -73,8 +74,22 @@ function releaseSpeech(drop) {
 // Local-only build (feature 24, fix 6): the overlay page's rebuild after a quiet stretch (rebuild.mjs), made below.
 // What is sent to the page counts as something shown or spoken, except its settings.
 let pageRebuild = null;
-const PAGE_SETTINGS = new Set(['sound', 'size', 'home', 'look', 'greet', 'settle']);
+const PAGE_SETTINGS = new Set(['sound', 'size', 'home', 'look', 'greet', 'settle', 'stand']);
+// Local-only build (feature 33): stand down (standdown.mjs), made once the activity log is (logLine). While it lasts,
+// what is on its way to the page unasked stops here, whatever sent it: a line for a bubble is kept to be shown when it
+// ends, speech is dropped (what waits for it to finish is answered, so nothing hangs), and the rest is dropped. What
+// the owner asks for meanwhile goes through: the list, Esc, closing a bubble, showing the character.
+let stood = null;
+const STAND_PASS = new Set(['list', 'esc', 'cancel_ask', 'ask_text', 'heard', 'hands', 'summon']);
+function standCatch(msg) {
+  if (!stood?.on() || PAGE_SETTINGS.has(msg.kind) || STAND_PASS.has(msg.kind) || (msg.kind === 'speech' && msg.stop)) return false;
+  if (msg.kind === 'speech') { if (msg.mark) { const done = played.get(msg.mark); played.delete(msg.mark); done?.(); } return true; }
+  if (msg.kind === 'ask') { logLine('stand_down_leak', { kind: 'ask' }); return false; } // a question is never dropped (its answer would never come); every one is held at its source
+  if (msg.kind === 'say' && typeof msg.text === 'string' && msg.text.trim()) { stood.caught(msg.text, msg.mood); logLine('stand_down_caught', { kind: 'say', chars: msg.text.length }); }
+  return true;
+}
 const ui = (msg) => {
+  if (standCatch(msg)) return;
   if (msg.kind === 'speech') {
     if (micWindow && !msg.stop) { heldSpeech.push(msg); return; }
     if (msg.stop) { send({ type: 'onboard', msg }); return send({ type: 'ui', msg }); }
@@ -224,7 +239,7 @@ const validTalk = (t) => Array.isArray(t) && t.length === 2 && new Set(t).size =
 // Accelerators look like "Control+Alt+KeyS": at least one of Control/Alt/Command, then one key code.
 const validSummon = (a) => typeof a === 'string' && /^((Control|Alt|Shift|Command)\+)+[A-Za-z0-9]+$/.test(a) && /(Control|Alt|Command)\+/.test(a);
 // The shell watches for the type-to-ask tap itself; on Wayland it can't see the keys, so it gets no pair.
-const sendKeys = () => send({ type: 'keybinds', ...keys(), write: HOTKEYS_OK ? keys().write : undefined });
+const sendKeys = () => { const stand = standKeys(); standKeysSent = JSON.stringify(stand); send({ type: 'keybinds', ...keys(), write: HOTKEYS_OK ? keys().write : undefined, stand }); }; // Local-only build (feature 33): stand: the stand-down shortcut and phrase
 // How to talk, in a sentence: hold the keys, or on Wayland (where no app can watch the keyboard) press the shortcut
 // they bound to `roamies --talk`, which starts listening and sends on a second press or a pause.
 const talkHow = () => (HOTKEYS_OK ? `Hold ${talkWords().replace('+', ' and ')}` : 'Press your talk shortcut');
@@ -356,6 +371,9 @@ const pi = createPi({
   // pi has finished. With spoken replies on, Roamies first says the gist in its own voice (a short turn of its own);
   // then pi's full reply goes on screen, word for word, and stays there. In text mode the full reply is the answer.
   onDone: async (r) => {
+    // Local-only build (feature 33): stopped by stand down: said in the line given when it ends, not now.
+    if (r.status === 'stopped' && piStood) { piStood = false; stood.add({ pi: true, processes: r.ended ?? 0 }); return; }
+    if (stood?.on()) { stood.caught(r.shown, r.status === 'error' ? 'concerned' : 'happy'); return; } // finished as it began: shown when it ends
     if (r.status === 'stopped') { say(r.shown); voiceLine(r.shown); return; }
     await tellResult(r, {
       voiceOn: VOICE_ON(),
@@ -385,9 +403,9 @@ function kokoroNotice(text) {
   kokoroSaid = heldNotice(text, (t) => { say(t, 'concerned'); if (noticesOn()) voiceLine(forVoice(t)); });
   offerKokoroNotice();
 }
-const offerKokoroNotice = () => kokoroSaid(uiReady && !onboarding && (!!config.onboarded || guideClosed));
+const offerKokoroNotice = () => kokoroSaid(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on()); // feature 33: held while stood down
 const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('settings_notice', { chars: text.length }); say(text, 'concerned'); });
-const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
+const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on());
 if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems() }); // Local-only build (feature 18): the to-dos, for their pages
@@ -470,7 +488,10 @@ async function dayReview(by) {
 // the other lines stay silent there. Either way they wait for the same quiet moment.
 const noticesOn = () => { try { return loadSettings(HOME).speakNotices; } catch { return false; } };
 let voiceState = 'idle', lineUntil = 0, calOffered = false, adoptOffered = false, calAsking = false;
-const calQuiet = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!config.onboarded || guideClosed) && !loggingIn, busy, queued, asking: pending.size > 0 || calAsking, voice: voiceState, speakingUntil: lineUntil });
+const calQuietBase = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!config.onboarded || guideClosed) && !loggingIn, busy, queued, asking: pending.size > 0 || calAsking, voice: voiceState, speakingUntil: lineUntil });
+// Local-only build (feature 33): stood down is never a quiet moment. What waits for one (calendar lines, pending and
+// daily questions, the review) waits on; the page rebuild doesn't wait for it (calQuietBase).
+const calQuiet = () => calQuietBase() && !stood?.on();
 async function calShow() {
   try {
     if (!calQuiet()) return;
@@ -528,11 +549,11 @@ const flow = createFlow({
   speak: (text) => lineDone(text),
   // closing: the reply to "thanks" carries the form of address whatever the clock says
   announce: (text, { closing = false } = {}) => { addressClock.allow(closing); try { say(text, 'happy'); return lineDone(forVoice(text)); } finally { addressClock.allow(false); } },
-  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); } }, // feature 24: the natural voice wakes for the answer
+  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding && !stood?.on()) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); } }, // feature 24: the natural voice wakes for the answer
   cancel: () => send({ type: 'listen_cancel' }),
   bubbles: () => [pi, answers],
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),
-  onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key'); },
+  onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key' || by === 'stand'); }, // feature 33: stood down, what was held is dropped
   actions: () => cal.kept(), // blocks kept until Super Productivity is open: listed by show_pending and the morning briefing
   afterExchange: { due: () => daily.morningDue(), run: () => daily.ask('morning', dailyIO) }, // feature 18: no morning briefing: the first exchange's end asks
   log: (kind, data) => logLine(kind, data),
@@ -544,13 +565,105 @@ for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.
 // The setting is read at each check.
 pageRebuild = createPageRebuild({
   minutes: () => limitsFor(HOME).pageRebuildQuietMinutes,
-  quiet: () => calQuiet() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase,
+  quiet: () => calQuietBase() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase,
   rebuild: ({ measure }) => send({ type: 'rebuild_overlays', measure }),
   measure: () => loadSettings(HOME).measurePageRebuild,
   log: (kind, data) => logLine(kind, data),
 });
 setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
 tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools, ...handover.tools])); // Local-only build: cal, flow, the open items (feature 18)
+
+// ---------- local-only build (feature 33): stand down (standdown.mjs) ----------
+// The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
+// microphone. Everything that is going on stops here; what would be said or shown unasked waits (calQuiet, the
+// briefings, the reminders, standCatch) until the owner's next request, typed or spoken, or the day turn.
+const STAND_DEFAULT = { phrase: 'stand down', shortcut: 'Control+Alt+Period' };
+function standSettings() { try { const s = loadSettings(HOME); return { ...s.standDown, persona: s.persona }; } catch { return { ...STAND_DEFAULT, endsAtDayTurn: true, persona: personaNow() }; } }
+/** [the phrase's words, the small words allowed around it]. */
+function standPhrase() { const s = standSettings(); return [standWords(s.phrase), standFill(s.persona)]; }
+/** What the shell is given: the shortcut, and the phrase as words, with the small words. */
+function standKeys() { const s = standSettings(), [phrase, fill] = standPhrase(); return { shortcut: s.shortcut, phrase, fill }; }
+let standKeysSent = '';
+let piStood = false; // pi was stopped by stand down: its "Stopped pi." waits for the line said at the end
+function standDownNow(by) {
+  if (onboarding || !stood) return;
+  const what = { speech: !!turnVoice || Date.now() < lineUntil, request: busy || queued > 0, pi: pi.busy(), window: !!flow.window() || micWindow, bubbles: pending.size > 0 || answers.open() || pi.bubble() };
+  stood.start(by, what); // logged once; said again while it lasts, everything is stopped again and nothing else
+  ui({ kind: 'stand', on: true, clear: true }); // the shell has told the page already; this is for the final words (onSpoken)
+  autoTurn = null; send({ type: 'listen_cancel' });
+  // Questions first: one closed now is unanswered, so it is kept (flow.mjs) before the request it belongs to ends,
+  // which would otherwise take it down as no answer at all.
+  const kept = flow.standDown();
+  if (kept) stood.add({ questions: kept });
+  micWindow = false;
+  for (const m of heldSpeech.splice(0)) if (m.mark) { const done = played.get(m.mark); played.delete(m.mark); done?.(); }
+  for (const [id, resolve] of [...pending]) { pending.delete(id); ui({ kind: 'cancel_ask', id }); resolve(null); }
+  if (barAsk) { barAsk.abort(); barAsk = null; }
+  interruptQuietly();
+  if (intro) endIntro();
+  stopShowcase();
+  if (pi.busy()) { piStood = true; pi.stop(); }
+  speech.stop();
+  ink.clear();
+  trail.steps = []; trail.open.clear(); trail.errors = [];
+  menu();
+}
+/** It ends (by: 'voice' | 'typed' | 'day'). What it held is given from here under the usual rules; the calendar lines
+ *  whose block has ended by now are dropped and counted. */
+function standUp(by) {
+  if (!stood?.on()) return;
+  const due = openCommitments().filter((c) => c.due && c.due <= Date.now() && !c.remindedAt).length;
+  stood.end(by, cal.heldCount() + (stood.state()?.caught.length ?? 0) + due);
+  ui({ kind: 'stand', on: false });
+  cal.dropPassed().then((n) => { if (n) stood.add({ lines: n }); }, (e) => console.error('stand down', e));
+  offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice();
+  menu();
+}
+/** Stood down at "calendar.reviewAt": the review is written in the daily note, and its line waits. */
+function standReview() {
+  if (reviewing || !daily.reviewDue()) return;
+  const r = dailyDo('review', () => daily.review({ by: 'time' }));
+  const key = dailyDo('review', () => daily.today().key);
+  if (r && key) stood.reviewed(key, r.line);
+}
+/** Once it has ended and things are quiet: one line worded here for what happened meanwhile, with any line caught on
+ *  its way to the screen; said too when "speakNotices" is on, unless it ended at the day turn. Then the review written
+ *  meanwhile, if its day is still today: its line, and its questions. → whether there was anything. */
+let standGiving = false;
+async function standGive() {
+  if (standGiving || !stood || stood.on() || !calQuiet()) return false;
+  const g = stood.give();
+  if (!g) return false;
+  standGiving = true;
+  try {
+    stood.given();
+    const today = dailyDo('review', () => daily.today().key);
+    const sameDay = !!g.review && g.review.key === today;
+    const line = standSummary({ ...g.counts, review: !!g.review && !sameDay });
+    const shown = [line, ...g.caught.map((c) => c.text)].filter(Boolean).join('\n');
+    const said = !!line && !g.quiet && noticesOn();
+    logLine('stand_down_said', { chars: line.length, caught: g.caught.length, said, review: sameDay });
+    if (shown) { say(shown, g.caught.some((c) => c.mood === 'concerned') ? 'concerned' : 'happy'); await lineDone(said ? forVoice(line) : null); }
+    if (sameDay) {
+      reviewing = true;
+      try {
+        say(g.review.line, 'happy'); await lineDone(forVoice(g.review.line));
+        await dailyAsk('review');
+        await inSeries('items', () => handover.askStale(dailyIO));
+      } finally { reviewing = false; }
+    }
+  } finally { standGiving = false; }
+  return true;
+}
+// The shortcut refused (another app, or another Roamies shortcut, has it): said once, when it can be shown.
+let standKeySaid = () => false;
+function standKeyNotice(m) {
+  logLine('stand_down_key_failed', {});
+  const accel = String(m.accel ?? '').slice(0, 60), phrase = standSettings().phrase;
+  standKeySaid = heldNotice(`I couldn't set the stand-down shortcut, ${accel}: another app or another Roamies shortcut has it. Change "standDown.shortcut" in settings.json. Saying "${phrase}" still works.`, (t) => say(t, 'concerned'));
+  offerStandKeyNotice();
+}
+const offerStandKeyNotice = () => standKeySaid(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on());
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -971,6 +1084,7 @@ const logLine = (kind, data) => {
   const line = `${now.toISOString()} ${kind} ${typeof data === 'string' ? data : JSON.stringify(data)}\n`;
   fs.mkdir(LOG_DIR, { recursive: true, mode: 0o700 }).then(() => fs.appendFile(path.join(LOG_DIR, `${day}.log`), line, { mode: 0o600 })).catch(() => {});
 };
+stood = createStandDown({ home: HOME, log: (kind, data) => logLine(kind, data) }); // Local-only build (feature 33)
 async function pruneLogs() {
   const cutoff = Date.now() - 7 * 864e5;
   for (const f of await fs.readdir(LOG_DIR).catch(() => [])) {
@@ -1100,6 +1214,9 @@ async function dayTurn(byVoice) {
   return true;
 }
 async function prompt(text, image = null, note = '', byVoice = false) {
+  // Local-only build (feature 33): a request still waiting when stand down began is not made (the owner's own next
+  // request ends stand down before it is queued).
+  if (stood?.on()) { logLine('stand_down_dropped', { what: 'request' }); return; }
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
   ownWords = intro || text.startsWith('(') ? '' : text; // Local-only build (feature 18): for item_dealt_with
   let problem = await readyAgent();
@@ -1518,7 +1635,7 @@ async function toggleItem(id) {
 // Finished items stay struck through for the rest of the day; at midnight they're deleted.
 async function midnightClean() {
   const n = await clearFinished().catch(() => 0);
-  if (n) { menu(); showList(); }
+  if (n) { menu(); if (!stood?.on()) showList(); } // feature 33: not shown while stood down
   pruneLogs(); pruneUsage();
   const next = new Date(); next.setHours(24, 0, 5, 0);
   setTimeout(midnightClean, Math.min(next.getTime() - Date.now(), 6 * 3600_000));
@@ -1777,7 +1894,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   const ctl = barAsk = new AbortController();
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
-  if (text?.trim()) enqueue(text.trim(), { interrupt });
+  if (text?.trim()) { standUp('typed'); enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down
 }
 function onWriteTap() {
   if (onboarding) return;
@@ -1874,6 +1991,7 @@ async function areaSnap() {
     if (!snap) return; // already sent by voice
     if (q === null) { snap = null; return; } // Escape: drop it
     const s = snap; snap = null;
+    standUp('typed'); // feature 33
     enqueue(q.trim() || 'What is this? Explain it simply.', { image: s.image });
   } catch (e) {
     say(String(e?.message ?? e).slice(0, 140), 'concerned');
@@ -1882,6 +2000,10 @@ async function areaSnap() {
 let snapping = false;
 // Words said while ⌃⌥ was held, maybe with an area marked by drawing on the screen at the same time.
 async function onSpoken(text, area, window = null) {
+  // Local-only build (feature 33): the stand-down phrase said alone. The shell acts on it first (stand.rs) and these
+  // words never come; this is in case they do. Anything else said with the talk keys is a request, which ends it.
+  if (isStandDown(text, ...standPhrase())) { ui({ kind: 'heard' }); standDownNow('phrase'); return; }
+  if (window == null) standUp('voice');
   // Local-only build (feature 22). Heard in an answer window (the helper marks those words with the window's id):
   // flow.mjs judges them. Only the answer to the model's own question comes back as a request; everything else was
   // an answer to the open question or is dropped there, and never goes further.
@@ -2095,10 +2217,13 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'size', size: sizeNow() });
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
+    if (stood?.on()) ui({ kind: 'stand', on: true }); // Local-only build (feature 33): a new page (a rebuild, a restart) keeps the stood-down look
     if (keep) ui({ kind: 'settle', hold: SETTLE_HOLD_SECONDS, ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
-    else if (config.onboarded) ui({ kind: 'greet' });
-    uiReady = true; offerSettingsNotice(); offerKokoroNotice(); // Local-only build: what settings.json lacks, said once per start-up
-  } else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
+    else if (config.onboarded && !stood?.on()) ui({ kind: 'greet' });
+    uiReady = true; offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice(); // Local-only build: what settings.json lacks, said once per start-up
+  } else if (m.type === 'stand_down') standDownNow(m.by === 'key' ? 'key' : 'phrase'); // Local-only build (feature 33): from the shell
+  else if (m.type === 'keybind_error' && m.which === 'stand') standKeyNotice(m);
+  else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
   else if (m.type?.startsWith('voice')) onVoice(m);
   else if (m.type === 'snap') areaSnap();
   else if (m.type === 'write_tap') onWriteTap();
@@ -2108,7 +2233,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   else if (m.type === 'speech_mark') { const done = played.get(m.mark); played.delete(m.mark); done?.(); }
   else if (m.type === 'auto_listen') {
     // Still the latest reply, nothing running since, and still switched on: listen once, hands-free.
-    if (m.turn !== autoTurn || busy || !autoListenOn()) return;
+    if (m.turn !== autoTurn || busy || !autoListenOn() || stood?.on()) return;
     autoTurn = null;
     logLine('auto_listen', { turn: m.turn });
     send({ type: 'listen' });
@@ -2162,7 +2287,7 @@ if (config.onboarded) warmUp();
 // for a to-do the owner gave Roamies and for one that came from Super Productivity. It waits while a reply is being
 // made or spoken or the owner is talking.
 async function remindTick() {
-  if (busy || queued || loggingIn || onboarding || voiceState !== 'idle' || Date.now() < lineUntil) { reminderRetry(); return; }
+  if (busy || queued || loggingIn || onboarding || voiceState !== 'idle' || Date.now() < lineUntil || stood?.on()) { reminderRetry(); return; } // feature 33: given late, never dropped
   const due = await takeDueReminders();
   if (!due.length) return;
   menu(); showList({ flash: due[0].id, seconds: 6 });
@@ -2211,6 +2336,9 @@ if (!config.onboarded) send({ type: 'onboarding' });
 // Local-only build: the briefings set up in ~/Documents/roamies-pi/settings.json ("briefings"). Checked once a minute;
 // given when nothing else is going on, once a day each.
 setInterval(() => {
+  // Local-only build (feature 33): stood down, no briefing (one whose window passes meanwhile is skipped, as before);
+  // the day's review is written in the note at its time, and its line waits.
+  if (stood?.on()) { standReview(); return; }
   // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken shortly before a briefing.
   try { if (pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
   try {
@@ -2236,7 +2364,10 @@ cal.startup().catch((e) => console.error('calendar', e));
   try { wait = loadSettings(HOME).calendar.syncSeconds; } catch { /* the default */ }
   setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(calTick); }, wait * 1000);
 })();
-setInterval(calShow, 3000);
+setInterval(() => { standGive().then((gave) => { if (!gave) calShow(); }, (e) => console.error('stand down', e)); }, 3000); // feature 33: what stand down left to say comes first
 // Local-only build (feature 18): to-dos finished since the last check get their Done line in the daily note.
 // The open items whose to-do is done, or whose box was ticked in a recent daily note, are closed.
 setInterval(() => { dailyDo('tick', () => daily.tick()); dailyDo('items', () => { handover.checkDone(todoItems()); handover.checkTicks(); notes.pages.renames(); }); }, 30_000);
+// Local-only build (feature 33): stand down ends by itself at the day turn ("standDown.endsAtDayTurn"), saying nothing
+// aloud; and the shortcut and phrase follow settings.json when it changes.
+setInterval(() => { try { if (stood.turned()) standUp('day'); } catch (e) { console.error('stand down', e); } if (JSON.stringify(standKeys()) !== standKeysSent) sendKeys(); }, 30_000);

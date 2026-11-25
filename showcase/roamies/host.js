@@ -420,6 +420,7 @@
     // sample has sounded (voice-out.js); the sidecar opens the microphone only on that answer, never on a guess.
     if (m.kind === 'speech' && m.mark && !Roamie.voiceOut) { send({ type: 'speech_mark', mark: m.mark }); return; }
     if (m.kind === 'speech') { if (Roamie.voiceOut && !Roamie.voiceOut.onMark) Roamie.voiceOut.onMark = (mark) => send({ type: 'speech_mark', mark }); Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
+    if (m.kind === 'stand') { standDown(m); return; } // Local-only build (feature 33): at once, even while it changes screens
     if (held) { held.q.push(m); return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
     if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }
@@ -464,6 +465,33 @@
     else if (m.kind === 'voice') onVoice(m);
     else if (m.kind === 'list') Roamie.ink?.reminders(m);
   };
+
+  // ---------- local-only build (feature 33): stand down ----------
+  // From the shell (the shortcut, the phrase) and from the sidecar. clear: what plays stops and what is on screen goes,
+  // now: speech, a listening or heard bubble, the reply, a question (closed without an answer: the sidecar keeps what
+  // must be kept), the card, the drawings and the list, the field. The character rests at home (hidden, it stays
+  // hidden), in its stood-down look (10-dither.js) until on is false; a new page is told again by the sidecar.
+  let stood = false;
+  function standDown(m) {
+    stood = !!m.on;
+    for (const t of Roamie.tiles ?? []) t.creature.setStood?.(stood);
+    Roamie.wake?.();
+    if (!stood || !m.clear) return;
+    dropAutoListen();
+    Roamie.voiceOut?.stop();
+    if (ask) { ask.id = null; finishAsk(null); }
+    hearing = false; waveTurn = false; heardText = false; responding = false; deferred = null;
+    endTalk(); listen?.close(); listen = null; heard?.close(); heard = null;
+    for (const j of [current, ...jobs]) if (j && j.result === undefined) { j.result = false; j.h?.done(true); }
+    jobs.length = 0;
+    Roamie.panel?.close();
+    if (Roamie.ink?.busy || Roamie.ink?.reminding) { Roamie.ink.clear({ all: true }); send({ type: 'ink_cleared' }); }
+    const a = getAgent();
+    if (!a) return;
+    a.hush(); a.hand?.end();
+    if (a.visible) a.hide();
+  }
+  Roamie.stood = () => stood;
 
   // ---------- Esc ----------
   // While it's on screen, Esc stops an answer (and the voice), or sends it away when it's idle. The shell holds a

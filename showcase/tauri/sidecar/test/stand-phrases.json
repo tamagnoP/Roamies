@@ -1,0 +1,33 @@
+{
+  "about": "Feature 33: the stand-down phrase, said alone. One table for both matchers: isStandDown (standdown.mjs, test/standdown.test.mjs) and the shell's (src-tauri/src/stand.rs, cargo test). fill is what the sidecar sends for the default persona (Jarvis, sir).",
+  "phrase": "stand down",
+  "fill": ["please", "now", "okay", "ok", "jarvis", "sir"],
+  "fires": [
+    "stand down",
+    "Stand down.",
+    "Stand-down!",
+    "STAND DOWN",
+    "Jarvis, stand down, please",
+    "okay Jarvis, stand down now please",
+    "OK, stand down, sir.",
+    "please stand down",
+    "stand down now",
+    "Stand down, stand down.",
+    "sir stand down jarvis"
+  ],
+  "quiet": [
+    "take a note: the committee will stand down in March",
+    "that's enough for today, you can stand down",
+    "stand down the committee",
+    "the committee will stand down",
+    "standing downstairs",
+    "stand",
+    "down",
+    "stand up",
+    "stand town",
+    "jarvis please",
+    "",
+    "hey jarvis stand down",
+    "stand down and send it"
+  ]
+}

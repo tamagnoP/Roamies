@@ -8,8 +8,8 @@ Before a session: build the app from `next` and install it as `CLAUDE.md` says (
 
 ## Group 1: features 18, 33, 25 and 31
 
-Not on `next` yet: feature 33 (stand down), feature 25 (check-ins on progress), feature 31 (speaking budget and
-quiet queue).
+Not on `next` yet: feature 25 (check-ins on progress), feature 31 (speaking budget and quiet queue). Feature 33 is
+built on `stand-down`, waiting for the owner's review.
 
 ### Feature 18: the daily note, task pages, the handover
 
@@ -85,6 +85,52 @@ over (to be missed), one still ahead, and one with nothing planned.
     comes first, said by the app, then the summary of pi's work.
 17. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
     You should see: `daily_*`, `handover`, `handover_items` and `open_item_*` lines with counts only, and no titles.
+
+### Feature 33: stand down
+
+Built on `stand-down`; on `next` once its review is accepted. The look is JARVIS's (set it in the menu if another
+look is on).
+
+**Before.** Add to `~/Documents/roamies-pi/settings.json`:
+`"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true }`. Have one to-do
+due a few minutes after you start, and `speakNotices` true.
+
+1. **Start Roamies.**
+   You should see: no bubble naming missing settings, and no bubble about the stand-down shortcut.
+2. **Ask something with a long spoken answer; while it speaks, press ⌃⌥. (Control-Option-Period).**
+   You should see and hear: the voice stops at once; the bubble and any card go; the globe turns grey and dim,
+   stops turning, and its heart is a flat dash; it sits still at home. No line is said.
+3. **Look at it beside normal rest.** Hold the talk keys and say something short, so it ends the stand down, and let
+   it come to rest (about 15 seconds).
+   You should see: normal rest is in colour, the globe turning slowly, a dot for a heart: clearly different from 2.
+4. **Hold the talk keys and say "Jarvis, stand down, please".**
+   You should see: it stands down as in 2 while the keys are still held (about a second after the last word); no
+   reply follows.
+5. **Hold the talk keys and say "take a note: the committee will stand down in March".**
+   You should see: a note is taken as usual (it ends the stand down from 4): nothing stood down.
+6. **Ask for something that ends with a question to you (a Send bubble for pi, or a yes/no), and when its answer
+   window opens say "okay Jarvis, stand down now please".**
+   You should see: the bubble closes; the microphone closes (no listening pill); nothing is sent. Say "what's
+   pending?" later: the question is listed. A read-only hand-off with its countdown running is not sent when the
+   countdown would have ended.
+7. **Hand pi a task that takes a while** ("ask pi to run the tests and wait a minute first"), press Send, and while
+   pi works press ⌃⌥. .
+   You should see: pi's steps stop; no "Stopped pi." line.
+8. **While stood down, let the to-do come due.**
+   You should see and hear: nothing at its time.
+9. **Restart Roamies while stood down** (Quit, open it again).
+   You should see: the character comes back in the stood-down look, with no wave and no greeting.
+10. **Type a request in the ask field.**
+    You should see and hear: colour comes back; the reply; then, once it is quiet, one line such as "While I stood
+    down: pi was stopped…" (shown, and said); then the late nudge for the to-do, with the list.
+11. **Say "that's enough for today, you can stand down".**
+    You should see: an ordinary reply; nothing stood down.
+12. **Optional: the day turn.** Stand down, then set `calendar.dayStart` and `calendar.dayTurnsAt` a few minutes
+    ahead and wait past the turn (set them back after).
+    You should see: colour comes back by itself, with nothing said aloud.
+13. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
+    You should see: one `stand_down` line each time it began (by `key` or `phrase`, then true/false only) and one
+    `stand_down_end` line each time it ended (`by`, `minutes`, `held`); no words you said, no titles.
 
 ## Group 2: features 23, 32, 14, 29 and 30
 

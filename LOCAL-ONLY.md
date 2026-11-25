@@ -260,6 +260,7 @@ setup guide is open, the bubble waits until it closes.
                "humour": "dry and rare", "maxSentences": 2,
                "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."],
                "addressEverySeconds": 180 },
+  "standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true },
   "limits": {
     "approvalBubbleChars": 600,
     "promptChars": 8000,
@@ -440,7 +441,8 @@ are deleted.
 that moment, so a later edit of yours is noticed), the days the
 briefings were given, under `pending` the questions nobody answered (see "Conversation flow"; a pending hand-off's
 prompt is kept there as plain text), and under `calendar` which to-do goes with which Super Productivity task, with the values both
-had after the last sync. Deleting it is safe for the first two, and forgets the pending questions; without `calendar`, Roamies no longer knows which
+had after the last sync, and under `standDown` whether Roamies is stood down and what it has to say when that ends
+(see "Standing down"). Deleting it is safe for the first two, and forgets the pending questions; without `calendar`, Roamies no longer knows which
 tasks are its own: it asks again before putting the list in the app, and the tasks already there would be made a
 second time.
 
@@ -593,6 +595,75 @@ Roamies asks the oldest pending question again, one at a time, spoken and with i
   question stays pending until it is.
 - Pending questions are never written to the notes vault. A hook for the daily note (feature 18: a Log line when a
   question becomes pending, and one when it is answered or dropped) is in place and connected to nothing yet.
+
+## Standing down
+
+Say "stand down" or press ⌃⌥. (Control-Option-Period), and Roamies stops everything at once. The phrase and the
+shortcut are settings (`standDown`). Code decides it; the model is never asked. (`standdown.mjs`; the shell's half
+is `src-tauri/src/stand.rs` and `voice.rs`.)
+
+**The phrase counts only when it is all you said.** Small words around it are fine, in any order: "please", "now",
+"okay", the persona's name and its form of address. "Jarvis, stand down, please" and "okay Jarvis, stand down now
+please" stand it down; "take a note: the committee will stand down in March" and "that's enough for today, you can
+stand down" do nothing. It works whenever the microphone is open: holding the talk keys, and in an answer window.
+The shell matches it on the words heard so far: once they have been the phrase alone for 0.7 seconds with nothing
+more said, or in the final words. A sentence that goes on past it ("stand down the committee") does nothing. The
+words are never logged and never reach the model.
+
+**The shortcut works at any moment**, also while Roamies speaks and the microphone is closed. It is held for as long
+as Roamies runs. If another app or another Roamies shortcut has it, a bubble says so once and the phrase still works.
+
+**What stops:**
+
+- speech, at once (the page stops playing before the sidecar hears of it);
+- the microphone and any answer window;
+- the request to the model, and any request still waiting behind it;
+- pi, and what its commands left running;
+- bubbles, cards, the step trail, drawings, the list and the ask field. The character rests at home; if it was
+  hidden, it stays hidden.
+
+**Questions.** A question on screen is closed as if its answer window had run out: one that is kept when nobody
+answers is kept in `pending` and asked again after a later exchange. A read-only hand-off whose countdown was running
+is kept the same way and never sent by itself: it is asked again in full, with no countdown. A missed-task round
+ends unanswered, and its to-dos come back the next morning. Pending questions stay kept.
+
+**While it lasts nothing is said or shown unless you ask.** Briefings, reminders, calendar lines, notices and
+questions wait, as they always waited for a quiet moment; standing down is one more reason to wait. Three things
+change:
+
+- a briefing whose window passes meanwhile is skipped, as before;
+- a calendar line about a block that has ended by the time it ends is dropped and counted;
+- reminders are never dropped: they are given late.
+
+The day's review is written in the daily note at `calendar.reviewAt` as usual; its line waits. What you ask for
+still works: the list shortcut, the panel, Esc. A line that would have gone to the screen from anywhere else is kept
+(up to 20) and shown afterwards.
+
+**It ends** when you next start a conversation the usual way: a request, spoken or typed. Pressing the talk keys
+alone doesn't end it. With `standDown.endsAtDayTurn` (on by default) it also ends by itself at `calendar.dayTurnsAt`,
+saying nothing aloud. Then, once things are quiet, one line worded by the app says what happened meanwhile ("While I
+stood down: pi was stopped and 2 processes it had left running were ended; 1 calendar line went by, its block
+over."), shown, and said when `speakNotices` is on (not when it ended at the day turn). If the review was written
+meanwhile and it is still that day, its line and its questions follow. Then what was held comes under the usual
+rules.
+
+**The look.** Grey, dim and still: every look is drawn in grey at about half its brightness and holds still where it
+rests, so the page stops drawing. JARVIS's globe stops turning and its heart is a flat dash. Normal rest is in colour
+with JARVIS's globe turning slowly and its heart a dot.
+
+**Kept** in `state.json` under `standDown`: a restart and a new overlay page keep it, look and all.
+
+**Recorded** as two log lines, with true/false and counts only: `stand_down {by, speech, request, pi, window,
+bubbles}` when it starts and `stand_down_end {by, minutes, held}` when it ends. Nothing goes in the daily note.
+
+```json
+"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true }
+```
+
+- `phrase`: one to four words, letters only. Not a phrase Roamies already acts on (yes, no, send, the closing
+  phrases, "leave it", "drop it", "review my day" and the like) and not only small words.
+- `shortcut`: a key with at least one modifier, written as the shell writes shortcuts (`Command+Shift+KeyD`).
+- `endsAtDayTurn`: `true` or `false`.
 
 ## What goes with each request
 
@@ -1075,6 +1146,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/daily.mjs` (new): the daily note (feature 18).
 - `showcase/tauri/sidecar/handover.mjs` (new): the handover, the open items, and the fresh conversation each day
   (feature 18).
+- `showcase/tauri/sidecar/standdown.mjs` (new), `sidekick.mjs`, `flow.mjs`, `calendar.mjs`, `pi.mjs`,
+  `showcase/roamies/host.js`, `10-dither.js`, `jarvis.js`, `showcase/tauri/src-tauri/src/stand.rs` (new), `voice.rs`,
+  `main.rs`: stand down (feature 33).
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/kokorovoice.mjs` (new): the natural voice: starts and watches the helper, its sandbox
@@ -1133,7 +1207,7 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/leftovers.test.mjs`, `test/pi-extension.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
   `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/home-page.test.mjs`,
-  `test/looks-rest.test.mjs`, `test/page.mjs`, `test/rebuild.test.mjs`, `test/rebuild-run.test.mjs`, `test/live.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs` (new),
+  `test/looks-rest.test.mjs`, `test/page.mjs`, `test/rebuild.test.mjs`, `test/rebuild-run.test.mjs`, `test/live.test.mjs`, `test/reference.test.mjs`, `test/calendar.test.mjs`, `test/adopt.test.mjs`, `test/flow.test.mjs`, `test/kokorovoice.test.mjs`, `test/persona.test.mjs`, `test/standdown.test.mjs`, `test/stand-page.test.mjs`, `test/standdown-run.test.mjs`, `test/stand-phrases.json` (new),
   `package.json`: tests.
 
 ## Build (macOS)

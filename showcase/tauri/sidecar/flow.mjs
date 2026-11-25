@@ -83,6 +83,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   let win = null, wins = 0; // the answer window that is open: { id, q, until, timer, processing, expired }
   let qseq = 0;
   const fresh = new Set(); // the questions that became pending in the exchange that is open: they wait for the next one
+  const asked = new Set(); // feature 33: the questions open on screen (question()), so stand down can close them
   // kind → (question) → what has become of it, found without asking anything:
   //   { done: true }      the thing was done meanwhile: cleared without a word
   //   { dropped: line }   it no longer applies and something they wanted is lost: cleared, and said in one line
@@ -270,6 +271,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     onWindow(false, 'time');
     log('window_closed', { by: 'time', kind: w.q.kind });
     const q = w.q;
+    asked.delete(q);
     if (q.kind !== 'bubble' || !q.open) return;
     // No answer: the question closes, is kept for later, and nothing is sent or changed.
     q.open = false;
@@ -295,6 +297,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   function question({ brief = '', pending: kept = null, onTimeout = () => {}, always = false } = {}) {
     const voiced = spokenNow();
     const q = { kind: 'bubble', open: true, pending: kept, onTimeout };
+    asked.add(q);
     activity();
     if (voiced || always) {
       const done = Promise.resolve(speak(brief || null));
@@ -303,6 +306,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     return {
       windowed: voiced,
       close(answered = true) {
+        asked.delete(q);
         if (!q.open) return;
         q.open = false;
         if (answered && kept) clear(kept);
@@ -358,6 +362,25 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     return 'kept';
   }
 
+  /** Feature 33, stand down: the answer window closes (the microphone with it), the exchange ends without its
+   *  questions, and every question open on screen is closed unanswered, as when its window runs out: the ones that are
+   *  kept when unanswered are kept (a hand-off among them, asked again later in full and never sent by itself), and
+   *  nothing is sent or changed. → how many were kept. */
+  function standDown() {
+    if (replyQ) { replyQ.open = false; replyQ = null; }
+    if (win) closeWindow('stand');
+    if (ex) end('stand');
+    let n = 0;
+    for (const q of [...asked]) {
+      asked.delete(q);
+      if (!q.open) continue;
+      q.open = false;
+      if (q.pending && keep(q.pending)) n++;
+      try { q.onTimeout(); } catch (e) { console.error('stand down', e); }
+    }
+    return n;
+  }
+
   const kept = () => { try { return (actions() ?? []).filter((a) => a && a.brief); } catch { return []; } };
   const tools = [{
     name: 'show_pending',
@@ -375,7 +398,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   }];
 
   return {
-    tools, question, replyWindow, voice, windowPhrase, closing, raise, series,
+    tools, question, replyWindow, voice, windowPhrase, closing, raise, series, standDown,
     /** A request was made by voice: the exchange is open. */
     start() { ex ??= { gen: 0, timer: null }; activity(); },
     activity, settle,

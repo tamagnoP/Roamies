@@ -851,7 +851,7 @@ const pendingNow = () => readState(dir).pending ?? [];
 {
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   // words from an answer window are judged by flow.mjs before anything else, and only 'request' goes on
-  assert.match(side, /async function onSpoken\(text, area, window = null\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(window != null\) \{ if \(flow\.windowPhrase\(text, window\) !== 'request'\) \{ ui\(\{ kind: 'heard' \}\); return; \} \}\n(?:\s*\/\/[^\n]*\n)*\s*else if \(!pi\.bubble\(\) && !answers\.open\(\) && flow\.closing\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n\s*(?:\/\/[^\n]*\n\s*)*if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\)/);
+  assert.match(side, /async function onSpoken\(text, area, window = null\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(isStandDown\(text, \.\.\.standPhrase\(\)\)\) \{ ui\(\{ kind: 'heard' \}\); standDownNow\('phrase'\); return; \}\n\s*if \(window == null\) standUp\('voice'\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(window != null\) \{ if \(flow\.windowPhrase\(text, window\) !== 'request'\) \{ ui\(\{ kind: 'heard' \}\); return; \} \}\n(?:\s*\/\/[^\n]*\n)*\s*else if \(!pi\.bubble\(\) && !answers\.open\(\) && flow\.closing\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n\s*(?:\/\/[^\n]*\n\s*)*if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\)/);
   assert.match(side, /onSpoken\(m\.text\.trim\(\), m\.area, m\.window \?\? null\)/);
   assert.match(side, /if \(m\.type === 'voice_state'\) flow\.voice\(voiceState, m\.window \?\? null\);/);
   assert.match(side, /m\.state === 'listening' && m\.window != null\) \{ \/\*/, 'the window\'s own listening interrupts nothing');
@@ -911,6 +911,34 @@ const pendingNow = () => readState(dir).pending ?? [];
   // a question between two things: the second button answers with what the sidecar gave (SECOND), and Y is not a yes there
   assert.match(host, /const second = choices && typeof m\.second === 'string' && m\.second \? m\.second : null;\n\s*const pick = \(i\) => \(i === 0 \? 'yes' : i === 1 && second \? second : null\);/);
   assert.match(host, /onChoose: \(i\) => finishAsk\(pick\(i\)\)/); assert.match(host, /if \(key === 'y' && !ask\.second\) finishAsk\('yes'\);/); assert.match(host, /finishAsk\(ask\.pick\(ask\.sel\)\);/);
+}
+
+// ================= feature 33, stand down: the window closes, the exchange ends without its questions, and every open
+// question is closed unanswered. A hand-off whose countdown was running is kept and never sent by itself: asked again
+// later in full, with no countdown. A yes/no without a pending form is closed and not kept.
+{
+  await reset();
+  writeSettings({ autoSendReadOnly: 0.2 });
+  await exchange(); const before = calls().length, cancels = mic.cancels.length;
+  const p = settled(tool('ask_pi').execute({ prompt: 'stood down mid-countdown', mode: 'read' }, {}));
+  await until(() => pi.bubble(), 'the countdown bubble'); await played();
+  assert.notEqual(flow.window(), null, 'its answer window is open');
+  const q = settled(answers.ask({ placeholder: 'A yes or no?', choices: ['Yes', 'No'] }));
+  await tick();
+  assert.equal(flow.standDown(), 1, 'one question kept: the hand-off');
+  assert.ok((await p).error instanceof Unanswered, 'the hand-off: unanswered'); assert.ok((await q).error instanceof Unanswered, 'the yes/no: unanswered');
+  assert.equal(flow.window(), null); assert.equal(mic.cancels.length, cancels + 1, 'the microphone is closed'); assert.deepEqual(mic.windows.at(-1), [false, 'stand']);
+  assert.equal(flow.open(), false); assert.ok(logs.some(([k, d]) => k === 'exchange_end' && d.by === 'stand'));
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(calls().length, before, 'well past the countdown: not sent');
+  assert.deepEqual(pendingNow().map((x) => [x.kind, x.data.prompt]), [['handoff', 'stood down mid-countdown']], 'kept, alone');
+  assert.equal(flow.standDown(), 0, 'twice: nothing more');
+  // the next exchange ends: asked again, in full, and not sent by itself
+  await exchange('what was that'); await advance(20_000);
+  await until(() => pi.bubble(), 'asked again');
+  await played(); await new Promise((r) => setTimeout(r, 400)); assert.equal(calls().length, before, 'no countdown when asked again');
+  click(false); await until(() => !pi.bubble(), 'closed'); await tick();
+  writeSettings(); await reset();
 }
 
 fs.rmSync(home, { recursive: true, force: true });

@@ -69,6 +69,12 @@
         const lv = 1 + lam * 1.6 + Math.max(0, band) * wavy * 1.4 + (z > 0.7 ? 0.4 : 0);
         put(px, py, clamp(Math.round(lv), 1, L - 1));
       }
+      // Local-only build (feature 33): stood down, the heart is a flat dash, and the globe holds still (st.rest).
+      if (st.stood) {
+        const w = Math.max(2, Math.round(rad * 0.24)), hy = Math.round(cy);
+        for (let x = -w; x <= w; x++) put(Math.round(cx) + x, hy, L);
+        return;
+      }
       // The heart: a bright core that swells with the voice; it dims to a dot asleep and closes on a blink.
       const open = st.open, sleepy = st.sleepy > 0.5;
       const hr = Math.max(1, Math.round(rad * (sleepy ? 0.1 : 0.17 + v * 0.07) * (A === 'hype' ? 1.25 : 1)));
@@ -106,9 +112,11 @@
         const a = q * (TAU / 4) + TAU / 8 - spin * 0.3;
         for (let d = 6.4; d <= 7.4; d += 0.5) put(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 2);
       }
-      // The heart: a dot that closes to a line on a blink and dims asleep; a cross while it talks.
+      // The heart: a dot that closes to a line on a blink and dims asleep; a cross while it talks. Feature 33: stood
+      // down, a flat dash.
       const sleepy = st.sleepy > 0.5;
-      if (sleepy) put(cx, cy, 2);
+      if (st.stood) { put(cx - 1, cy, L - 1); put(cx, cy, L - 1); put(cx + 1, cy, L - 1); }
+      else if (sleepy) put(cx, cy, 2);
       else if (st.open < 0.35) { put(cx - 1, cy, L - 1); put(cx, cy, L); put(cx + 1, cy, L - 1); }
       else {
         put(cx, cy, L); put(cx + 1, cy, L - 1); put(cx - 1, cy, L - 1); put(cx, cy + 1, L - 1); put(cx, cy - 1, L - 1);

@@ -199,8 +199,8 @@ assert.match(startupSettings(home), /isn't valid JSON/); assert.deepEqual(limits
   const none = heldNotice('', (t) => shown.push(t)); assert.equal(none(true), false); assert.equal(shown.length, 1, 'nothing to say, nothing shown');
   // sidekick.mjs offers it when the overlay is up and when the setup guide closes, and works it out once, at start-up
   const side = fs.readFileSync(path.join(src, 'sidekick.mjs'), 'utf8');
-  assert.equal(side.match(/startupSettings\(/g).length, 1); assert.equal(side.match(/offerSettingsNotice\(\)/g).length, 2, 'offered at ui_ready and at ob_closed');
-  assert.ok(side.includes('settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed))'));
+  assert.equal(side.match(/startupSettings\(/g).length, 1); assert.equal(side.match(/offerSettingsNotice\(\)/g).length, 3, 'offered at ui_ready, at ob_closed, and when stand down ends (feature 33)');
+  assert.ok(side.includes('settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on())'));
 }
 
 // ---- 3. settings.json was never written, and settings.default.json never read

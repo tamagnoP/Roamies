@@ -13,10 +13,26 @@ static SNAP_ID: AtomicU32 = AtomicU32::new(0);
 static LIST_ID: AtomicU32 = AtomicU32::new(0);
 /// Id of the Esc hotkey, held only while the Roamie is on screen (0 when it isn't).
 static ESC_ID: AtomicU32 = AtomicU32::new(0);
+/// Local-only build (feature 33): id of the stand-down hotkey, held for as long as Roamies runs.
+static STAND_ID: AtomicU32 = AtomicU32::new(0);
+/// Feature 33: how long the phrase must have been all that was heard, with nothing more said, before it counts
+/// (STAND_SETTLE_MS in sidecar/standdown.mjs).
+const STAND_SETTLE_MS: u64 = 700;
+
+/// Feature 33: the phrase as words and the small words allowed around it (from the sidecar), and the take being heard:
+/// gen counts what it has heard so far, so a wait for the phrase to settle is dropped when more comes; fired: this take
+/// has already stood Roamies down, so its final words go nowhere.
+struct Stand {
+    phrase: Vec<String>,
+    fill: Vec<String>,
+    gen: u64,
+    fired: bool,
+}
+static STAND: Mutex<Stand> = Mutex::new(Stand { phrase: Vec::new(), fill: Vec::new(), gen: 0, fired: false });
 
 thread_local! {
     // The hotkey manager must live on the main thread; it also owns the current show/hide hotkey.
-    static HOTKEYS: RefCell<Option<(global_hotkey::GlobalHotKeyManager, [Option<global_hotkey::hotkey::HotKey>; 3])>> = const { RefCell::new(None) };
+    static HOTKEYS: RefCell<Option<(global_hotkey::GlobalHotKeyManager, [Option<global_hotkey::hotkey::HotKey>; 4])>> = const { RefCell::new(None) };
     // The overlays that have the Roamie (or its card, or its ask field) on screen right now.
     static ESC_UP: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
 }
@@ -118,7 +134,7 @@ fn cancel_voice(app: &AppHandle) {
 pub(crate) fn init_hotkeys(app: &AppHandle) {
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
     match GlobalHotKeyManager::new() {
-        Ok(m) => HOTKEYS.with(|h| *h.borrow_mut() = Some((m, [None, None, None]))),
+        Ok(m) => HOTKEYS.with(|h| *h.borrow_mut() = Some((m, [None, None, None, None]))),
         Err(e) => return eprintln!("hotkeys unavailable: {e}"),
     }
     let app = app.clone();
@@ -129,6 +145,12 @@ pub(crate) fn init_hotkeys(app: &AppHandle) {
         let summon = e.id() == SUMMON_ID.load(Ordering::Relaxed);
         let snap = e.id() == SNAP_ID.load(Ordering::Relaxed);
         let list = e.id() == LIST_ID.load(Ordering::Relaxed);
+        let stand = e.id() != 0 && e.id() == STAND_ID.load(Ordering::Relaxed);
+        if stand {
+            let app2 = app.clone();
+            let _ = app.run_on_main_thread(move || stand_down(&app2, "key"));
+            return;
+        }
         let esc = e.id() != 0 && e.id() == ESC_ID.load(Ordering::Relaxed);
         if esc {
             // The panel has the keyboard: Esc closes it, as it would without this hotkey.
@@ -161,12 +183,12 @@ pub(crate) fn init_hotkeys(app: &AppHandle) {
     }));
 }
 
-/// Swaps one global shortcut (0 = show/hide, 1 = ask about an area, 2 = show the list). On failure (bad format, or
-/// another app owns it) the old one stays.
+/// Swaps one global shortcut (0 = show/hide, 1 = ask about an area, 2 = show the list, 3 = stand down). On failure
+/// (bad format, or another app owns it) the old one stays.
 pub(crate) fn set_hotkey(slot: usize, accel: &str) -> Result<(), String> {
     use global_hotkey::hotkey::HotKey;
     let new: HotKey = accel.parse().map_err(|e| format!("{e}"))?;
-    let id_slot = [&SUMMON_ID, &SNAP_ID, &LIST_ID][slot];
+    let id_slot = [&SUMMON_ID, &SNAP_ID, &LIST_ID, &STAND_ID][slot];
     HOTKEYS.with(|h| {
         let mut h = h.borrow_mut();
         let Some((manager, keys)) = h.as_mut() else { return Err("hotkeys unavailable".to_string()) };
@@ -229,6 +251,50 @@ pub(crate) fn set_esc(app: &AppHandle, label: &str, on: bool) {
     });
 }
 
+/// Feature 33: the phrase and its small words, as words (the sidecar's standKeys).
+pub(crate) fn set_stand(phrase: Vec<String>, fill: Vec<String>) {
+    let mut s = STAND.lock().unwrap();
+    s.phrase = phrase;
+    s.fill = fill;
+}
+
+/// Feature 33: stand down, by the shortcut or the phrase. The page stops what it plays and clears the screen now,
+/// without waiting for the sidecar; the sidecar stops the rest; the microphone closes. The sidecar is told before the
+/// microphone closes, so it has stood down before it hears that the take was cancelled.
+pub(crate) fn stand_down(app: &AppHandle, by: &str) {
+    STAND.lock().unwrap().fired = true;
+    to_overlays(app, &json!({ "kind": "stand", "on": true, "clear": true }));
+    to_sidecar(app, &json!({ "type": "stand_down", "by": by }));
+    cancel_voice(app);
+}
+
+/// Feature 33: what has been heard so far in this take. When it is the phrase alone, it counts once nothing more has
+/// been heard for STAND_SETTLE_MS: words that go on past it (the phrase opening a longer sentence) do nothing.
+fn stand_heard(app: &AppHandle, text: &str) {
+    let gen = {
+        let mut s = STAND.lock().unwrap();
+        s.gen += 1;
+        if s.fired || !crate::stand::matches(text, &s.phrase, &s.fill) {
+            return;
+        }
+        s.gen
+    };
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(STAND_SETTLE_MS));
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let go = {
+                let s = STAND.lock().unwrap();
+                s.gen == gen && !s.fired
+            };
+            if go {
+                stand_down(&app2, "phrase");
+            }
+        });
+    });
+}
+
 fn handle_voice(app: &AppHandle, msg: Value) {
     let mut ui = msg.clone();
     ui["kind"] = json!("voice");
@@ -263,12 +329,36 @@ fn handle_voice(app: &AppHandle, msg: Value) {
     }
     match msg.get("type").and_then(Value::as_str) {
         Some("state") => {
+            // Feature 33: a new take (or an answer window reopened for the next phrase) starts afresh.
+            if msg.get("state").and_then(Value::as_str) == Some("listening") {
+                let mut s = STAND.lock().unwrap();
+                s.gen += 1;
+                s.fired = false;
+            }
             to_overlays(app, &ui);
             // Local-only build: "window" is the answer window the session belongs to (none for a key press).
             to_sidecar(app, &json!({ "type": "voice_state", "state": msg.get("state"), "window": msg.get("window") }));
         }
-        Some("partial") | Some("level") => to_overlays(app, &ui),
+        Some("partial") => {
+            to_overlays(app, &ui);
+            stand_heard(app, msg.get("text").and_then(Value::as_str).unwrap_or(""));
+        }
+        Some("level") => to_overlays(app, &ui),
         Some("final") => {
+            // Feature 33: the take that stood Roamies down, or the phrase alone in the final words: they go nowhere.
+            let text = msg.get("text").and_then(Value::as_str).unwrap_or("");
+            let (fired, phrase) = {
+                let mut s = STAND.lock().unwrap();
+                s.gen += 1;
+                (s.fired, crate::stand::matches(text, &s.phrase, &s.fill))
+            };
+            if fired {
+                return;
+            }
+            if phrase {
+                stand_down(app, "phrase");
+                return;
+            }
             to_overlays(app, &ui);
             // area: the part of the screen marked with the pen while talking (a PNG, its rect and the strokes).
             to_sidecar(app, &json!({ "type": "voice", "text": msg.get("text"), "area": msg.get("area"), "ms": msg.get("ms"), "via": msg.get("via"), "window": msg.get("window") }));

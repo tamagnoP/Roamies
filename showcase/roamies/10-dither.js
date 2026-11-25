@@ -53,6 +53,8 @@
       const drawn = (l) => (l === 'jarvis' ? Roamie.jarvis : Roamie.people?.[l]);
       const pickLook = (l) => (drawn(l) ? l : 'classic');
       let look = pickLook(typeof location !== 'undefined' ? new URLSearchParams(location.search).get('look') : null);
+      // Local-only build (feature 33): stood down. Every look is drawn grey and dim, and holds still where it rests.
+      let stood = false;
       const jst = { spin: 0, dt: 0.016 };
       const hands = [-1, 1].map((s) => ({ s, x: m.x, y: m.y, vx: 0, vy: 0 }));
       const parts = [];
@@ -87,7 +89,8 @@
         if (mask) { const r = mask(gx, gy); if (!r) return; if (r === 2) c = PAL[L]; }
         if (gx < dx0) dx0 = gx; if (gx > dx1) dx1 = gx; if (gy < dy0) dy0 = gy; if (gy > dy1) dy1 = gy;
         const f = SCAN !== 1 && gy & 1 ? SCAN : 1;
-        const r = c[0] * f, g = c[1] * f, b = c[2] * f;
+        let r = c[0] * f, g = c[1] * f, b = c[2] * f;
+        if (stood) { r = g = b = (r * 0.3 + g * 0.59 + b * 0.11) * 0.45; } // feature 33: grey and dim
         if (K === 1) { const i = (gy * IW + gx) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a; return; }
         for (let j = 0; j < K; j++) for (let k = 0; k < K; k++) {
           const i = ((gy * K + j) * IW + gx * K + k) * 4;
@@ -498,7 +501,9 @@
           mouth: pose?.mouth ?? (act && { wave: null, hype: 'shout', remind: 'o', upset: 'frown', motivate: 'grin' }[A]),
           brow: pose ? pose.brow : A === 'upset' ? 'angry' : A === 'motivate' ? 'determined' : A === 'remind' ? 'raised' : null,
           // Local-only build: resting at home with nothing to do; a look that moves by itself holds still (jarvis.js).
-          rest: !!plug?.api?.resting && !pose?.mode && !act && !pending && m.speed < 2 && !m.dragging && !m.flung,
+          // Feature 33: stood down, it holds still wherever it has come to a stop.
+          rest: ((!!plug?.api?.resting && !pose?.mode && !act && !pending) || stood) && m.speed < 2 && !m.dragging && !m.flung,
+          stood,
         });
         // The globe's points overlap (the brightest wins); a character is drawn in layers (the last one wins).
         if (look !== 'jarvis') {
@@ -609,6 +614,9 @@
         morph,
         get look() { return look; },
         setLook(l) { look = pickLook(l); jst.spin = 0; jst.tail = null; },
+        // Local-only build (feature 33): the stood-down look, on or off (host.js).
+        setStood(v) { stood = !!v; },
+        get stood() { return stood; },
         resize(env) {
           lastEnv = env;
           const S = Roamie.unit(env);

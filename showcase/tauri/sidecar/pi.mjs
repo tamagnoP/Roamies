@@ -22,6 +22,7 @@ import { CHFLAGS, EXTENSION, PS, PS_ARGS, RECORD, START_SLACK, endedNotice, offN
 import { COMING_DAYS, DROP_WORDS, KEEP_DAYS, LEAVE_WORDS, REVIEW_PHRASES } from './daily.mjs';
 import { KEEP_PAGES, TASKS_FOLDER } from './notes.mjs';
 import { DONE_WORDS, GO_WORDS, HANDOVER_WORDS, HEADINGS, KEEP_WORDS, LINE_CHARS, PART_TWO_LINES, PART_TWO_SECONDS, TICKS_MINUTES } from './handover.mjs'; // feature 18: shown in settings.default.json
+import { STAND_CAUGHT, STAND_FILL, STAND_SETTLE_MS } from './standdown.mjs'; // feature 33: shown in settings.default.json
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -329,12 +330,23 @@ export const PERSONA = {
   // How often the form of address is used, by the app's lines and the model's replies together; 0: always.
   addressEverySeconds: { default: 180, min: 0, max: 86400, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 86400 },
 };
+/** Feature 33: the parts of "standDown". phrase: one to four words, letters only, none of them a phrase Roamies already
+ *  acts on (STAND_RESERVED) and not only small words. shortcut: a key with at least one modifier, as the shell's
+ *  shortcuts are written ("Control+Alt+Period"). endsAtDayTurn: it ends by itself at calendar.dayTurnsAt. */
+const STAND_MODS = ['control', 'ctrl', 'alt', 'option', 'shift', 'super', 'command', 'cmd', 'meta', 'cmdorctrl', 'commandorcontrol'];
+const standPlain = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').split(/[^\p{L}]+/u).filter(Boolean).join(' ');
+export const STAND_RESERVED = () => [...YES_WORDS, ...NO_WORDS, ...SEND_WORDS, ...DONT_WORDS, ...HANDS_FREE_SEND, ...CLOSING_PHRASES, ...LEAVE_WORDS, ...DROP_WORDS, ...REVIEW_PHRASES, ...KEEP_WORDS, ...GO_WORDS, ...MOVE_WORDS, ...SECOND_WORDS, ...THAT_WORDS, ...NEW_WORDS].map(standPlain);
+export const STAND_DOWN = {
+  phrase: { default: 'stand down', ok: (v) => { if (!text(40)(v) || !/^[\p{L}' -]+$/u.test(v)) return false; const w = standPlain(v); const n = w.split(' ').length; return !!w && n <= 4 && !STAND_RESERVED().includes(w) && !w.split(' ').every((x) => [...STAND_FILL, ...FILLER_WORDS].includes(x)); } },
+  shortcut: { default: 'Control+Alt+Period', ok: (v) => { if (!text(60)(v)) return false; const p = v.split('+').map((x) => x.trim()); return p.length >= 2 && p.slice(0, -1).every((m) => STAND_MODS.includes(m.toLowerCase())) && /^[A-Za-z][A-Za-z0-9]{0,19}$/.test(p.at(-1)) && !STAND_MODS.includes(p.at(-1).toLowerCase()); } },
+  endsAtDayTurn: { default: true, ok: (v) => typeof v === 'boolean' },
+};
 function partDefaults(table) { return Object.fromEntries(Object.entries(table).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : v.default])); }
 const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -390,6 +402,7 @@ const CLEAN = {
   voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
   kokoro: when(isObj),
   persona: when(isObj),
+  standDown: when(isObj),
   limits: when(isObj),
   calendar: when(isObj),
 };
@@ -466,9 +479,9 @@ export function loadSettings(home) {
       if (!invalid.some((i) => i.name === 'calendar.dayTurnsAt')) invalid.push({ name: 'calendar.dayTurnsAt', using: cal.dayTurnsAt });
     }
   }
-  // kokoro and persona: part by part, the same way.
+  // kokoro, persona and standDown (feature 33): part by part, the same way.
   const parts = {};
-  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['persona', set.persona, PERSONA]]) {
+  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['persona', set.persona, PERSONA], ['standDown', set.standDown, STAND_DOWN]]) {
     parts[group] = partDefaults(table);
     if (given === defaults[group]) continue;
     for (const name of Object.keys(table)) {
@@ -508,7 +521,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -810,11 +823,12 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         return;
       }
       // Feature 24: what its commands left running (leftovers.mjs), then the watcher and the folder go.
-      let leftNotice = lfOff ? offNotice : '';
+      let leftNotice = lfOff ? offNotice : '', ended = 0;
       if (lf) {
         const ran = lf.ready() || !j.events;
         const { count, done } = lf.end('pi_end');
         done.then(dropLf, dropLf);
+        ended = count; // feature 33: how many, for the line said when stand down ends
         if (count) leftNotice = endedNotice(count);
         else if (!ran) { leftNotice = offNotice; log('pi_leftovers_off', { why: 'hook' }); }
       }
@@ -831,7 +845,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       onChange();
       // What's put on screen: pi's own words, whole and unchanged.
       const shown = `${status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`}${leftNotice ? `\n\n${leftNotice}` : ''}`;
-      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown, notice: leftNotice };
+      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown, notice: leftNotice, ended };
       // The app decides how it's told (sidekick.mjs: Roamies says the gist in its own voice, then the full reply goes on
       // screen). Without one, it's shown and read out as it is.
       if (onDone) Promise.resolve().then(() => onDone(result)).catch((e) => { console.error('pi relay', e); tell(shown, null); });
@@ -1118,6 +1132,7 @@ export function codeReference() {
     dailyNote: { place: 'the vault\'s "dailyFolder" folder, one note a day named YYYY-MM-DD.md', writtenBy: 'the app alone, through the vault\'s one writer: only ever added to', dayTurnsAt: 'calendar.dayTurnsAt', plan: 'the to-dos with a block or a due time on the day, the ones whose every time has passed (Needs a new time), and the deadlines coming up; written by the morning briefing, whose note for the model counts the ones that need a new time without naming them, or by the first thing written that day', comingUpDays: COMING_DAYS, log: ['Done: a to-do finished, in Roamies or in Super Productivity', 'Note: a note taken, linked', 'Rescheduled: a new time given in answer to a question', 'Let go: no more questions about a to-do'], review: 'at calendar.reviewAt, by the evening briefing when that comes first (not when reviewAt is ""), or when asked by one of reviewPhrases said alone: each planned to-do as done, missed or still open today, two sentences worded by the app, and the missed ones under Needs a new time; a second review adds only what changed', reviewPhrases: [...REVIEW_PHRASES], questions: { when: 'after the review (the missed to-dos), and in the morning (the ones that need a new time): after the morning briefing, or, with none, at the end of the first exchange of the day', mostEachTime: 'limits.reviewQuestions, oldest first; one line says how many are left', wording: '"<title> was planned for <time> and isn\'t done. When will you do it?", or "<title> needs a new time: it was <day>, <time>. When will you do it?"', answers: { aTime: 'a day and a time ("tomorrow at 10", "Friday 14:30"; an hour without am or pm is the one inside the working day): the block moves there, or the due time is set when there is no block', aDay: 'a day alone ("Monday", "the 28th"): the due time is set to that day at calendar.dayEnd', leave: [...LEAVE_WORDS], drop: [...DROP_WORDS], buttons: ['Leave it', 'Drop it'] }, leave: 'nothing changes; asked again the next morning', drop: 'no more questions about it while it keeps that time, and a "Let go" line; the to-do itself stays exactly as it is, never deleted or marked done', noAnswer: 'nothing changes, and the round ends; not kept as a pending question', judgedBy: 'the app, never the model; Roamies never picks a time' }, counted: 'to-dos only; reminders and timers never appear', notIn: 'pi\'s work (it stays in the records folder)', keptDaysInState: KEEP_DAYS, sentToTheModel: 'nothing' },
     handover: { when: 'the first request of a new day (calendar.dayTurnsAt), typed, spoken or a briefing; that request waits for it', partOne: 'written by code in the last day of the conversation that ends: the to-dos and reminders made, changed, done or dropped that day (each linked to its task page), the questions still waiting, the blocks kept', partTwo: { by: 'one model request, by the same route as the fold', given: 'the ending conversation, and the open items\' text', headings: [...HEADINGS], mostLines: PART_TWO_LINES, lineChars: LINE_CHARS, leftOpen: 'only new lines; a line matching an open item makes nothing', waitSeconds: PART_TWO_SECONDS, whileWaiting: 'a line worded by the app: "One moment: I\'m wrapping up yesterday."', failed: 'part one stays written, the old conversation carries on, and part two is tried again at the next request' }, newConversation: { firstMessage: `part two\'s Decided and Worth remembering, and the open items with their ids, oldest first, marked as background; at most ${HANDOVER_WORDS} words`, neverIn: 'part one, the daily note, the to-do list', oldOne: 'the usual memory pass' }, quietDay: 'a day with no conversation makes no request; after a gap of days the new conversation gets the most recent handover and the open items', inState: 'state.json "handover"', openItems: { madeFrom: 'each new Left open line, unless it matches an open item (the same words, small words aside, or all of one\'s words in the other\'s; a duplicate is harmless, a lost item is not)', inTheNote: 'every handover lists them oldest first, as a checkbox with its id: - [ ] … ^oi-…', closedWhen: ['the to-do or reminder it is about is done', `its box is ticked in one of the last ${KEEP_DAYS} daily notes (read every ${TICKS_MINUTES} minutes at most)`, 'the owner says so: item_dealt_with'], dealtWith: { closesAtOnce: 'only when the owner\'s own words in that message say so, checked by the app against doneWords (not after a "not" in the three words before, not in a question)', doneWords: [...DONE_WORDS], otherwise: 'the app asks yes or no', said: 'the app says which item it closed' }, logged: 'once, ticked, in that day\'s note: Closed (and how), or Let go; earlier notes are not rewritten', askedAfter: 'limits.openItemAskDays, at the evening review: keep it (asked again after as many days) or let it go', keep: [...KEEP_WORDS], letGo: [...GO_WORDS], mostEachTime: 'limits.reviewQuestions' } },
     taskPages: { place: `the vault's "${TASKS_FOLDER}" folder, one page per to-do or reminder, named for its title`, madeWhen: 'the first time a note is linked to it (write_note with task, or link_note)', sameTitle: '"Title (2)", "Title (3)"…', page: 'the title, the due time if any, and a line for each note linked and each day it was planned or finished, linking that day\'s daily note; a new title adds a line (nothing is renamed in the vault)', note: 'a new note made with task has the page and the day in its front matter; a note linked or added to gets one line at its end linking the page and the day', notesFor: 'the notes the page links to, and the notes that link to the page, links added by hand included; task pages and daily notes are not counted', keptInState: `state.json "taskPages": the to-do → page name and title, the newest ${KEEP_PAGES}`, tools: ['link_note', 'notes_for'], sentToTheModel: 'the note titles notes_for finds; never a page\'s text or the to-do\'s title' },
+    standDown: { phrase: 'standDown.phrase: one to four words, letters only; not a phrase Roamies already acts on, and not only small words', alone: 'it counts only when it is all that was said, these small words around it aside, in any order', smallWords: [...STAND_FILL], alsoSmall: 'the persona\'s name and form of address', heardFor: `matched on what the voice helper has heard so far, once it has been all that was heard for ${STAND_SETTLE_MS} ms with nothing more said, or in the final words; never logged`, shortcut: 'standDown.shortcut: a key with at least one modifier, held for as long as Roamies runs; refused when another app or another Roamies shortcut has it (a bubble says so)', stops: ['speech', 'the microphone and any answer window', 'the request to the model', 'pi and what its commands left running', 'bubbles, cards and drawings'], questions: 'an open question is closed unanswered: one that is kept when unanswered is kept, and a hand-off whose countdown was stopped is asked again later, never sent by itself', meanwhile: 'nothing is said or shown unasked; briefings, reminders, calendar lines, notices and questions wait. A briefing whose window passes is skipped; a calendar line whose block has ended is dropped and counted; reminders are given late; the day\'s review is written in the note at its time and its line waits', caughtLinesKept: STAND_CAUGHT, ends: 'the next request, spoken or typed; or at calendar.dayTurnsAt when standDown.endsAtDayTurn is true (then nothing is said aloud)', after: 'one line worded by the app for what happened meanwhile, shown, and said when speakNotices is true; then what was held, under the usual rules', look: 'resting, grey and dim and still; JARVIS\'s heart a flat dash', keptIn: `${PATHS.state} "standDown": a restart and a new overlay page keep it`, logged: 'stand_down when it starts and stand_down_end when it ends: true/false and counts only; nothing in the daily note' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },
     paths: { folder: dir, settings: PATHS.settings, reference: PATHS.reference, state: PATHS.state, records: `${PATHS.log}/`, defaultProject: `${PATHS.workspace}/`, longPrompt: PATHS.pending },
   };

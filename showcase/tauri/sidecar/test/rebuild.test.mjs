@@ -246,13 +246,14 @@ for (const [size, spot] of [['small', SMALL], ['default', HOME['bottom-left']]])
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   const ready = side.slice(side.indexOf("else if (m.type === 'ui_ready')"), side.indexOf("else if (m.type?.startsWith('ob_')"));
   assert.match(ready, /const keep = pageRebuild\?\.ready\(\)/, 'ui_ready asks whether this page is a rebuild');
-  assert.match(ready, /if \(keep\) ui\(\{ kind: 'settle'[^\n]*\n\s*else if \(config\.onboarded\) ui\(\{ kind: 'greet' \}\);/, 'a rebuilt page is settled, not greeted');
+  assert.match(ready, /if \(keep\) ui\(\{ kind: 'settle'[^\n]*\n\s*else if \(config\.onboarded && !stood\?\.on\(\)\) ui\(\{ kind: 'greet' \}\);/, 'a rebuilt page is settled, not greeted (nor one stood down: feature 33)');
   assert.ok(ready.indexOf("kind: 'look'") < ready.indexOf("kind: 'settle'"), 'settle comes after the settings');
   assert.match(side, /if \(!PAGE_SETTINGS\.has\(msg\.kind\)\) pageRebuild\?\.shown\(\);\n\s*send\(\{ type: 'ui', msg \}\);/, 'everything the page is sent counts as shown, but its settings');
   assert.match(side, /minutes: \(\) => limitsFor\(HOME\)\.pageRebuildQuietMinutes,/, 'the setting is read at each check');
   const quiet = /quiet: \(\) => ([^\n]+),\n/.exec(side.slice(side.indexOf('pageRebuild = createPageRebuild(')))[1];
-  for (const part of ['calQuiet()', '!pi.bubble()', '!answers.open()', '!micWindow', '!heldSpeech.length', '!turnVoice', '!cal.hasHeld()', '!flow.open()', '!flow.window()', '!intro', '!showcase']) assert.ok(quiet.includes(part), `quiet needs ${part}`);
+  for (const part of ['calQuietBase()', '!pi.bubble()', '!answers.open()', '!micWindow', '!heldSpeech.length', '!turnVoice', '!cal.hasHeld()', '!flow.open()', '!flow.window()', '!intro', '!showcase']) assert.ok(quiet.includes(part), `quiet needs ${part}`);
   assert.ok(!/pending/.test(quiet), 'a question kept in state.json does not hold the rebuild off');
+  assert.ok(!/stood|calQuiet\(\)/.test(quiet), 'nor does stand down (feature 33): calQuietBase, not calQuiet');
   assert.match(side, /rebuild: \(\{ measure \}\) => send\(\{ type: 'rebuild_overlays', measure \}\),\n\s*measure: \(\) => loadSettings\(HOME\)\.measurePageRebuild,/, 'the shell is asked to measure when the setting is on');
   assert.match(ready, /ui\(\{ kind: 'settle', hold: SETTLE_HOLD_SECONDS,/, 'the new page is told how long it holds its spot');
   assert.match(side, /else if \(m\.type === 'measure'\) pageRebuild\?\.measured\(m\);/, 'what is measured goes through measured(), which logs only while it lasts');

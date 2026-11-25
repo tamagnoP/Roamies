@@ -9,7 +9,7 @@ const ROOT = new URL('../../../', import.meta.url); // showcase/
 /** The overlay page with stand-ins for the browser and the shell. Time only moves in tick(). */
 export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80, right: 0, ox: 0, oy: 0 } } = {}) {
   let clock = 1000, tid = 1, frames = 0;
-  const rafs = [], timers = [], listeners = {}, sent = [], invoked = [];
+  const rafs = [], timers = [], listeners = {}, sent = [], invoked = [], made = [];
   // Something that can be read, called and built without complaint: the parts of the browser nothing here depends on.
   const anything = () => new Proxy(function () {}, {
     get: (t, p) => (p === Symbol.toPrimitive ? () => 0 : p === 'then' ? undefined : (t[p] ??= anything())),
@@ -21,12 +21,15 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
     c.createImageData = (W, H) => ({ width: W, height: H, data: new Uint8ClampedArray(W * H * 4) });
     c.getImageData = (x, y, W, H) => ({ width: W, height: H, data: new Uint8ClampedArray(W * H * 4) });
     c.measureText = (s) => ({ width: String(s).length * 7 });
+    c.putImageData = (img) => { c.last = img; }; // feature 33: what was last put on it, to measure (stand-page.test.mjs)
+    made.push(c);
     return c;
   };
   const el = (tag) => {
     const e = anything(), on = {};
     Object.assign(e, { style: {}, width: 1, height: 1, tagName: tag, on, classList: { add() {}, remove() {}, contains: () => false, toggle() {} } });
-    e.getContext = () => (e.ctx ??= ctx2d());
+    let ctx = null; // a closure, not a property: on the stand-in every property already reads as something
+    e.getContext = () => (ctx ??= ctx2d());
     e.addEventListener = (n, f) => { (on[n] ??= []).push(f); };
     for (const n of ['setAttribute', 'appendChild', 'focus', 'blur', 'setPointerCapture']) e[n] = () => {};
     e.getAttribute = () => ''; e.toDataURL = () => 'data:image/png;base64,AAAA'; e.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0 });
@@ -73,7 +76,7 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
   };
   const m = creature.mover, agent = creature.agent;
   return {
-    win, R, agent, creature, m, tick, sent, invoked, canvas, listeners, timers,
+    win, R, agent, creature, m, tick, sent, invoked, canvas, listeners, timers, made,
     host: (msg) => win.__roamieHost(msg),
     ptr: (x, y) => win.__roamiePtr(x, y, clock), // the shell's cursor sample; it answers through set_hot
     hot: () => invoked.filter(([c]) => c === 'set_hot').at(-1)?.[1].hot ?? false,

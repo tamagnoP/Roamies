@@ -45,7 +45,8 @@ These are the reasons the fork exists. A change that weakens one needs the owner
 3. **A hand-off that can edit is sent only after the owner says send.** Read-only hand-offs may send themselves after
    the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first. Heard hands-free (in
    an answer window) only "send" or "send it" sends one that can edit. A pending hand-off is only ever asked again:
-   it is never sent because it was pending, and has no countdown.
+   it is never sent because it was pending, and has no countdown. A countdown stopped by stand down (feature 33) is
+   never resumed: the hand-off is kept and only asked again.
 4. **An undo snapshot is taken before any hand-off that can edit** (git ref under `refs/roamies/`).
 5. **Apps on the never-look list are never captured, read or worked in** (`guard.mjs`), and the check fails closed.
 6. **`open` takes an app name only; `act_in_app` works the front app only.** Both limits live in `gateTools`.
@@ -72,6 +73,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
+| `showcase/tauri/sidecar/standdown.mjs` | Ours. Feature 33: stand down: the phrase said alone, the state kept in `state.json`, the line said when it ends. The shell's half is `src-tauri/src/stand.rs` (the phrase) and `voice.rs` (the shortcut). |
 | `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, `makeCommitment`, `reminded` in `addCommitment`, and `doneAt` and `createdAt` in `listItems`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |
