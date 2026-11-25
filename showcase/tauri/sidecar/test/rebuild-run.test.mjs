@@ -21,6 +21,7 @@ execFileSync(process.execPath, ['--input-type=module', '-e', `
   const d = JSON.parse(JSON.stringify(settingsDefaults(os.homedir())));
   d.voiceEngine = 'system'; d.limits.pageRebuildQuietMinutes = 1;
   d.calendar.syncSeconds = 3600; // no sync during the run: with Super Productivity open, its failure in this home is a bubble
+  d.calendar.reviewAt = ''; // the day's review only when asked: at its time (18:00 by default) its line is shown and restarts the quiet minute
   const dir = path.join(os.homedir(), 'Documents', 'roamies-pi');
   fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(d, null, 2));
   const { project } = loadSettings(os.homedir());
@@ -56,6 +57,8 @@ try {
   tell({ type: 'page_rest', on: true, keep: { spin: 2.75 } });
   while (!asked(from) && Date.now() - restAt < 100_000) await sleep(200);
   const ask = asked(from);
+  // Not asked for: what the activity log says happened meanwhile (its kinds and times), to see what broke the quiet.
+  if (!ask) console.error(`rebuild-run: no rebuild ${((Date.now() - restAt) / 1000).toFixed(0)} s after rest. The log:\n${logText().split('\n').filter(Boolean).map((l) => l.split(' ').slice(0, 2).join(' ')).join('\n')}`);
   assert.ok(ask, 'the rebuild is asked for');
   const after = (ask.at - restAt) / 1000;
   assert.ok(after >= 59 && after <= 77, `one quiet minute, give or take a check (${after.toFixed(1)} s)`);
