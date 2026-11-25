@@ -31,7 +31,7 @@ Last updated: 2026-11-21.
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
 | 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
-| 18 | Daily note (plan, log, review) and task pages | Queued (Prompt E), after 24 | |
+| 18 | Daily note (plan, log, review) and task pages | In progress on `daily-note` (plan accepted 2026-11-25): steps 1 to 3 built (the vault's one writer; the note with Plan, Log and Review; the missed-task questions). Waiting for the owner's test before steps 4 to 8 | `daily-note` |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
@@ -1415,9 +1415,35 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   applied at once; each change is measured with its cause. The test fails on the old code.
 - **2026-11-25, later (feature 24, the owner).** The orb did not move at the page rebuild on the installed
   `rebuild-still`. Merge approved: `test:all` passed (449 s), `rebuild-still` fast-forwarded into `local-only`.
+- **2026-11-25 (feature 18, the owner).** Plan accepted, built on `daily-note`, one commit per step. The owner's
+  answers:
+  - **The review.** It runs at `calendar.reviewAt` (default: `calendar.dayEnd`'s value; `""` means only when
+    asked) and when asked by voice. Its summary is two sentences worded by code; no request is made to the model.
+  - **The fresh conversation and guarantee 1.** It starts with part two and the open items only; guarantee 1 is
+    unchanged.
+  - **The day turns** at `calendar.dayTurnsAt` (04:00), for the note and the fresh conversation. Waiting for part
+    two is fine, with a "one moment" line from code.
+  - **Answers to "When will you do it?":** a day and a time, a day, "leave it", or "drop it". "Drop it" stops the
+    questions and logs "Let go"; the to-do is left exactly as it is.
+  - **The Plan** uses plain bullets; feature 25 will make them checkboxes.
+  - **item_dealt_with** closes without a question only on the owner's own words in that turn, checked by code
+    against a fixed list.
+  - **Unanswered missed-task questions** come back the next morning and are not kept as pending.
+  - **Additions:**
+    - `limits.reviewQuestions` (3), oldest first, with one line for the rest.
+    - Part two lists only new "Left open" lines.
+    - A day with no conversation makes no part-two request.
+    - With no morning briefing, the questions come at the end of the first exchange.
+
+  Report after step 3, then stop for the owner's test.
 
 ## 6. Still to test
 
+- [ ] Feature 18, steps 1 to 3 on `daily-note`:
+  - the daily note in the real vault: Plan, Done and Note lines, the review at `calendar.reviewAt` and on "review my
+    day";
+  - the missed-task questions by voice: a time, a day, "leave it", "drop it", and no answer;
+  - the morning questions at the end of the first exchange.
 - [ ] Feature 24, fix 4 with the real voice helper: quit during a spoken reply (the live run on `daf228f` quit after
   the reply had ended).
 - [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first

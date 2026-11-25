@@ -285,6 +285,7 @@ setup guide is open, the bubble waits until it closes.
     "kokoroTimeoutSeconds": 20,
     "historyTokens": 40000,
     "kokoroSentenceChars": 120,
+    "reviewQuestions": 3,
     "pageRebuildQuietMinutes": 15
   },
   "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60,
@@ -408,6 +409,7 @@ setup guide is open, the bubble waits until it closes.
   | `kokoroTimeoutSeconds` | 20 | 2 to 120 | Seconds the natural voice may take over one sentence (six times that to start) before the Mac's voice takes over for the session. |
   | `historyTokens` | 40000 | 20000 to 500000, whole | Tokens sent in one request at which the older part of the conversation is folded into a summary (see "What goes with each request"). Never later than three quarters of what a request may hold. |
   | `kokoroSentenceChars` | 120 | 40 to 1000, whole | A sentence longer than this is split at a clause before the natural voice makes it. |
+  | `reviewQuestions` | 3 | 1 to 20, whole | The most to-dos the daily note's questions ask about each time, oldest first (see "The daily note"). |
   | `pageRebuildQuietMinutes` | 15 | 0 to 1440, whole; 0 is never | Quiet minutes after which the overlay page is made afresh (see "Where the character sits"). |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
@@ -701,12 +703,34 @@ after.
   `## Log`.
 - **Review.** At `calendar.reviewAt` (18:00), or when you say "review my day" (or another phrase in
   `reference.dailyNote.reviewPhrases`) on its own. It lists each planned to-do as **done**, **missed** (its time is
-  over) or **still open today** (its time is still ahead). Two sentences worded by code follow. Roamies then says
-  the counts. A second review adds `## Review update (HH:MM)` with only what changed.
+  over) or **still open today** (its time is still ahead). Two sentences worded by code follow, then the missed ones
+  again under **Needs a new time**. Roamies then says the counts. A second review adds `## Review update (HH:MM)`
+  with only what changed.
+- **Questions.** Roamies never picks a new time itself; it asks "When will you do it?", in a bubble that is said and
+  gets its answer window.
+  - When: after the review, about each missed to-do. In the morning, about each to-do under Needs a new time: after
+    the morning briefing, or, with no briefing, at the end of your first exchange of the day.
+  - How many: at most `limits.reviewQuestions` (3) each time, oldest first. If more remain, one line says how many
+    and that they are in today's note under Needs a new time.
+  - Your answer is judged by code, never by the AI:
+    - **A day and a time** ("tomorrow at 10", "Friday 14:30", "half past three on Monday"). An hour without am or
+      pm is the one inside the working day; when neither is, before 7 means the afternoon. The block moves there
+      (the usual question if it overlaps something), or the due time is set when the to-do has no block. A
+      `Rescheduled` line goes in the Log.
+    - **A day alone** ("Monday", "the 28th"): the due time is set to that day at `calendar.dayEnd`.
+    - **"Leave it"** (or the button): nothing changes; it is asked again the next morning.
+    - **"Drop it"** (or the button): no more questions about it while it keeps that time, and a `Let go` line goes
+      in the Log. The to-do itself is left exactly as it is, in Roamies and in Super Productivity: never deleted,
+      never marked done.
+    - The full lists are in `reference.dailyNote.questions`. "Next Friday", or a time that has passed, is not
+      taken: the bubble shows what it heard and stays open.
+  - No answer changes nothing and ends the round. These questions are not kept as pending questions; they come back
+    the next morning.
 - Only to-dos count. Reminders and timers never appear, and neither does pi's work (it stays in the records folder).
 - Nothing in the daily note is sent to the AI, and making it involves no request. "Review my day" is answered by the
-  app and never reaches the model. The activity log records counts only (`daily_plan`, `daily_log`,
-  `daily_review`); a failure is logged once per reason (`daily_failed`).
+  app and never reaches the model, and so are the questions and your answers. The activity log records counts
+  only (`daily_plan`, `daily_log`, `daily_review`, `daily_questions`); a failure is logged once per reason
+  (`daily_failed`).
 - `state.json` keeps, under `daily`, what was written for each of the last 14 days. This stops a line being written
   twice and lets the review find a to-do finished earlier in the day.
 

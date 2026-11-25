@@ -18,6 +18,8 @@
 //     two things; the caller gives the phrases that name each, and what is said counts only when it is made of one
 //     side's phrases and nothing else. Digits count there ("the 20th"). A no word answers neither. Otherwise it is a
 //     bubble like the others: said, with an answer window, kept when unanswered.
+//   - Feature 18: a question whose answer is judged by the caller's own code (opts.parse: "When will you do it?",
+//     daily.mjs). What is said counts only when parse() takes it; its two buttons answer by position (opts.clicks).
 
 // A click is never judged by words. The overlay answers a bubble with buttons by which button it was: FIRST for the
 // first one (also the Y key), nothing for any other. Should a page ever hand back the button's label instead, the
@@ -122,14 +124,15 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
   function askSpoken(opts, signal) {
     const closing = new AbortController();
     const inner = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
-    const { spoken, pending, which = null, always = false, ...shown } = opts;
+    const { spoken, pending, which = null, always = false, parse = null, clicks = [], hint = '', ...shown } = opts;
+    const button = (a) => { const w = whichButton(a, opts.choices); return w === FIRST ? clicks[0] ?? null : w === SECOND ? clicks[1] ?? null : null; };
     return new Promise((resolve, reject) => {
       const entry = {
         settle(answer, by) {
           const i = waiting.indexOf(entry);
           if (i < 0) return;
           waiting.splice(i, 1);
-          log('bubble_answer', { by, yes: answer === FIRST, ...(which ? { second: answer === SECOND } : {}) });
+          log('bubble_answer', { by, ...(parse ? { kind: answer?.kind ?? null } : { yes: answer === FIRST, ...(which ? { second: answer === SECOND } : {}) }) });
           resolve(answer);
           entry.window?.close(!signal?.aborted); // an answer clears every pending copy of the question (flow.mjs); a bubble taken down with its request is not one
           closing.abort(); // answered by voice: the bubble is taken down
@@ -144,9 +147,10 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
           closing.abort();
         },
         // What was heard and not taken, as the bubble's last line (in place of the hint) until the next phrase.
-        refused(text) { retext(`${opts.placeholder}\n${heardLine(text, which ? which.hint : 'yes or no', heardChars())}`); },
+        refused(text) { retext(`${opts.placeholder}\n${heardLine(text, which ? which.hint : parse ? hint : 'yes or no', heardChars())}`); },
         // What was said, as an answer to this bubble: → [answer] when it is one, else null.
         judge(text, handsFree) {
+          if (parse) { const v = parse(text); return v ? [v] : null; }
           const a = which ? whichAnswer(handsFree ? text : unfilled(text, plainNum), which) : spokenAnswer(handsFree ? text : unfilled(text));
           return !a ? null : [a === 'no' ? null : a === 'yes' ? FIRST : a];
         },
@@ -154,7 +158,7 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
       waiting.push(entry);
       entry.window = question?.({ brief: spoken ?? briefOf(opts.placeholder), pending: pending ?? null, always, onTimeout: () => entry.unanswered() }) ?? null;
       // which: the overlay answers the second button with SECOND instead of nothing (host.js).
-      Promise.resolve(ask({ ...shown, ...(which ? { second: SECOND } : {}), placeholder: `${opts.placeholder}\n${which ? `Say ${which.hint}, or click.` : SPOKEN_HINT}` }, inner)).then((a) => entry.settle(which ? whichButton(a, opts.choices) : firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
+      Promise.resolve(ask({ ...shown, ...(which || parse ? { second: SECOND } : {}), placeholder: `${opts.placeholder}\n${which ? `Say ${which.hint}, or click.` : parse ? `Say ${hint}, or click.` : SPOKEN_HINT}` }, inner)).then((a) => entry.settle(parse ? button(a) : which ? whichButton(a, opts.choices) : firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
     });
   }
   return {

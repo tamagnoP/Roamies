@@ -469,6 +469,10 @@ out = await T('move_block').execute({ todo: third.id, start: '09:15', minutes: 2
 assert.match(out, /Wednesday 25 November, 09:15 to 09:35/);
 assert.deepEqual(writes(mark).map((w) => w.body), [{ dueWithTime: at(25, 16) }, { dueWithTime: at(25, 9, 15), timeEstimate: 20 * M }]);
 await assert.rejects(T('move_block').execute({ todo: third.id }), /Say what changes/);
+// Feature 18: the daily note's question, answered with a day and a time, moves the block (daily.mjs).
+mark = app.log.length;
+assert.deepEqual(await cal.reschedule(third.id, { start: at(26, 14) }), { ok: true, line: '"Book room D" is now Thursday 26 November, 14:00 to 14:20.' });
+assert.deepEqual(writes(mark).map((w) => w.body), [{ dueWithTime: at(26, 14) }]); assert.equal(third.status, 'open');
 mark = app.log.length;
 out = await T('unschedule_block').execute({ todo: third.id });
 assert.equal(out, '"Book room D" is off the calendar. It is still on the to-do list.');
@@ -476,6 +480,15 @@ assert.deepEqual(writes(mark).map((w) => w.body), [{ dueWithTime: null }]); asse
 assert.equal(linkOf(third).local.minutes, 20, 'the length is kept');
 assert.equal(await T('unschedule_block').execute({ todo: third.id }), '"Book room D" has no block on the calendar.');
 await assert.rejects(T('move_block').execute({ todo: third.id, start: '09:00' }), /has no block to move/);
+// Feature 18: with no block, a day and a time set its due time; a day alone, that day at dayEnd. Nothing else changes.
+assert.deepEqual(await cal.reschedule(third.id, { start: at(27, 10) }), { ok: true, line: '"Book room D" is now due Friday 27 November at 10:00.' });
+assert.equal(third.due, at(27, 10)); assert.equal(linkOf(third).local.start, null, 'no block is made');
+assert.deepEqual(await cal.reschedule(third.id, { day: new Date(2026, 10, 28) }), { ok: true, line: '"Book room D" is now due Saturday 28 November.' });
+assert.equal(third.due, at(28, 18)); assert.equal(third.status, 'open');
+await cal.sync('test'); assert.equal(app.tasks.get(linkOf(third).task).deadlineWithTime, at(28, 18), 'the due time reaches the app at the next sync');
+const nudgeOnly = add('Stretch', { due: at(26, 9), kind: 'reminder' });
+assert.deepEqual(await cal.reschedule(nudgeOnly.id, { start: at(27, 10) }), { ok: false, line: 'That to-do is no longer open, so nothing was changed.' }, 'a reminder is not one of the daily note\'s to-dos');
+assert.equal(nudgeOnly.due, at(26, 9)); nudgeOnly.status = 'dropped';
 
 // ---- ticking a to-do marks its block's task done
 const reviewTask = linkOf(review).task; review.status = 'done'; await cal.changed(review);

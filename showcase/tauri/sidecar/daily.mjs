@@ -6,9 +6,17 @@
 //     briefing, or by the first thing written in the note that day.
 //   - Log: a line when a to-do is finished (seen at each check, whether it was ticked in Roamies or in Super
 //     Productivity) and when a note is taken. A Log line that comes after another section starts a new "## Log".
-//   - Review: each planned to-do as done, missed or still open today, and two sentences worded here. Written at
-//     "calendar.reviewAt", or when the owner asks for it. A second review adds "## Review update (HH:MM)" with only
-//     what changed.
+//   - Review: each planned to-do as done, missed or still open today, the missed ones again under "Needs a new
+//     time", and two sentences worded here. Written at "calendar.reviewAt", or when the owner asks for it. A second
+//     review adds "## Review update (HH:MM)" with only what changed.
+//   - Questions: after the review, each missed to-do is asked about ("When will you do it?"), and in the morning each
+//     one that needs a new time: after the morning briefing, or at the end of the first exchange of the day when
+//     there is no briefing. "limits.reviewQuestions" at most each time, oldest first; one line says how many are
+//     left. The answer is judged here, in code (parseWhen): a day and a time, a day, "leave it" or "drop it". Roamies
+//     never picks a time. A time moves the to-do's block there, or sets its due time when it has no block; a day
+//     sets its due time; "leave it" changes nothing (it is asked again the next morning); "drop it" stops the
+//     questions about that to-do and logs "Let go", leaving the to-do exactly as it is. No answer changes nothing.
+//     These questions are not kept as pending questions: they come back the next morning.
 //
 // Only to-dos count (kind "commitment"); reminders and timers never appear. pi's work is not in it (it stays in the
 // records folder). Nothing here makes a request to the model, and nothing of the note goes to it.
@@ -24,6 +32,11 @@ export const KEEP_DAYS = 14; // what is kept in state.json about each day
 export const REVIEW_PHRASES = ['review my day', 'review the day', 'review today', 'day review', 'daily review', 'evening review', 'end of day review', 'do my review', 'do the review', 'run the review', 'run my review', 'my day review', 'how did my day go', 'how did today go'];
 const REVIEW = only(REVIEW_PHRASES);
 export const isReviewAsk = (text) => REVIEW.test(unfilled(text));
+// The answers to "When will you do it?" that aren't a time, said alone. The buttons are the same two.
+export const LEAVE_WORDS = ['leave it', 'leave it for now', 'leave it there', 'leave', 'skip it', 'skip', 'not now', 'ask me later', 'ask me tomorrow'];
+export const DROP_WORDS = ['drop it', 'drop', 'let it go', 'let go', 'forget it', 'forget about it', 'stop asking', 'stop asking about it'];
+export const WHEN_HINT = 'a day and a time, a day, "leave it" or "drop it"';
+const LEAVE = only(LEAVE_WORDS), DROP = only(DROP_WORDS);
 
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -42,6 +55,106 @@ export function noteDay(ms, turn = 0) {
   d.setHours(0, 0, 0, 0);
   return d;
 }
+// ---- the answer to "When will you do it?", judged in code
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const MONTH_NAMES = MONTH.map((m) => m.toLowerCase());
+const HOUR_WORDS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth', 'twenty first', 'twenty second', 'twenty third', 'twenty fourth', 'twenty fifth', 'twenty sixth', 'twenty seventh', 'twenty eighth', 'twenty ninth', 'thirtieth', 'thirty first'];
+const MINUTE_WORDS = { 'oh five': 5, ten: 10, fifteen: 15, twenty: 20, thirty: 30, 'forty five': 45, 'o clock': 0, oclock: 0 };
+const words = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/\b([ap])\.?\s?m\b\.?/g, '$1m').replace(/(\d)([a-z])/g, '$1 $2').replace(/[^a-z0-9:]+/g, ' ').trim();
+const alt = (list) => list.slice().sort((a, b) => b.length - a.length).join('|');
+const ORD_RE = new RegExp(`^(?:the )?(?:(\\d{1,2})(?: (?:st|nd|rd|th))?|(${alt(ORDINAL_WORDS)}))(?: of)?(?: (${alt(MONTH_NAMES)}))?$`);
+const MONTH_FIRST_RE = new RegExp(`^(${alt(MONTH_NAMES)}) (?:the )?(?:(\\d{1,2})(?: (?:st|nd|rd|th))?|(${alt(ORDINAL_WORDS)}))$`);
+const LATER = '(?: (in the morning|in the afternoon|in the evening|at night|tonight))?';
+const DIGIT_TIME = new RegExp(`^(\\d{1,2})(?::(\\d{2})| (\\d{2}))?(?: (am|pm|o clock|oclock))?${LATER}$`);
+const WORD_TIME = new RegExp(`^(${alt(HOUR_WORDS)})(?: (${alt(Object.keys(MINUTE_WORDS))}))?(?: (am|pm))?${LATER}$`);
+const PAST_TIME = new RegExp(`^(half past|quarter past|quarter to) (\\d{1,2}|${alt(HOUR_WORDS)})(?: (am|pm))?${LATER}$`);
+
+/** A day as said: → { day (00:00), weekday, pm } or null. "Next friday" is not taken (which one is not guessed). */
+function dayPart(str, today) {
+  const t = str.replace(/^(?:on|this) /, '');
+  const plus = (n) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + n);
+  if (t === 'today') return { day: plus(0) };
+  if (t === 'tonight') return { day: plus(0), pm: true };
+  if (t === 'tomorrow') return { day: plus(1) };
+  if (t === 'day after tomorrow' || t === 'the day after tomorrow') return { day: plus(2) };
+  const w = DAY_NAMES.findIndex((n) => n === t || (t.length === 3 && n.startsWith(t)));
+  if (w >= 0) return { day: plus((w - today.getDay() + 7) % 7), weekday: true };
+  let n = null, month = null, m;
+  if ((m = ORD_RE.exec(t)) && (m[1] || m[2]) && (t.startsWith('the ') || m[2] || m[3] || /\d (?:st|nd|rd|th)/.test(t))) { n = m[1] ? +m[1] : ORDINAL_WORDS.indexOf(m[2]) + 1; month = m[3] ? MONTH_NAMES.indexOf(m[3]) : null; }
+  else if ((m = MONTH_FIRST_RE.exec(t))) { month = MONTH_NAMES.indexOf(m[1]); n = m[2] ? +m[2] : ORDINAL_WORDS.indexOf(m[3]) + 1; }
+  if (n === null || n < 1 || n > 31) return null;
+  for (let ahead = 0; ahead < 13; ahead++) {
+    const y = today.getFullYear(), mo = month === null ? today.getMonth() + ahead : month, d = new Date(month === null ? y : y + ahead, mo, n);
+    if (d.getDate() !== n) { if (month !== null) return null; continue; }
+    if (d >= today) return { day: d };
+    if (month !== null && ahead > 0) return null;
+  }
+  return null;
+}
+/** A time as said: → { h, m, mer, pm } or null. */
+function timePart(str) {
+  const t = str.replace(/^at /, '');
+  if (t === 'noon' || t === 'midday') return { h: 12, m: 0, mer: 'pm' };
+  const later = (x) => (x === 'in the morning' ? 'am' : x ? 'pm' : null);
+  let m;
+  if ((m = DIGIT_TIME.exec(t))) { const mer = m[4] === 'am' || m[4] === 'pm' ? m[4] : null; return { h: +m[1], m: m[2] ? +m[2] : m[3] ? +m[3] : 0, mer: mer ?? later(m[5]) }; }
+  if ((m = WORD_TIME.exec(t))) return { h: HOUR_WORDS.indexOf(m[1]) + 1, m: m[2] ? MINUTE_WORDS[m[2]] : 0, mer: m[3] ?? later(m[4]) };
+  if ((m = PAST_TIME.exec(t))) {
+    const h = /^\d/.test(m[2]) ? +m[2] : HOUR_WORDS.indexOf(m[2]) + 1, mer = m[3] ?? later(m[4]);
+    return m[1] === 'quarter to' ? { h: h - 1 || 12, m: 45, mer } : { h, m: m[1] === 'half past' ? 30 : 15, mer };
+  }
+  return null;
+}
+/** The minutes after midnight a time means. Without am or pm, an hour from 1 to 12 is the one inside the working day
+ *  (dayStart to dayEnd); when neither is, before 7 means the afternoon. */
+function minutesOf({ h, m, mer }, pm, dayStart, dayEnd) {
+  if (h > 23 || m > 59) return null;
+  if (mer) { if (h < 1 || h > 12) return null; return ((h % 12) + (mer === 'pm' ? 12 : 0)) * 60 + m; }
+  if (h === 0 || h > 12) return h * 60 + m;
+  if (h === 12) return 12 * 60 + m;
+  const am = h * 60 + m, later = (h + 12) * 60 + m;
+  if (pm) return later;
+  if (am >= dayStart && am < dayEnd) return am;
+  if (later >= dayStart && later < dayEnd) return later;
+  return h < 7 ? later : am;
+}
+/** What was said, as the answer to "When will you do it?": { kind: 'at', start } (a day and a time; a time alone is
+ *  the next one to come), { kind: 'day', day } (a day alone: 00:00), { kind: 'leave' }, { kind: 'drop' }, or null
+ *  when it is none of them (a time that has passed, "next friday", anything else). */
+export function parseWhen(text, { now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
+  const p = unfilled(text, words), raw = words(text);
+  if (!p) return null;
+  if (LEAVE.test(p) || LEAVE.test(raw)) return { kind: 'leave' };
+  if (DROP.test(p) || DROP.test(raw)) return { kind: 'drop' };
+  const n = new Date(now), today = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  const tokens = p.split(' ');
+  for (let k = 0; k <= tokens.length; k++) {
+    const left = tokens.slice(0, k).join(' '), right = tokens.slice(k).join(' ');
+    for (const [ds, ts] of [[left, right], [right, left]]) {
+      const d = ds ? dayPart(ds, today) : null, t = ts ? timePart(ts) : null;
+      if ((ds && !d) || (ts && !t) || (!d && !t)) continue;
+      if (d && !t) {
+        const due = d.day.getTime() + dayEnd * 60_000;
+        if (due > now) return { kind: 'day', day: d.day };
+        if (d.weekday) return { kind: 'day', day: new Date(d.day.getFullYear(), d.day.getMonth(), d.day.getDate() + 7) };
+        return null;
+      }
+      const mins = minutesOf(t, !!d?.pm, dayStart, dayEnd);
+      if (mins === null) return null;
+      const on = d ? d.day : today;
+      let start = new Date(on.getFullYear(), on.getMonth(), on.getDate(), 0, mins).getTime();
+      if (start <= now) {
+        if (!d) start = new Date(on.getFullYear(), on.getMonth(), on.getDate() + 1, 0, mins).getTime();
+        else if (d.weekday) start = new Date(on.getFullYear(), on.getMonth(), on.getDate() + 7, 0, mins).getTime();
+        else return null;
+      }
+      return { kind: 'at', start };
+    }
+  }
+  return null;
+}
+
 /** A note day's stretch of time: from its turn to the next one. */
 export function dayWindow(day, turn = 0) {
   return { from: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, turn).getTime(), until: new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 0, turn).getTime() };
@@ -63,6 +176,9 @@ const span = (x) => (x.block ? `${hm(x.at)} to ${hm(x.end)}` : `due ${hm(x.at)}`
 /**
  * todos(): every to-do and reminder that is open or was finished today: [{ id, text, kind, status, due, doneAt }].
  * blocks(): { to-do id: { start, minutes, kept } } (calendar.mjs).
+ * The questions (ask) are given their means by the caller: io.ask(opts) is the bubble (answers.mjs, with parse),
+ * io.reschedule(id, { start } | { day }) gives the to-do its new time (calendar.mjs) → { ok, line }, io.say(text)
+ * says a line and resolves when it has been said.
  */
 export function createDaily({ home = os.homedir(), userName = 'the user', todos = () => [], blocks = () => ({}), log = () => {}, now = () => Date.now() } = {}) {
   const vault = createVault({ home, userName });
@@ -71,14 +187,17 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   // ---- what is kept in state.json, under "daily": { days: { "YYYY-MM-DD": { plan, done, noted, planned, review } } }
   //   plan: when the Plan was written; done: { to-do id: { title, at } } for the Done lines written; noted: notes
   //   logged; planned: { to-do id: { title, at, end, block } }, each planned to-do as it was last seen (a finished
-  //   one loses its block on the calendar side); review: { at, status: { id: 'done' | 'missed' | 'open' } }.
-  const blank = () => ({ days: {} });
+  //   one loses its block on the calendar side); review: { at, status: { id: 'done' | 'missed' | 'open' } };
+  //   answered: { to-do id: 'moved' | 'left' | 'dropped' } for the questions answered that day; morning: when the
+  //   morning's questions were asked. letGo: { to-do id: the latest time it had when it was let go }: no question
+  //   about it while that is still its latest time.
+  const blank = () => ({ days: {}, letGo: {} });
   function get() {
     const d = readState(settings().dir).daily;
-    return d && typeof d === 'object' && !Array.isArray(d) ? { ...blank(), ...d, days: d.days && typeof d.days === 'object' ? d.days : {} } : blank();
+    return d && typeof d === 'object' && !Array.isArray(d) ? { ...blank(), ...d, days: d.days && typeof d.days === 'object' ? d.days : {}, letGo: d.letGo && typeof d.letGo === 'object' ? d.letGo : {} } : blank();
   }
   function edit(fn) {
-    const dir = settings().dir, all = readState(dir), d = all.daily && typeof all.daily === 'object' ? { ...blank(), ...all.daily } : blank();
+    const dir = settings().dir, d = get();
     const out = fn(d);
     const keys = Object.keys(d.days).sort();
     for (const k of keys.slice(0, Math.max(0, keys.length - KEEP_DAYS))) delete d.days[k];
@@ -102,7 +221,8 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     const seen = get().days[t0.key]?.planned ?? {};
     for (const t of all) if (t.status === 'done' && seen[t.id] && !planned.some((p) => p.t.id === t.id)) planned.push({ t, x: { at: seen[t.id].at, end: seen[t.id].end, block: seen[t.id].block ? { kept: false } : null } });
     planned.sort((a, c) => a.x.at - c.x.at);
-    const needs = open.map((t) => ({ t, last: latestTime(t, b[t.id]) })).filter((p) => p.last !== null && p.last < t0.w.from).sort((a, c) => a.last - c.last);
+    const gone = get().letGo;
+    const needs = open.map((t) => ({ t, last: latestTime(t, b[t.id]) })).filter((p) => p.last !== null && p.last < t0.w.from && gone[p.t.id] !== p.last).sort((a, c) => a.last - c.last);
     const soon = t0.w.until + COMING_DAYS * 864e5;
     const coming = open.filter((t) => typeof t.due === 'number' && t.due >= t0.w.until && t.due < soon).sort((a, c) => a.due - c.due);
     return { planned, needs, coming };
@@ -195,11 +315,14 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     const rows = standing(t0), day = get().days[t0.key] ?? {}, at = hm(now());
     const extra = Object.keys(day.done ?? {}).filter((id) => !day.planned?.[id]).length;
     const before = day.review?.status ?? null;
+    const gone = get().letGo, b = blocks(), all = new Map(list().map((t) => [t.id, t]));
+    const needs = rows.filter((r) => r.status === 'missed' && gone[r.id] !== latestTime(all.get(r.id) ?? {}, b[r.id]));
+    const needsText = needs.length ? `\n### Needs a new time\n${needs.map((r) => `- ${r.title} (${r.x.block ? `${hm(r.x.at)} to ${hm(r.x.end)}` : `due ${hm(r.x.at)}`})`).join('\n')}\n` : '';
     let text;
-    if (!before) text = `\n## Review (${at})\n${rows.length ? rows.map(reviewLine).join('\n') : '- Nothing was planned.'}\n\n${summary(rows, extra, day.noted ?? 0)}\n`;
+    if (!before) text = `\n## Review (${at})\n${rows.length ? rows.map(reviewLine).join('\n') : '- Nothing was planned.'}\n\n${summary(rows, extra, day.noted ?? 0)}\n${needsText}`;
     else {
       const changed = rows.filter((r) => before[r.id] !== r.status);
-      text = `\n## Review update (${at})\n${changed.length ? changed.map(reviewLine).join('\n') : `- Nothing has changed since ${day.review.at}.`}\n\n${summary(rows, extra, day.noted ?? 0)}\n`;
+      text = `\n## Review update (${at})\n${changed.length ? changed.map(reviewLine).join('\n') : `- Nothing has changed since ${day.review.at}.`}\n\n${summary(rows, extra, day.noted ?? 0)}\n${needsText}`;
     }
     vault.append(t0.rel, text);
     editDay(t0.key, (d) => { d.review = { at: before ? d.review.at : at, status: Object.fromEntries(rows.map((r) => [r.id, r.status])) }; });
@@ -207,6 +330,66 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     log('daily_review', { by, update: !!before, planned: rows.length, done: count('done'), missed: count('missed'), open: count('open') });
     const line = rows.length ? `Day review: ${count('done')} of ${plural(rows.length, 'planned to-do')} done${count('missed') ? `, ${count('missed')} missed` : ''}${count('open') ? `, ${count('open')} still open` : ''}. It's in today's note.` : 'Day review: nothing was planned for today. It\'s in today\'s note.';
     return { rows, missed: rows.filter((r) => r.status === 'missed'), line };
+  }
+
+  // ---- the questions
+  /** Of these to-dos, the ones that may be asked about: not let go at the time they have, and not answered today. */
+  function askable(t0, rows) {
+    const d = get(), answered = d.days[t0.key]?.answered ?? {}, b = blocks(), all = new Map(list().map((t) => [t.id, t]));
+    return rows.filter((r) => { const t = all.get(r.id); return t && t.status === 'open' && !answered[r.id] && d.letGo[r.id] !== latestTime(t, b[r.id]); });
+  }
+  /** What is asked: after the review, the missed to-dos; in the morning, the ones that need a new time. Oldest first. */
+  function questions(kind, t0 = today()) {
+    if (kind === 'review') return askable(t0, standing(t0).filter((r) => r.status === 'missed')).map((r) => ({ id: r.id, title: r.title, question: `${r.title} ${r.x.block ? `was planned for ${hm(r.x.at)} to ${hm(r.x.end)}` : `was due at ${hm(r.x.at)}`} and isn't done. When will you do it?` }));
+    return askable(t0, planFor(t0).needs.map(({ t, last }) => ({ id: t.id, title: oneLine(t.text), last }))).map((r) => ({ id: r.id, title: r.title, question: `${r.title} needs a new time: it was ${dayLong(new Date(r.last))}, ${hm(r.last)}. When will you do it?` }));
+  }
+  /** Whether the morning's questions are to be asked at the end of this exchange: not asked yet today, a morning
+   *  briefing isn't still to come (it asks them itself), and there is something to ask. */
+  function morningDue() {
+    try {
+      const t0 = today();
+      if (get().days[t0.key]?.morning) return false;
+      const b = t0.s.briefings.morning, n = new Date(now()), mins = n.getHours() * 60 + n.getMinutes();
+      const given = readState(t0.s.dir).briefings?.morning === ymd(n);
+      if (b !== null && !given && mins < b + t0.s.limits.morningBriefingWindowHours * 60) return false;
+      return questions('morning', t0).length > 0;
+    } catch { return false; }
+  }
+  /** Asks about each to-do (kind: 'review' | 'morning'), at most limits.reviewQuestions of them, oldest first, one
+   *  at a time; the first left unanswered ends the round. → { asked, left }. */
+  async function ask(kind, io) {
+    const t0 = ensure(today()), most = t0.s.limits.reviewQuestions, all = questions(kind, t0);
+    if (kind === 'morning') editDay(t0.key, (d) => { d.morning = hm(now()); });
+    const mark = (id, how) => editDay(t0.key, (d) => { d.answered = { ...(d.answered ?? {}), [id]: how }; });
+    const counts = { moved: 0, leave: 0, dropped: 0, failed: 0 };
+    let asked = 0, ended = '';
+    for (const q of all.slice(0, most)) {
+      const s = settings();
+      const opts = { placeholder: q.question, spoken: q.question, choices: ['Leave it', 'Drop it'], clicks: [{ kind: 'leave' }, { kind: 'drop' }], hint: WHEN_HINT, parse: (text) => parseWhen(text, { now: now(), dayStart: s.calendar.dayStart, dayEnd: s.calendar.dayEnd }) };
+      let a;
+      try { a = await io.ask(opts); } catch (e) { if (e?.name !== 'Unanswered') throw e; ended = 'unanswered'; asked++; break; }
+      asked++;
+      if (!a) { ended = 'closed'; break; }
+      if (a.kind === 'leave') { mark(q.id, 'left'); counts.leave++; continue; }
+      if (a.kind === 'drop') {
+        const t = list().find((x) => x.id === q.id), b = blocks()[q.id];
+        edit((d) => { d.letGo = { ...d.letGo, [q.id]: t ? latestTime(t, b) : null }; const open = new Set(list().filter((x) => x.status === 'open').map((x) => x.id)); for (const id of Object.keys(d.letGo)) if (!open.has(id)) delete d.letGo[id]; });
+        mark(q.id, 'dropped'); counts.dropped++;
+        logLines(today(), [`- ${hm(now())} Let go: ${q.title}`]);
+        await io.say(`I'll stop asking about ${q.title}.`);
+        continue;
+      }
+      const r = await io.reschedule(q.id, a.kind === 'at' ? { start: a.start } : { day: a.day });
+      if (r.ok) {
+        mark(q.id, 'moved'); counts.moved++;
+        logLines(today(), [`- ${hm(now())} Rescheduled: ${q.title} → ${a.kind === 'at' ? `${dayLong(new Date(a.start))}, ${hm(a.start)}` : `due ${dayLong(a.day)}`}`]);
+      } else counts.failed++;
+      if (r.line) await io.say(r.line);
+    }
+    const left = all.length - asked;
+    if (left > 0) await io.say(`${left} more ${left === 1 ? 'needs' : 'need'} a new time: ${left === 1 ? 'it\'s' : 'they\'re'} in today's note under Needs a new time.`);
+    log('daily_questions', { kind, total: all.length, asked, left, ...counts, ...(ended ? { ended } : {}) });
+    return { asked, left };
   }
 
   /** Whether the review is due by the clock: "calendar.reviewAt" has come today and today has no review yet. */
@@ -218,5 +401,6 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     } catch { return false; }
   }
 
-  return { tick, noted, ensure, review, reviewDue, today, planFor, state: get };
+  const morningAsked = () => { try { return !!get().days[today().key]?.morning; } catch { return true; } };
+  return { tick, noted, ensure, review, reviewDue, questions, morningDue, morningAsked, ask, today, planFor, state: get };
 }

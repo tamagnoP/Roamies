@@ -423,8 +423,23 @@ function dailyDo(what, fn) {
     return null;
   }
 }
+// The daily note's questions ("When will you do it?"): bubbles that take a click or a spoken answer judged by code
+// (daily.mjs), asked as a series (flow.mjs) when nothing else is going on: after the review, after the morning
+// briefing, and at the end of the first exchange of the day when there is no briefing.
+const dailyIO = {
+  ask: (opts) => answers.ask(opts),
+  reschedule: (id, when) => cal.reschedule(id, when),
+  say: (text) => { say(text, 'happy'); return lineDone(forVoice(text)); },
+};
+async function dailyAsk(kind) {
+  for (let i = 0; i < 120; i++) {
+    try { if (await flow.series(() => daily.ask(kind, dailyIO))) return; } catch (e) { dailyDo('questions', () => { throw e; }); return; }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  logLine('daily_questions_skipped', { kind });
+}
 // The day's review (daily.mjs): at "calendar.reviewAt", or when they ask for it. Written in today's note; the counts
-// are said in words worded by the app.
+// are said in words worded by the app, then the missed to-dos are asked about.
 let reviewing = false;
 async function dayReview(by) {
   if (reviewing) return;
@@ -433,6 +448,7 @@ async function dayReview(by) {
     const r = dailyDo('review', () => daily.review({ by }));
     if (!r) { const line = 'I couldn\'t write the day\'s review in the daily note: the activity log says why.'; say(line, 'concerned'); await lineDone(forVoice(line)); return; }
     say(r.line, 'happy'); await lineDone(forVoice(r.line));
+    await dailyAsk('review');
   } catch (e) { console.error('daily review', e); } finally { reviewing = false; }
 }
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
@@ -508,6 +524,7 @@ const flow = createFlow({
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),
   onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key'); },
   actions: () => cal.kept(), // blocks kept until Super Productivity is open: listed by show_pending and the morning briefing
+  afterExchange: { due: () => daily.morningDue(), run: () => daily.ask('morning', dailyIO) }, // feature 18: no morning briefing: the first exchange's end asks
   log: (kind, data) => logLine(kind, data),
 });
 for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);
@@ -2147,15 +2164,16 @@ setInterval(() => {
   // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken shortly before a briefing.
   try { if (pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
   try {
+    // Local-only build (feature 18): the day's review, when its time has come and nothing else is going on. It needs
+    // no model, so it doesn't wait for a sign-in.
+    if (!reviewing && !pi.busy() && daily.reviewDue() && calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window()) { dayReview('time').catch((e) => console.error('daily review', e)); return; }
     if (busy || queued || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
-    // Local-only build (feature 18): the day's review, when its time has come and nothing else is going on.
-    if (!reviewing && daily.reviewDue() && calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window()) { dayReview('time').catch((e) => console.error('daily review', e)); return; }
     const b = pi.briefing();
     if (!b) return;
     pi.briefing.done(b.kind);
     if (b.kind === 'morning') dailyDo('plan', () => daily.ensure()); // feature 18: the morning briefing writes the day's Plan
     logLine('briefing', { kind: b.kind });
-    cal.sync('briefing').catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`)); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
+    cal.sync('briefing').catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`).then(() => (b.kind === 'morning' && !daily.morningAsked() ? dailyAsk('morning') : null)).catch((e) => console.error('briefing', e))); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the

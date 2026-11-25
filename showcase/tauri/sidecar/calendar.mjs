@@ -963,6 +963,32 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         const where = `${quote(t.text)} is now ${dayName(at.day)}, ${span({ start: at.start, minutes: length })}.`;
         return { text: settle(pre, where), say: where };
   }
+  /** Feature 18: a new time for a to-do, from the owner's answer to the daily note's question (daily.mjs). when:
+   *  { start } (a day and a time) moves its block there (the usual question when it overlaps something; kept when
+   *  the app is closed), or sets its due time when it has no block; { day } sets its due time to that day at dayEnd and
+   *  leaves any block as it is. Nothing is deleted or marked done. → { ok, line }: line is what the owner is told. */
+  async function reschedule(id, when) {
+    const t = (await todos.all()).find((x) => x.id === id);
+    if (!t || t.status !== 'open' || t.kind !== 'commitment') return { ok: false, line: 'That to-do is no longer open, so nothing was changed.' };
+    const name = quote(t.text);
+    try {
+      if (when.start != null && blockOf(id)) {
+        const d = new Date(when.start);
+        const r = await doMove({ todo: id, date: ymd(d), start: hm(when.start) });
+        await r.text; // the sync that sends it over
+        return { ok: true, line: r.say };
+      }
+      const due = when.start ?? new Date(when.day.getFullYear(), when.day.getMonth(), when.day.getDate(), 0, settings().calendar.dayEnd).getTime();
+      await todos.update(id, { dueMs: due });
+      log('calendar_due', { from: 'daily' });
+      sync('change').catch(() => {});
+      return { ok: true, line: `${name} is now due ${dayName(new Date(due))}${when.start != null ? ` at ${hm(due)}` : ''}.` };
+    } catch (e) {
+      if (e?.declined || e?.name === 'Unanswered') return { ok: false, line: `${name} stays as it was.` };
+      log('calendar_reschedule_failed', { kind: e?.constructor?.name ?? 'Error' });
+      return { ok: false, line: `I couldn't give ${name} a new time, so it stays as it was.` };
+    }
+  }
   const blockTools = [
     {
       name: 'schedule_block',
@@ -1381,5 +1407,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).${cal.adopt ? ' Every open task they have in the app is on the to-do list too, whoever made it; the app adds new ones itself.' : ''}` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, resume, dayNote, outline, startup, takeHeld, hasHeld, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, reschedule, resume, dayNote, outline, startup, takeHeld, hasHeld, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
 }

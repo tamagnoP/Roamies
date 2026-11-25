@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createDaily, dayWindow, isReviewAsk, noteDay, timeOn } from '../daily.mjs';
+import { WHEN_HINT, createDaily, dayWindow, isReviewAsk, noteDay, parseWhen, timeOn } from '../daily.mjs';
+import { SECOND, createAnswers } from '../answers.mjs';
+import { createFlow } from '../flow.mjs';
 import { loadSettings, readState } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'daily-home-')));
@@ -94,17 +96,20 @@ assert.ok(note().endsWith(`- 11:59 Done: Someday
 - Still open today: Call Ana (due 20:00)
 
 1 of 3 planned to-dos done, 1 missed, 1 still open today. 1 more to-do done that wasn't planned, and 1 note taken.
+
+### Needs a new time
+- Send slides (due 17:00)
 `));
 assert.equal(daily.reviewDue(), false, 'once a day by the clock');
 // A Log line after the review starts a Log of its own.
 clock = at(26, 19); finish('c', at(26, 19)); daily.tick();
-assert.ok(note().endsWith('1 note taken.\n\n## Log\n- 19:00 Done: Call Ana\n'));
+assert.ok(note().endsWith('- Send slides (due 17:00)\n\n## Log\n- 19:00 Done: Call Ana\n'));
 // A second review adds only what changed.
 clock = at(26, 21, 10);
 assert.equal(daily.review({ by: 'asked' }).line, 'Day review: 2 of 3 planned to-dos done, 1 missed. It\'s in today\'s note.');
-assert.ok(note().endsWith('- 19:00 Done: Call Ana\n\n## Review update (21:10)\n- Done: Call Ana\n\n2 of 3 planned to-dos done, 1 missed. 1 more to-do done that wasn\'t planned, and 1 note taken.\n'));
+assert.ok(note().endsWith('- 19:00 Done: Call Ana\n\n## Review update (21:10)\n- Done: Call Ana\n\n2 of 3 planned to-dos done, 1 missed. 1 more to-do done that wasn\'t planned, and 1 note taken.\n\n### Needs a new time\n- Send slides (due 17:00)\n'));
 clock = at(26, 21, 20); daily.review({ by: 'asked' });
-assert.ok(note().endsWith('## Review update (21:20)\n- Nothing has changed since 18:30.\n\n2 of 3 planned to-dos done, 1 missed. 1 more to-do done that wasn\'t planned, and 1 note taken.\n'));
+assert.ok(note().endsWith('## Review update (21:20)\n- Nothing has changed since 18:30.\n\n2 of 3 planned to-dos done, 1 missed. 1 more to-do done that wasn\'t planned, and 1 note taken.\n\n### Needs a new time\n- Send slides (due 17:00)\n'));
 assert.ok(note().startsWith(plan));
 // Still the 26th at 03:00 the next morning; the 27th from 04:00, with its own note.
 clock = at(27, 3); assert.equal(daily.today().key, '2026-11-26');
@@ -159,6 +164,123 @@ s = withCal(file0.calendar, { dailyFolder: 'Journal' }); assert.equal(s.dailyFol
 clock = at(30, 9); daily.ensure(); assert.ok(fs.existsSync(path.join(vault, 'Journal', '2026-11-30.md')));
 fs.writeFileSync(settingsFile, JSON.stringify(file0));
 
+// ---- the answer to "When will you do it?", judged in code (Thursday 26 November, 18:30; working day 09:00 to 18:00)
+const t1830 = at(26, 18, 30), when = (text) => { const r = parseWhen(text, { now: t1830, dayStart: 540, dayEnd: 1080 }); return r && (r.kind === 'at' ? new Date(r.start).toString().slice(0, 21) : r.kind === 'day' ? `day ${r.day.toDateString()}` : r.kind); };
+for (const [said, want] of [
+  ['tomorrow at 10', 'Fri Nov 27 2026 10:00'], ['Friday 14:30', 'Fri Nov 27 2026 14:30'], ['friday at 2:30 pm', 'Fri Nov 27 2026 14:30'],
+  ['at 2', 'Fri Nov 27 2026 14:00'], ['at 9', 'Fri Nov 27 2026 09:00'], ['at 6', 'Fri Nov 27 2026 18:00'], ['3pm', 'Fri Nov 27 2026 15:00'],
+  ['10 a.m. tomorrow', 'Fri Nov 27 2026 10:00'], ['tomorrow 10am', 'Fri Nov 27 2026 10:00'], ['noon tomorrow', 'Fri Nov 27 2026 12:00'],
+  ['um, tomorrow at ten thirty please', 'Fri Nov 27 2026 10:30'], ['half past three on monday', 'Mon Nov 30 2026 15:30'], ['quarter to nine tomorrow', 'Fri Nov 27 2026 08:45'],
+  ['tonight at 8', 'Thu Nov 26 2026 20:00'], ['28 November at 9', 'Sat Nov 28 2026 09:00'], ['on the 30th at 11', 'Mon Nov 30 2026 11:00'],
+  ['tomorrow', 'day Fri Nov 27 2026'], ['monday', 'day Mon Nov 30 2026'], ['the 28th', 'day Sat Nov 28 2026'], ['december 1st', 'day Tue Dec 01 2026'],
+  ['thursday', 'day Thu Dec 03 2026'], ['the day after tomorrow', 'day Sat Nov 28 2026'],
+  ['leave it', 'leave'], ['Not now.', 'leave'], ['drop it', 'drop'], ['let it go', 'drop'],
+  ['today at 9', null], ['next friday', null], ['next week', null], ['banana', null], ['tomorrow at 25', null], ['', null], ['delete it', null], ['mark it done', null],
+]) assert.equal(when(said), want, said);
+
+// ---- the bubble: a click answers by position, what is said by parse()
+{
+  const shown = [], texts = []; let click;
+  const ans = createAnswers({ ask: (o) => { shown.push(o); return new Promise((r) => { click = r; }); }, retext: (t) => texts.push(t) });
+  const opts = () => ({ placeholder: 'Q?', choices: ['Leave it', 'Drop it'], clicks: [{ kind: 'leave' }, { kind: 'drop' }], hint: WHEN_HINT, parse: (t) => parseWhen(t, { now: t1830 }) });
+  let p = ans.ask(opts());
+  assert.equal(shown[0].second, SECOND); assert.equal(shown[0].placeholder, 'Q?\nSay a day and a time, a day, "leave it" or "drop it", or click.');
+  assert.equal(ans.heard('banana', { handsFree: true }), true); assert.equal(texts.at(-1), 'Q?\nHeard "banana". Say a day and a time, a day, "leave it" or "drop it".'); assert.ok(ans.open(), 'not an answer: it stays open');
+  assert.equal(ans.heard('yes'), true); assert.ok(ans.open(), 'a yes is not an answer to it');
+  ans.heard('tomorrow at 10', { handsFree: true }); assert.deepEqual(await p, { kind: 'at', start: at(27, 10) });
+  p = ans.ask(opts()); click(SECOND); assert.deepEqual(await p, { kind: 'drop' });
+  p = ans.ask(opts()); click('yes'); assert.deepEqual(await p, { kind: 'leave' });
+  p = ans.ask(opts()); click(null); assert.equal(await p, null, 'Esc: no answer');
+}
+
+// ---- the questions: after the review (missed to-dos) and in the morning (the ones that need a new time)
+{
+  const home2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'daily-ask-')));
+  const v2 = path.join(home2, 'Documents', 'roamies-vault', 'Daily');
+  let now2 = at(26, 18, 30);
+  const T2 = [
+    { id: 'm1', text: 'Draft abstract', kind: 'commitment', status: 'open', due: null, doneAt: null },
+    { id: 'm2', text: 'Email Bo', kind: 'commitment', status: 'open', due: at(26, 11), doneAt: null },
+    { id: 'm3', text: 'Order reagents', kind: 'commitment', status: 'open', due: at(26, 12), doneAt: null },
+    { id: 'm4', text: 'Book bench', kind: 'commitment', status: 'open', due: at(26, 13), doneAt: null },
+    { id: 'o1', text: 'Call Ana', kind: 'commitment', status: 'open', due: at(26, 20), doneAt: null },
+    { id: 'n1', text: 'Old thing', kind: 'commitment', status: 'open', due: at(24, 10), doneAt: null },
+    { id: 'r1', text: 'Stretch', kind: 'reminder', status: 'open', due: at(26, 10), doneAt: null },
+  ];
+  const B2 = { m1: { start: at(26, 9), minutes: 60, kept: false } };
+  const logs2 = [];
+  const d2 = createDaily({ home: home2, todos: () => T2.map((t) => ({ ...t })), blocks: () => ({ ...B2 }), now: () => now2, log: (k, d) => logs2.push([k, d]) });
+  const asked = [], said = [], moved = []; let script = [];
+  const io = {
+    ask: async (o) => { asked.push(o); const a = script.shift(); if (a === 'nobody') throw Object.assign(new Error('no answer'), { name: 'Unanswered' }); return typeof a === 'string' ? o.parse(a) : a ?? null; },
+    reschedule: async (id, w) => { moved.push([id, w]); const t = T2.find((x) => x.id === id); if (B2[id] && w.start) B2[id] = { ...B2[id], start: w.start }; else t.due = w.start ?? w.day.getTime() + 18 * 3600_000; return { ok: true, line: `Moved ${id}.` }; },
+    say: async (t) => { said.push(t); },
+  };
+  const note2 = (k = '2026-11-26') => fs.readFileSync(path.join(v2, `${k}.md`), 'utf8');
+  d2.review();
+  assert.ok(note2().includes('### Needs a new time\n- Draft abstract (09:00 to 10:00)\n- Email Bo (due 11:00)\n- Order reagents (due 12:00)\n- Book bench (due 13:00)\n'));
+  script = ['tomorrow at 10', 'drop it', 'leave it'];
+  assert.deepEqual(await d2.ask('review', io), { asked: 3, left: 1 }, 'limits.reviewQuestions (3) at most, oldest first');
+  assert.deepEqual(asked.map((o) => o.placeholder), ['Draft abstract was planned for 09:00 to 10:00 and isn\'t done. When will you do it?', 'Email Bo was due at 11:00 and isn\'t done. When will you do it?', 'Order reagents was due at 12:00 and isn\'t done. When will you do it?']);
+  assert.deepEqual(asked[0].choices, ['Leave it', 'Drop it']); assert.equal(asked[0].spoken, asked[0].placeholder);
+  assert.deepEqual(moved, [['m1', { start: at(27, 10) }]], 'only an answer with a time moves anything; Roamies never picks one');
+  assert.deepEqual(said, ['Moved m1.', 'I\'ll stop asking about Email Bo.', '1 more needs a new time: it\'s in today\'s note under Needs a new time.']);
+  assert.ok(note2().endsWith('## Log\n- 18:30 Rescheduled: Draft abstract → Friday 27 November, 10:00\n- 18:30 Let go: Email Bo\n'));
+  assert.deepEqual(T2.find((t) => t.id === 'm2'), { id: 'm2', text: 'Email Bo', kind: 'commitment', status: 'open', due: at(26, 11), doneAt: null }, 'let go: the to-do itself is left exactly as it is');
+  assert.equal(T2.find((t) => t.id === 'm3').due, at(26, 12), '"leave it" changes nothing');
+  // Asked again the same evening: only what wasn't answered. No answer ends the round and changes nothing.
+  now2 = at(26, 21); asked.length = 0; said.length = 0; moved.length = 0; script = ['nobody'];
+  d2.review({ by: 'asked' });
+  assert.deepEqual(await d2.ask('review', io), { asked: 1, left: 1 }, 'Call Ana (due 20:00) is missed by now too');
+  assert.deepEqual(asked.map((o) => o.placeholder.split(' was')[0]), ['Book bench']); assert.deepEqual(moved, []);
+  assert.deepEqual(said, ['1 more needs a new time: it\'s in today\'s note under Needs a new time.']);
+  // The next morning, no briefing set: asked at the end of the first exchange. The Plan lists what needs a new time,
+  // without the one let go.
+  now2 = at(27, 9);
+  assert.equal(d2.morningDue(), true);
+  d2.ensure();
+  assert.ok(note2('2026-11-27').includes('## Plan\n- 10:00 to 11:00 Draft abstract\n\n### Needs a new time\n- Old thing (was Tuesday 24 November, 10:00)\n- Order reagents (was Thursday 26 November, 12:00)\n- Book bench (was Thursday 26 November, 13:00)\n- Call Ana (was Thursday 26 November, 20:00)\n'));
+  asked.length = 0; said.length = 0; script = ['the 30th', { kind: 'leave' }];
+  assert.deepEqual(await d2.ask('morning', io), { asked: 3, left: 1 });
+  assert.deepEqual(asked.map((o) => o.placeholder), ['Old thing needs a new time: it was Tuesday 24 November, 10:00. When will you do it?', 'Order reagents needs a new time: it was Thursday 26 November, 12:00. When will you do it?', 'Book bench needs a new time: it was Thursday 26 November, 13:00. When will you do it?']);
+  assert.deepEqual(moved.at(-1), ['n1', { day: new Date(2026, 10, 30) }]);
+  assert.ok(note2('2026-11-27').endsWith('## Log\n- 09:00 Rescheduled: Old thing → due Monday 30 November\n'));
+  assert.equal(d2.morningDue(), false, 'once a day'); assert.equal(d2.morningAsked(), true);
+  // With a morning briefing set, the briefing asks: the end of an exchange doesn't, until its window has passed.
+  const f2 = path.join(home2, 'Documents', 'roamies-pi', 'settings.json'), set2 = JSON.parse(fs.readFileSync(f2, 'utf8'));
+  fs.writeFileSync(f2, JSON.stringify({ ...set2, briefings: { morning: '10:00' } }));
+  now2 = at(28, 8); assert.equal(d2.morningDue(), false, 'the briefing is still to come');
+  now2 = at(28, 14, 30); assert.equal(d2.morningDue(), true, 'its window (4 hours) has passed without it');
+  // At most limits.reviewQuestions: a setting.
+  fs.writeFileSync(f2, JSON.stringify({ ...set2, limits: { ...set2.limits, reviewQuestions: 1 } }));
+  asked.length = 0; said.length = 0; script = ['leave it'];
+  assert.deepEqual(await d2.ask('morning', io), { asked: 1, left: 3 }, 'Draft abstract\'s new time (the 27th, 10:00) has passed too');
+  assert.deepEqual(said, ['3 more need a new time: they\'re in today\'s note under Needs a new time.']);
+  for (const [k, d] of logs2) assert.ok(!/Draft|Email|Order|Bench|Old thing|Ana/i.test(JSON.stringify(d)), `${k}: counts only`);
+  assert.deepEqual(logs2.filter(([k]) => k === 'daily_questions').map(([, d]) => d), [
+    { kind: 'review', total: 4, asked: 3, left: 1, moved: 1, leave: 1, dropped: 1, failed: 0 },
+    { kind: 'review', total: 2, asked: 1, left: 1, moved: 0, leave: 0, dropped: 0, failed: 0, ended: 'unanswered' },
+    { kind: 'morning', total: 4, asked: 3, left: 1, moved: 1, leave: 1, dropped: 0, failed: 0, ended: 'closed' },
+    { kind: 'morning', total: 4, asked: 1, left: 3, moved: 0, leave: 1, dropped: 0, failed: 0 },
+  ]);
+  fs.rmSync(home2, { recursive: true, force: true });
+}
+
+// ---- flow.mjs: the questions as a series, and the end of an exchange
+{
+  const home3 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'daily-flow-')));
+  loadSettings(home3);
+  let idle = true, ran = 0, spokenInside = null, due = true;
+  const flow = createFlow({ home: home3, idle: () => idle, afterExchange: { due: () => due, run: async () => { ran++; spokenInside = flow.spoken(); } }, timers: { set: (fn) => { fn(); return 0; }, clear: () => {} } });
+  assert.equal(await flow.series(async () => { spokenInside = flow.spoken(); }), true); assert.equal(spokenInside, true, 'each question is said and gets its window');
+  idle = false; assert.equal(await flow.series(async () => {}), false, 'not while something else is going on'); idle = true;
+  flow.start(); flow.closing('thanks'); await new Promise((r) => setTimeout(r, 20));
+  assert.equal(ran, 1, 'the end of an exchange asks them'); assert.equal(spokenInside, true);
+  due = false; flow.start(); flow.closing('thanks'); await new Promise((r) => setTimeout(r, 20));
+  assert.equal(ran, 1, 'only when they are due');
+  fs.rmSync(home3, { recursive: true, force: true });
+}
+
 // ---- "review my day", said alone, is the app's
 for (const yes of ['review my day', 'Review my day.', 'um, review my day please', 'day review', 'how did today go?']) assert.ok(isReviewAsk(yes), yes);
 for (const no of ['review my day and book a call', 'review the slides', 'what is my day like', '']) assert.ok(!isReviewAsk(no), no);
@@ -168,7 +290,11 @@ const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8'
 assert.match(side, /if \(b\.kind === 'morning'\) dailyDo\('plan', \(\) => daily\.ensure\(\)\);/, 'the morning briefing writes the Plan');
 assert.match(side, /if \(!area\?\.file && isReviewAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); flow\.start\(\);[^\n]*dayReview\('asked'\)[^\n]*return; \}/, 'asked for by voice: answered by the app, never sent to the model');
 assert.match(side, /daily\.reviewDue\(\) && calQuiet\(\)/, 'by the clock, when nothing else is going on');
-assert.ok(!/enqueue\([^\n]*daily\./.test(side), 'nothing of the daily note is sent as a request');
+assert.match(side, /afterExchange: \{ due: \(\) => daily\.morningDue\(\), run: \(\) => daily\.ask\('morning', dailyIO\) \}/, 'no morning briefing: the end of the first exchange asks');
+assert.match(side, /\.then\(\(\) => \(b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'after the morning briefing');
+assert.match(side, /say\(r\.line, 'happy'\); await lineDone\(forVoice\(r\.line\)\);\n\s*await dailyAsk\('review'\);/, 'after the review');
+assert.match(side, /reschedule: \(id, when\) => cal\.reschedule\(id, when\)/);
+assert.ok(!/enqueue\(`[^`]*daily\./.test(side) && !/enqueue\([^`)]*daily\./.test(side), 'nothing of the daily note is sent as a request');
 const src = fs.readFileSync(new URL('../daily.mjs', import.meta.url), 'utf8');
 assert.ok(!/oneShot|enqueue|fetch\(|http/.test(src), 'daily.mjs makes no request');
 
