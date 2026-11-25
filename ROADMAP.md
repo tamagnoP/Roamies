@@ -53,7 +53,7 @@ Last updated: 2026-11-25.
 | 30 | Machine status: this Mac's memory, disk and battery, and whether the Mac mini answers | Agreed 2026-11-24, not designed; after 29 | |
 | 31 | Speaking budget and quiet queue | Agreed 2026-11-24, not designed; built with 25 | |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Agreed 2026-11-24, not designed; recorded with 23, shown in 21 | |
-| 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | Built on `stand-down` (`ff2f9ef`), `test:all` passed; waiting for the owner's review, then into `next`; checks in `TESTS.md`, group 1 | `stand-down` |
+| 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
@@ -813,10 +813,10 @@ the records folder. Replaces the "Daily log" note.
   - After `limits.openItemAskDays` (default 7), Roamies asks at the evening review whether to keep the item or let
     it go.
 
-### 33. Stand down (branch `stand-down`)
+### 33. Stand down (branch `stand-down`, now in `next`)
 
-Built 2026-11-25 on `stand-down`, off `next`, in one piece (`ff2f9ef`); `test:all` passed. Waiting for the owner's
-review, then into `next`. How it behaves is in `LOCAL-ONLY.md` ("Standing down"); the checks by hand are in
+Built 2026-11-25 on `stand-down`, off `next`, in one piece (`ff2f9ef`); the review's three changes in `deb6bd8`;
+`test:all` passed; merged into `next`. Waiting for test session 1. How it behaves is in `LOCAL-ONLY.md` ("Standing down"); the checks by hand are in
 `TESTS.md`, group 1. What was agreed (the owner, 2026-11-25), and how it was answered:
 
 - **Triggers.** The phrase (`standDown.phrase`, "stand down"), heard whenever the microphone is open, and a shortcut
@@ -827,7 +827,8 @@ review, then into `next`. How it behaves is in `LOCAL-ONLY.md` ("Standing down")
   - The shell matches it on the partial words (`src-tauri/src/stand.rs`, twin of `isStandDown` in
     `standdown.mjs`, one table for both): it acts once the words have been the phrase alone for 0.7 s with nothing
     more said, or on the final words. The wait was added in building, so the phrase opening a longer sentence
-    ("stand down the committee") does nothing either.
+    ("stand down the committee") does nothing either; after the review it is a setting, `standDown.waitSeconds`
+    (1.5 s, 0.5 to 3).
 - **What it stops:** speech at once (the page stops before the sidecar hears of it), the microphone and any answer
   window, the request to the model (and any waiting behind it), pi and what its commands left running, bubbles,
   cards, drawings, the list and the field.
@@ -835,13 +836,15 @@ review, then into `next`. How it behaves is in `LOCAL-ONLY.md` ("Standing down")
   countdown was stopped is never sent by itself afterwards; it is asked again as a pending question. Pending
   questions stay kept.
 - **While stood down** nothing is said or shown unasked; briefings, reminders, notices and questions are held. A
-  briefing whose window passes is skipped, as before. Calendar lines whose block has ended are dropped and counted.
+  briefing whose window passes is skipped, as before; one already waiting behind a request when it began is not
+  marked given, and is held like the others. Calendar lines whose block has ended are dropped and counted.
   Reminders are never dropped; they are given late. The day's review is written in the note at its time and its
   line waits.
 - **Ending.** At the owner's next request, typed or spoken; or by itself at the day turn
   (`standDown.endsAtDayTurn`, default true), saying nothing aloud. Then one summary line worded by code for what
   happened meanwhile (pi stopped, processes ended, calendar lines that passed, questions kept), shown, and spoken if
-  `speakNotices` is on; then what was held, under the usual rules.
+  `speakNotices` is on; after an end at the day turn, only at the end of the owner's first exchange after it. Then
+  what was held, under the usual rules.
 - **Kept** in `state.json`: a restart and a page rebuild keep the state and the look. Hidden, it stays hidden;
   shown again, it has the stood-down look.
 - **Look.** JARVIS in full: grey, dim, still, its heart a flat dash. The other looks: grey, dim and still (one line
@@ -1575,11 +1578,17 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   the test always failed when run after that time (reproduced with `reviewAt` two minutes earlier). The test now
   sets `reviewAt` to "" and prints the activity log's kinds and times when the rebuild doesn't come. The failure
   seen at 13:35 is not explained by it: recorded under "Known limits" as a flaky test.
+- **2026-11-25, night (feature 33's review, the owner).** Accepted with three changes, from the gaps reported: the
+  summary line after a stand down that ended at the day turn waits for the end of his first exchange after it, and
+  is then given like other held things (said when `speakNotices` is on); a briefing waiting behind a request when he
+  stood down is not marked given, and is held like any other (given later in its window, skipped after it); the
+  phrase's wait is a setting, `standDown.waitSeconds` (1.5 s, 0.5 to 3). Built in `deb6bd8`, `test:all` passed,
+  `stand-down` merged into `next`. Next: 25 with 31, planned first on one branch off `next`.
 
 ## 6. Still to test
 
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
-- [ ] Feature 33 on `stand-down`: the checks in `TESTS.md` (group 1).
+- [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 24, fix 4 with the real voice helper: quit during a spoken reply (the live run on `daf228f` quit after
   the reply had ended).
 - [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first
