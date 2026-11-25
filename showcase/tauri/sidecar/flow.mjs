@@ -75,8 +75,10 @@ export const sameKey = (q) => `${q?.kind}:${JSON.stringify((SAME[q?.kind] ?? ((d
  *   morning briefing's note list them. They are not questions: nothing here asks or runs them.
  * afterExchange: { due(), run() }. Feature 18: when an exchange ends and due() is true, run() asks its questions
  *   (the daily note's morning questions) as a series, before any pending question is raised.
+ * ended(by): an exchange started by voice has ended (feature 33: the line left by a stand down that ended at the day
+ *   turn waits for it).
  */
-export function createFlow({ home = os.homedir(), settings = () => loadSettings(home), speak = async () => {}, announce = async () => {}, listen = () => {}, cancel = () => {}, bubbles = () => [], idle = () => true, onWindow = () => {}, onPending = () => {}, actions = () => [], afterExchange = { due: () => false, run: async () => {} }, log = () => {}, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) } } = {}) {
+export function createFlow({ home = os.homedir(), settings = () => loadSettings(home), speak = async () => {}, announce = async () => {}, listen = () => {}, cancel = () => {}, bubbles = () => [], idle = () => true, onWindow = () => {}, onPending = () => {}, actions = () => [], afterExchange = { due: () => false, run: async () => {} }, ended = () => {}, log = () => {}, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) } } = {}) {
   let ex = null; // the exchange started by voice, while it is open: { gen, timer }
   let raising = false; // a pending question is being asked again
   let replyQ = null; // the model's own question, until its reply has finished playing
@@ -230,6 +232,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     const skip = new Set(fresh);
     fresh.clear();
     log('exchange_end', { by });
+    try { ended(by); } catch (e) { console.error('exchange end', e); }
     return skip;
   }
   /** A closing phrase said alone ends the exchange here: a short spoken line, and nothing goes to the model. */

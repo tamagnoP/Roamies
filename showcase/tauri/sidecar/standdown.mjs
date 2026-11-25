@@ -4,7 +4,8 @@
 //
 // The phrase counts only when it is all that was said, small words around it aside (STAND_FILL, the persona's name and
 // form of address), in any order. The shell matches it on what the voice helper has heard so far (src-tauri/src/stand.rs,
-// the twin of isStandDown below): once it has matched for STAND_SETTLE_MS with nothing more said, or in the final words.
+// the twin of isStandDown below): once it has matched for "standDown.waitSeconds" with nothing more said, or at once in
+// the final words.
 // Words that went on past it (the phrase inside a longer sentence) do nothing. What was heard is never logged.
 //
 // While it lasts, nothing is said or shown unasked: briefings, reminders, calendar lines, notices and questions wait for
@@ -12,7 +13,8 @@
 // what the owner chose (2026-11-25): a briefing whose window passes is skipped as before, and a calendar line whose
 // block has ended is dropped and counted. It ends when the owner next starts a conversation the usual way (a request,
 // spoken or typed), or by itself at the day turn ("standDown.endsAtDayTurn"). Then one line worded here says what
-// happened meanwhile, and what was held is given under the usual rules.
+// happened meanwhile, and what was held is given under the usual rules. Ended at the day turn, that line waits for the
+// end of the owner's first exchange after it (the owner, 2026-11-25), like other held things.
 //
 // Kept in state.json under "standDown", so a restart and a new overlay page keep it. One log line when it starts and
 // one when it ends, with counts and true/false only. Nothing goes in the daily note.
@@ -22,8 +24,6 @@ import { loadSettings, readState, writeState } from './pi.mjs';
 
 /** The small words that may be said with the phrase, besides the persona's name and form of address. */
 export const STAND_FILL = ['please', 'now', 'okay', 'ok'];
-/** How long the phrase must have been all that was heard, with nothing more said, before it counts (the shell's). */
-export const STAND_SETTLE_MS = 700;
 /** At most this many lines caught on their way to the screen while stood down are kept to be shown afterwards. */
 export const STAND_CAUGHT = 20;
 
@@ -55,7 +55,7 @@ export function standSummary({ pi = false, processes = 0, questions = 0, lines =
 
 /**
  * The state, in state.json. settings: → loadSettings(home). log(kind, data): the activity log.
- * → { on(), start(by, what), add(counts), reviewed(key, line), caught(text, mood), end(by, held), turned(), give(), given(), state() }
+ * → { on(), start(by, what), add(counts), reviewed(key, line), caught(text, mood), end(by, held), turned(), exchanged(), give(), given(), state() }
  */
 export function createStandDown({ home = os.homedir(), settings = () => loadSettings(home), log = () => {}, now = () => Date.now() } = {}) {
   const usable = (s) => !!s && typeof s === 'object' && typeof s.on === 'boolean' && Number.isFinite(Date.parse(s.since)) && s.counts && typeof s.counts === 'object' && Array.isArray(s.caught);
@@ -99,7 +99,7 @@ export function createStandDown({ home = os.homedir(), settings = () => loadSett
     end(by, held = 0) {
       if (!on()) return null;
       const minutes = Math.max(0, Math.round((now() - Date.parse(cur.since)) / 60_000));
-      cur = { ...cur, on: false, endedBy: String(by) };
+      cur = { ...cur, on: false, endedBy: String(by), exchanged: by !== 'day' };
       save();
       log('stand_down_end', { by: String(by), minutes, held });
       return cur;
@@ -112,13 +112,21 @@ export function createStandDown({ home = os.homedir(), settings = () => loadSett
       const turn = s.calendar.dayTurnsAt;
       return ymd(noteDay(now(), turn)) !== ymd(noteDay(Date.parse(cur.since), turn));
     },
-    /** What is left to give once it has ended: { counts, caught, review, quiet } (review: { key, line } when the day's
-     *  review was written meanwhile; quiet: it ended at the day turn, so the line is shown and not said). null while it
-     *  lasts, or when there is nothing. */
+    /** An exchange of the owner's has ended (a typed request's reply, or a spoken exchange's end). → whether this was
+     *  the one an end at the day turn waited for. */
+    exchanged() {
+      if (!cur || cur.on || cur.exchanged !== false) return false;
+      cur.exchanged = true;
+      save();
+      return true;
+    },
+    /** What is left to give once it has ended: { counts, caught, review } (review: { key, line } when the day's review
+     *  was written meanwhile). null while it lasts, when there is nothing, and, when it ended at the day turn, until
+     *  the end of the owner's first exchange after it. */
     give() {
-      if (!cur || cur.on) return null;
+      if (!cur || cur.on || cur.exchanged === false) return null;
       if (!standSummary(cur.counts) && !cur.caught.length && !cur.review) { cur = null; save(); return null; }
-      return { counts: { ...cur.counts }, caught: cur.caught.slice(), review: cur.review ?? null, quiet: cur.endedBy === 'day' };
+      return { counts: { ...cur.counts }, caught: cur.caught.slice(), review: cur.review ?? null };
     },
     /** It has been given: forgotten. */
     given() { if (cur && !cur.on) { cur = null; save(); } },

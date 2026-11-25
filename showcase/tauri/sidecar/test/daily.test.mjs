@@ -317,7 +317,7 @@ assert.match(side, /if \(b\.kind === 'morning'\) dailyDo\('plan', \(\) => daily\
 assert.match(side, /if \(!area\?\.file && isReviewAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); flow\.start\(\);[^\n]*dayReview\('asked'\)[^\n]*return; \}/, 'asked for by voice: answered by the app, never sent to the model');
 assert.match(side, /daily\.reviewDue\(\) && calQuiet\(\)/, 'by the clock, when nothing else is going on');
 assert.match(side, /afterExchange: \{ due: \(\) => daily\.morningDue\(\), run: \(\) => daily\.ask\('morning', dailyIO\) \}/, 'no morning briefing: the end of the first exchange asks');
-assert.match(side, /\.then\(\(\) => \(b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'after the morning briefing');
+assert.match(side, /\.then\(\(\) => \(given\.given && b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'after the morning briefing (feature 33: when it was given)');
 assert.match(side, /say\(r\.line, 'happy'\); await lineDone\(forVoice\(r\.line\)\);\n\s*await dailyAsk\('review'\);/, 'after the review');
 assert.match(side, /reschedule: \(id, when\) => cal\.reschedule\(id, when\)/);
 assert.match(side, /const first = b\.kind === 'evening' && daily\.reviewWithBriefing\(\) \? dayReview\('briefing'\) : Promise\.resolve\(\);\n\s*first\.then/, 'the evening briefing writes the review first');

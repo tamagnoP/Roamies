@@ -61,7 +61,7 @@ const click = (first) => bubble().resolve(first ? 'yes' : null);
 const speak = (text) => new Promise((resolve) => { if (text) overlay.said.push(text); overlay.speaking.push(resolve); });
 const played = async () => { for (const done of overlay.speaking.splice(0)) done(); await tick(); };
 const mic = { listens: [], cancels: [], windows: [] };
-const logs = [], hooks = [], told = [], enqueued = [], keptBlocks = [];
+const logs = [], hooks = [], told = [], enqueued = [], keptBlocks = [], endings = [];
 let busy = false;
 const flow = createFlow({
   home, speak, timers, now: () => t,
@@ -72,6 +72,7 @@ const flow = createFlow({
   onWindow: (open, by) => mic.windows.push([open, by]),
   onPending: (event, q) => hooks.push([event, q.kind]),
   actions: () => keptBlocks,
+  ended: (by) => endings.push(by), // feature 33
   log: (k, d) => logs.push([k, d]),
 });
 const answers = createAnswers({ ask, log: (k, d) => logs.push([k, d]), question: (q) => flow.question(q), retext: (text) => overlay.retexts.push(text) });
@@ -425,6 +426,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   await advance(1);
   await until(() => pi.bubble(), 'asked again');
   assert.ok(logs.some(([k, d]) => k === 'exchange_end' && d.by === 'quiet'));
+  assert.ok(endings.includes('quiet'), 'feature 33: the end of an exchange is told (the line a stand down left waits for it)');
   // asked again in full: a new Send bubble with the whole prompt, said, with its window, and no countdown
   assert.notEqual(bubble(), first); assert.ok(bubble().opts.placeholder.includes(prompt.slice(0, 400))); assert.match(bubble().opts.placeholder, /^Send to pi\? {2}CAN EDIT/);
   assert.match(overlay.said.at(-1), /^For pi, with editing allowed\. Rewrite the README\. The rest is on screen\. Say send to send it\.$/);
@@ -445,6 +447,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.equal(enqueued.length, n, 'a closing phrase is not sent to the model');
   assert.deepEqual(overlay.shown.at(-1), 'At your service.'); assert.equal(overlay.said.at(-1), 'At your service.');
   assert.ok(logs.some(([k, d]) => k === 'exchange_end' && d.by === 'phrase'));
+  assert.equal(endings.at(-1), 'phrase');
   assert.equal(pi.bubble(), null, 'the question waits until the acknowledgement has been said');
   await played();
   await until(() => pi.bubble(), 'asked again after the closing phrase'); await played();

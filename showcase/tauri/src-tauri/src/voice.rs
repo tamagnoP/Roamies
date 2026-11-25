@@ -15,20 +15,18 @@ static LIST_ID: AtomicU32 = AtomicU32::new(0);
 static ESC_ID: AtomicU32 = AtomicU32::new(0);
 /// Local-only build (feature 33): id of the stand-down hotkey, held for as long as Roamies runs.
 static STAND_ID: AtomicU32 = AtomicU32::new(0);
-/// Feature 33: how long the phrase must have been all that was heard, with nothing more said, before it counts
-/// (STAND_SETTLE_MS in sidecar/standdown.mjs).
-const STAND_SETTLE_MS: u64 = 700;
 
 /// Feature 33: the phrase as words and the small words allowed around it (from the sidecar), and the take being heard:
 /// gen counts what it has heard so far, so a wait for the phrase to settle is dropped when more comes; fired: this take
-/// has already stood Roamies down, so its final words go nowhere.
+/// has already stood Roamies down, so its final words go nowhere; wait_ms: how long the phrase must stand alone.
 struct Stand {
     phrase: Vec<String>,
     fill: Vec<String>,
     gen: u64,
     fired: bool,
+    wait_ms: u64,
 }
-static STAND: Mutex<Stand> = Mutex::new(Stand { phrase: Vec::new(), fill: Vec::new(), gen: 0, fired: false });
+static STAND: Mutex<Stand> = Mutex::new(Stand { phrase: Vec::new(), fill: Vec::new(), gen: 0, fired: false, wait_ms: crate::stand::WAIT_MS });
 
 thread_local! {
     // The hotkey manager must live on the main thread; it also owns the current show/hide hotkey.
@@ -251,11 +249,13 @@ pub(crate) fn set_esc(app: &AppHandle, label: &str, on: bool) {
     });
 }
 
-/// Feature 33: the phrase and its small words, as words (the sidecar's standKeys).
-pub(crate) fn set_stand(phrase: Vec<String>, fill: Vec<String>) {
+/// Feature 33: the phrase and its small words, as words, and the wait in seconds (the sidecar's standKeys). A wait
+/// that is missing or out of bounds keeps the default.
+pub(crate) fn set_stand(phrase: Vec<String>, fill: Vec<String>, wait_seconds: Option<f64>) {
     let mut s = STAND.lock().unwrap();
     s.phrase = phrase;
     s.fill = fill;
+    s.wait_ms = crate::stand::wait_ms(wait_seconds);
 }
 
 /// Feature 33: stand down, by the shortcut or the phrase. The page stops what it plays and clears the screen now,
@@ -269,19 +269,20 @@ pub(crate) fn stand_down(app: &AppHandle, by: &str) {
 }
 
 /// Feature 33: what has been heard so far in this take. When it is the phrase alone, it counts once nothing more has
-/// been heard for STAND_SETTLE_MS: words that go on past it (the phrase opening a longer sentence) do nothing.
+/// been heard for the wait ("standDown.waitSeconds"): words that go on past it (the phrase opening a longer sentence) do
+/// nothing.
 fn stand_heard(app: &AppHandle, text: &str) {
-    let gen = {
+    let (gen, wait) = {
         let mut s = STAND.lock().unwrap();
         s.gen += 1;
         if s.fired || !crate::stand::matches(text, &s.phrase, &s.fill) {
             return;
         }
-        s.gen
+        (s.gen, s.wait_ms)
     };
     let app = app.clone();
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(STAND_SETTLE_MS));
+        thread::sleep(Duration::from_millis(wait));
         let app2 = app.clone();
         let _ = app.run_on_main_thread(move || {
             let go = {

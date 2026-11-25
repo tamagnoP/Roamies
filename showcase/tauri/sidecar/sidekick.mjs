@@ -39,7 +39,7 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, voiceFor } from './pi.mjs';
+import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -556,6 +556,7 @@ const flow = createFlow({
   onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key' || by === 'stand'); }, // feature 33: stood down, what was held is dropped
   actions: () => cal.kept(), // blocks kept until Super Productivity is open: listed by show_pending and the morning briefing
   afterExchange: { due: () => daily.morningDue(), run: () => daily.ask('morning', dailyIO) }, // feature 18: no morning briefing: the first exchange's end asks
+  ended: () => stood?.exchanged(), // feature 33: the line left by a stand down that ended at the day turn comes after
   log: (kind, data) => logLine(kind, data),
 });
 for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);
@@ -577,12 +578,11 @@ tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...
 // The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
 // microphone. Everything that is going on stops here; what would be said or shown unasked waits (calQuiet, the
 // briefings, the reminders, standCatch) until the owner's next request, typed or spoken, or the day turn.
-const STAND_DEFAULT = { phrase: 'stand down', shortcut: 'Control+Alt+Period' };
-function standSettings() { try { const s = loadSettings(HOME); return { ...s.standDown, persona: s.persona }; } catch { return { ...STAND_DEFAULT, endsAtDayTurn: true, persona: personaNow() }; } }
+function standSettings() { try { const s = loadSettings(HOME); return { ...s.standDown, persona: s.persona }; } catch { return { ...settingsDefaults(HOME).standDown, persona: personaNow() }; } }
 /** [the phrase's words, the small words allowed around it]. */
 function standPhrase() { const s = standSettings(); return [standWords(s.phrase), standFill(s.persona)]; }
-/** What the shell is given: the shortcut, and the phrase as words, with the small words. */
-function standKeys() { const s = standSettings(), [phrase, fill] = standPhrase(); return { shortcut: s.shortcut, phrase, fill }; }
+/** What the shell is given: the shortcut, the phrase as words with the small words, and how long it must stand alone. */
+function standKeys() { const s = standSettings(), [phrase, fill] = standPhrase(); return { shortcut: s.shortcut, phrase, fill, wait: s.waitSeconds }; }
 let standKeysSent = '';
 let piStood = false; // pi was stopped by stand down: its "Stopped pi." waits for the line said at the end
 function standDownNow(by) {
@@ -627,7 +627,8 @@ function standReview() {
   if (r && key) stood.reviewed(key, r.line);
 }
 /** Once it has ended and things are quiet: one line worded here for what happened meanwhile, with any line caught on
- *  its way to the screen; said too when "speakNotices" is on, unless it ended at the day turn. Then the review written
+ *  its way to the screen; said too when "speakNotices" is on. Ended at the day turn, it waits for the end of the
+ *  owner's first exchange after (stood.exchanged, from enqueue and flow's "ended"). Then the review written
  *  meanwhile, if its day is still today: its line, and its questions. → whether there was anything. */
 let standGiving = false;
 async function standGive() {
@@ -641,7 +642,7 @@ async function standGive() {
     const sameDay = !!g.review && g.review.key === today;
     const line = standSummary({ ...g.counts, review: !!g.review && !sameDay });
     const shown = [line, ...g.caught.map((c) => c.text)].filter(Boolean).join('\n');
-    const said = !!line && !g.quiet && noticesOn();
+    const said = !!line && noticesOn();
     logLine('stand_down_said', { chars: line.length, caught: g.caught.length, said, review: sameDay });
     if (shown) { say(shown, g.caught.some((c) => c.mood === 'concerned') ? 'concerned' : 'happy'); await lineDone(said ? forVoice(line) : null); }
     if (sameDay) {
@@ -903,12 +904,20 @@ let credsBaseUrl;
 
 // One run at a time: a new request waits for (or interrupts) the current one. Folding waits until none is left.
 let queued = 0;
-function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false } = {}) {
+let briefingWaiting = false; // feature 33: a briefing chosen, on its way to its request
+// Local-only build (feature 33): briefing: { kind, given } for a briefing's request, given set once it is made.
+function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false, briefing = null } = {}) {
   if (interrupt && busy) interruptQuietly();
   if (interrupt && byVoice) flow.start(); // Local-only build (feature 22): a request made by voice opens the exchange
   queued++;
-  running = running.then(() => prompt(text, image, note, byVoice)).catch((e) => console.error('prompt', e))
-    .finally(() => { if (--queued === 0) maybeCompact(); });
+  const own = !intro && !text.startsWith('('); // feature 33: the owner's own request, typed or spoken
+  running = running.then(() => prompt(text, image, note, byVoice, briefing)).catch((e) => console.error('prompt', e))
+    .finally(() => {
+      if (briefing) briefingWaiting = false;
+      // Feature 33: a typed request's reply is an exchange of the owner's (a spoken one ends in flow.mjs, "ended").
+      if (own && !flow.spoken()) stood?.exchanged();
+      if (--queued === 0) maybeCompact();
+    });
   return running;
 }
 // The welcome tour: job tickets for what it can do and a medal for their goal, spoken when replies are.
@@ -1213,10 +1222,12 @@ async function dayTurn(byVoice) {
   if (msg) session.messages = [{ role: 'user', content: msg }];
   return true;
 }
-async function prompt(text, image = null, note = '', byVoice = false) {
+async function prompt(text, image = null, note = '', byVoice = false, briefing = null) {
   // Local-only build (feature 33): a request still waiting when stand down began is not made (the owner's own next
-  // request ends stand down before it is queued).
-  if (stood?.on()) { logLine('stand_down_dropped', { what: 'request' }); return; }
+  // request ends stand down before it is queued). A briefing's is held: it is marked given only once it is made, so
+  // it comes again after, while its window is open (the owner, 2026-11-25).
+  if (stood?.on()) { if (briefing) logLine('stand_down_held', { what: 'briefing', kind: briefing.kind }); else logLine('stand_down_dropped', { what: 'request' }); return; }
+  if (briefing) { pi.briefing.done(briefing.kind); briefing.given = true; logLine('briefing', { kind: briefing.kind }); }
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
   ownWords = intro || text.startsWith('(') ? '' : text; // Local-only build (feature 18): for item_dealt_with
   let problem = await readyAgent();
@@ -2345,15 +2356,16 @@ setInterval(() => {
     // Local-only build (feature 18): the day's review, when its time has come and nothing else is going on. It needs
     // no model, so it doesn't wait for a sign-in.
     if (!reviewing && !pi.busy() && daily.reviewDue() && calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window()) { dayReview('time').catch((e) => console.error('daily review', e)); return; }
-    if (busy || queued || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
+    if (busy || queued || briefingWaiting || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
     const b = pi.briefing();
     if (!b) return;
-    pi.briefing.done(b.kind);
+    // Feature 33: marked given (and logged) when its request is made (prompt); until then none other is chosen.
+    const given = { kind: b.kind, given: false };
+    briefingWaiting = true;
     if (b.kind === 'morning') dailyDo('plan', () => daily.ensure()); // feature 18: the morning briefing writes the day's Plan
-    logLine('briefing', { kind: b.kind });
     // Feature 18: the evening briefing writes the day's review first (said by the app), when today has none yet.
     const first = b.kind === 'evening' && daily.reviewWithBriefing() ? dayReview('briefing') : Promise.resolve();
-    first.then(() => cal.sync('briefing')).catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}${daily.morningNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`).then(() => (b.kind === 'morning' && !daily.morningAsked() ? dailyAsk('morning') : null)).catch((e) => console.error('briefing', e))); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs) and counts the to-dos that need a new time (daily.mjs)
+    first.then(() => cal.sync('briefing')).catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}${daily.morningNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`, { briefing: given }).then(() => (given.given && b.kind === 'morning' && !daily.morningAsked() ? dailyAsk('morning') : null)).catch((e) => console.error('briefing', e))); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs) and counts the to-dos that need a new time (daily.mjs)
   } catch (e) { console.error('briefing', e); }
 }, 60_000);
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the

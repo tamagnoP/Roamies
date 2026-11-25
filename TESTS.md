@@ -92,7 +92,7 @@ Built on `stand-down`; on `next` once its review is accepted. The look is JARVIS
 look is on).
 
 **Before.** Add to `~/Documents/roamies-pi/settings.json`:
-`"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true }`. Have one to-do
+`"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true, "waitSeconds": 1.5 }`. Have one to-do
 due a few minutes after you start, and `speakNotices` true.
 
 1. **Start Roamies.**
@@ -104,8 +104,8 @@ due a few minutes after you start, and `speakNotices` true.
    it come to rest (about 15 seconds).
    You should see: normal rest is in colour, the globe turning slowly, a dot for a heart: clearly different from 2.
 4. **Hold the talk keys and say "Jarvis, stand down, please".**
-   You should see: it stands down as in 2 while the keys are still held (about a second after the last word); no
-   reply follows.
+   You should see: it stands down as in 2 while the keys are still held (about a second and a half after the last
+   word); no reply follows.
 5. **Hold the talk keys and say "take a note: the committee will stand down in March".**
    You should see: a note is taken as usual (it ends the stand down from 4): nothing stood down.
 6. **Ask for something that ends with a question to you (a Send bubble for pi, or a yes/no), and when its answer
@@ -127,7 +127,8 @@ due a few minutes after you start, and `speakNotices` true.
     You should see: an ordinary reply; nothing stood down.
 12. **Optional: the day turn.** Stand down, then set `calendar.dayStart` and `calendar.dayTurnsAt` a few minutes
     ahead and wait past the turn (set them back after).
-    You should see: colour comes back by itself, with nothing said aloud.
+    You should see: colour comes back by itself, with nothing said or shown. Then type a request: after its reply,
+    the "While I stood down…" line, if anything happened meanwhile.
 13. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
     You should see: one `stand_down` line each time it began (by `key` or `phrase`, then true/false only) and one
     `stand_down_end` line each time it ended (`by`, `minutes`, `held`); no words you said, no titles.

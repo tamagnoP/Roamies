@@ -1753,7 +1753,7 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
             // Local-only build (feature 33): the stand-down shortcut, and the phrase as words with its small words.
             if let Some(st) = msg.get("stand") {
                 let words = |k: &str| st.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect::<Vec<_>>()).unwrap_or_default();
-                set_stand(words("phrase"), words("fill"));
+                set_stand(words("phrase"), words("fill"), st.get("wait").and_then(Value::as_f64));
                 if let Some(accel) = st.get("shortcut").and_then(Value::as_str) {
                     if let Err(e) = set_hotkey(3, accel) {
                         eprintln!("stand-down shortcut {accel}: {e}");

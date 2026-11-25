@@ -29,6 +29,20 @@ pub fn matches(text: &str, phrase: &[String], fill: &[String]) -> bool {
     found
 }
 
+/// How long the phrase must have been all that was heard, with nothing more said, before it counts, until the sidecar
+/// sends "standDown.waitSeconds" (sidecar/pi.mjs, STAND_DOWN.waitSeconds: its default and bounds).
+pub const WAIT_MS: u64 = 1500;
+pub const WAIT_MIN_MS: u64 = 500;
+pub const WAIT_MAX_MS: u64 = 3000;
+
+/// The wait in milliseconds, for a wait in seconds as the sidecar sends it; missing or out of bounds: the default.
+pub fn wait_ms(wait_seconds: Option<f64>) -> u64 {
+    match wait_seconds.filter(|w| w.is_finite()).map(|w| (w * 1000.0).round()) {
+        Some(ms) if ms >= WAIT_MIN_MS as f64 && ms <= WAIT_MAX_MS as f64 => ms as u64,
+        _ => WAIT_MS,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,5 +71,16 @@ mod tests {
         assert_eq!(words("ma'am"), ["maam"]);
         assert!(words("  ... ").is_empty());
         assert!(!matches("stand down", &[], &[]));
+    }
+
+    #[test]
+    fn the_wait() {
+        assert_eq!(wait_ms(Some(1.5)), 1500);
+        assert_eq!(wait_ms(Some(0.5)), 500);
+        assert_eq!(wait_ms(Some(3.0)), 3000);
+        assert_eq!(wait_ms(Some(2.25)), 2250);
+        for out in [None, Some(0.4), Some(3.1), Some(f64::NAN), Some(f64::INFINITY), Some(-1.0)] {
+            assert_eq!(wait_ms(out), WAIT_MS, "{out:?}");
+        }
     }
 }

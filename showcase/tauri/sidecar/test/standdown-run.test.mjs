@@ -5,7 +5,9 @@
 //   - a new page, and a restart of the sidecar, keep it (the stood-down look, no greeting);
 //   - a spoken request ends it: one log line, the look back, the late nudge, and the line worded by the app for what
 //     happened meanwhile (a calendar line whose block ended went by).
-//   - the phrase said alone, when it reaches the sidecar as words, stands it down too.
+//   - the phrase said alone, when it reaches the sidecar as words, stands it down too;
+//   - it ends by itself at the day turn, with nothing said or shown; its line waits for the owner's first exchange
+//     after (here a typed request) and comes once it has ended.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -113,6 +115,32 @@ try {
   assert.match(logText(), / stand_down \{"by":"phrase",/);
   assert.ok(page(from).some((m) => m.kind === 'stand' && m.on === true));
   assert.doesNotMatch(logText(), /dentist|Jarvis, stand down/i, 'no words in the log');
+
+  // the day turn (calendar.dayTurnsAt, 04:00): stood down since yesterday evening, with two calendar lines gone by
+  const saidLines = () => (logText().match(/ stand_down_said /g) ?? []).length, saidBefore = saidLines();
+  await stop();
+  const since = new Date(); since.setDate(since.getDate() - 1); since.setHours(22, 0, 0, 0);
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ ...state(), standDown: { ...state().standDown, since: since.toISOString(), counts: { lines: 2 } } }));
+  start(); await sleep(3000);
+  tell({ type: 'ui_ready' }); await sleep(1500);
+  from = out.length;
+  await waitFor(() => / stand_down_end \{"by":"day",/.test(logText()), 40_000, 'it ends at the day turn');
+  assert.ok(page(from).some((m) => m.kind === 'stand' && m.on === false), 'the look is back');
+  // its line is not given then, nor while nothing is asked
+  await sleep(8000);
+  assert.equal(saidLines(), saidBefore, 'not at the day turn');
+  assert.ok(!page(from).some((m) => ['say', 'speech'].includes(m.kind)), `nothing shown or said (${page(from).map((m) => m.kind).join(', ')})`);
+  assert.equal(state().standDown.exchanged, false, 'it waits, in state.json');
+  // a typed request (no model is signed in: its reply is the app's own): once it is over, the line comes
+  from = out.length;
+  tell({ type: 'menu', id: 'ask' });
+  await waitFor(() => page(from).some((m) => m.kind === 'ask' && m.bar), 3000, 'the ask field');
+  tell({ type: 'answer', id: page(from).find((m) => m.kind === 'ask' && m.bar).id, text: 'what is on my list' });
+  await waitFor(() => saidLines() > saidBefore, 15_000, 'the line after the exchange');
+  const said = page(from).filter((m) => m.kind === 'say').map((m) => m.text);
+  assert.ok(said.indexOf('While I stood down: 2 calendar lines went by, their blocks over.') > 0, `after the reply (${said.join(' | ')})`);
+  assert.match(logText().split('\n').filter((l) => / stand_down_said /.test(l)).at(-1), / stand_down_said \{"chars":64,"caught":0,"said":(true|false),"review":false\}$/);
+  await waitFor(() => state().standDown === undefined, 10_000, 'given: forgotten');
 } finally {
   await stop();
   fs.rmSync(home, { recursive: true, force: true });

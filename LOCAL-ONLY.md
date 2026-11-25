@@ -260,7 +260,7 @@ setup guide is open, the bubble waits until it closes.
                "humour": "dry and rare", "maxSentences": 2,
                "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."],
                "addressEverySeconds": 180 },
-  "standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true },
+  "standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true, "waitSeconds": 1.5 },
   "limits": {
     "approvalBubbleChars": 600,
     "promptChars": 8000,
@@ -606,8 +606,8 @@ is `src-tauri/src/stand.rs` and `voice.rs`.)
 "okay", the persona's name and its form of address. "Jarvis, stand down, please" and "okay Jarvis, stand down now
 please" stand it down; "take a note: the committee will stand down in March" and "that's enough for today, you can
 stand down" do nothing. It works whenever the microphone is open: holding the talk keys, and in an answer window.
-The shell matches it on the words heard so far: once they have been the phrase alone for 0.7 seconds with nothing
-more said, or in the final words. A sentence that goes on past it ("stand down the committee") does nothing. The
+The shell matches it on the words heard so far: once they have been the phrase alone for `standDown.waitSeconds`
+(1.5 seconds) with nothing more said, or at once in the final words. A sentence that goes on past it ("stand down the committee") does nothing. The
 words are never logged and never reach the model.
 
 **The shortcut works at any moment**, also while Roamies speaks and the microphone is closed. It is held for as long
@@ -631,7 +631,8 @@ ends unanswered, and its to-dos come back the next morning. Pending questions st
 questions wait, as they always waited for a quiet moment; standing down is one more reason to wait. Three things
 change:
 
-- a briefing whose window passes meanwhile is skipped, as before;
+- a briefing whose window passes meanwhile is skipped, as before. One that was already waiting behind a request
+  when you stood down is not counted as given: it is held like the others, given later if its window is still open;
 - a calendar line about a block that has ended by the time it ends is dropped and counted;
 - reminders are never dropped: they are given late.
 
@@ -643,7 +644,9 @@ still works: the list shortcut, the panel, Esc. A line that would have gone to t
 alone doesn't end it. With `standDown.endsAtDayTurn` (on by default) it also ends by itself at `calendar.dayTurnsAt`,
 saying nothing aloud. Then, once things are quiet, one line worded by the app says what happened meanwhile ("While I
 stood down: pi was stopped and 2 processes it had left running were ended; 1 calendar line went by, its block
-over."), shown, and said when `speakNotices` is on (not when it ended at the day turn). If the review was written
+over."), shown, and said when `speakNotices` is on. When it ended at the day turn, that line is not given then: it
+waits (over a restart too) for the end of your first exchange after it: a typed request once its reply is done, a
+spoken one when the exchange ends. If the review was written
 meanwhile and it is still that day, its line and its questions follow. Then what was held comes under the usual
 rules.
 
@@ -657,13 +660,15 @@ with JARVIS's globe turning slowly and its heart a dot.
 bubbles}` when it starts and `stand_down_end {by, minutes, held}` when it ends. Nothing goes in the daily note.
 
 ```json
-"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true }
+"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true, "waitSeconds": 1.5 }
 ```
 
 - `phrase`: one to four words, letters only. Not a phrase Roamies already acts on (yes, no, send, the closing
   phrases, "leave it", "drop it", "review my day" and the like) and not only small words.
 - `shortcut`: a key with at least one modifier, written as the shell writes shortcuts (`Command+Shift+KeyD`).
 - `endsAtDayTurn`: `true` or `false`.
+- `waitSeconds`: 0.5 to 3. How long the words heard so far must have been the phrase alone before it counts. Shorter
+  acts sooner; longer leaves more time to go on past it (a pause after "stand down" in a longer sentence).
 
 ## What goes with each request
 
