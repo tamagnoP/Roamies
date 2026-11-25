@@ -38,7 +38,7 @@ Last updated: 2026-11-25.
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
 | 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
-| 18 | Daily note (plan, log, review) and task pages | In progress on `daily-note` (plan accepted 2026-11-25): steps 1 to 3 built (the vault's one writer; the note with Plan, Log and Review; the missed-task questions). Waiting for the owner's test before steps 4 to 8 | `daily-note` |
+| 18 | Daily note (plan, log, review) and task pages | Built on `daily-note` (plan accepted 2026-11-25): steps 1 to 8, `test:all` passed. Waiting for the owner's review, then into `next`; checks in `TESTS.md`, group 1 | `daily-note` |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
@@ -754,13 +754,12 @@ Questions for the owner:
 `toolFolders` (`~/.config/zotero-mcp`, `~/.config/find_papers`, `~/.config/get_pdfs`); fill in `readOnly` with the
 parent folders of research work and data; list the OrbStack app's project under `docker`.
 
-## 3. Queued, in this order
+### 18. Daily note (Prompt E, branch `daily-note`)
 
-Build order: 24, 18, 25, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
-2026-11-21, with 24 moved ahead of 18 by the owner on 2026-11-21. 24 is in section 2; the subsections below follow
-the rest.
-
-### 18. Daily note (Prompt E)
+Built 2026-11-25 as planned, one commit per step: the vault's one writer (`bcd16ff`), the note (`acd2aa6`), the
+missed-task questions (`8fd1dfa`), task pages (`58e5ce9`, finished to the 2026-11-21 agreement in `063ef75`), the
+briefings (`3d176dc`), the handover and the fresh conversation (`d84164d`), the open items (`3809867`). How it
+behaves is in `LOCAL-ONLY.md` ("Notes", "The daily note"); the checks by hand are in `TESTS.md`. What was agreed:
 
 One note per day at Daily/YYYY-MM-DD.md in the vault, built by code and only ever added to. Three parts: Plan
 (morning: tasks scheduled or due today, plus tasks that need a new time), Log (a line when a task is finished and
@@ -785,7 +784,7 @@ the records folder. Replaces the "Daily log" note.
 - Titles are made safe for a file name by code. Two tasks with the same title get distinct pages.
 - Nothing is written to Super Productivity for this.
 
-**A fresh conversation each day, with a handover (the owner, 2026-11-24). Recorded, not to be built now.**
+**A fresh conversation each day, with a handover (the owner, 2026-11-24; included in feature 18 on 2026-11-25).**
 
 - A fresh conversation starts at the first request of each day.
 - Before the old one is closed, a "Handover" section is added to that day's note in the vault, in two parts.
@@ -806,6 +805,12 @@ the records folder. Replaces the "Daily log" note.
   - A closed item appears once, ticked, in the note of the day it was closed. Earlier notes are not rewritten.
   - After `limits.openItemAskDays` (default 7), Roamies asks at the evening review whether to keep the item or let
     it go.
+
+## 3. Queued, in this order
+
+Build order: 24, 18, 25, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
+2026-11-21, with 24 moved ahead of 18 by the owner on 2026-11-21. 24 and 18 are in section 2; the subsections
+below follow the rest.
 
 ### 25. Check-ins on progress
 
@@ -1452,14 +1457,15 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
     review. Nothing is merged into `local-only` until the owner says a test session has passed.
   - `TESTS.md` in the repo lists, for each feature on `next`, the checks to run by hand, in order, with what
     should be seen. Group 1: features 18, 33, 25 and 31.
+- **2026-11-25, evening (feature 18, the owner).** Steps 4 to 8 go on without waiting for his checks. One
+  addition to step 6: the first request of each day, typed or spoken, also writes that day's Plan if it isn't
+  written yet. Built; task pages finished to the 2026-11-21 agreement (reminders have pages too, a line per day
+  planned or finished, the link in the note, renames). `test:all` passed; `daily-note` pushed, waiting for the
+  review before it goes into `next`.
 
 ## 6. Still to test
 
-- [ ] Feature 18, steps 1 to 3 on `daily-note`:
-  - the daily note in the real vault: Plan, Done and Note lines, the review at `calendar.reviewAt` and on "review my
-    day";
-  - the missed-task questions by voice: a time, a day, "leave it", "drop it", and no answer;
-  - the morning questions at the end of the first exchange.
+- [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 24, fix 4 with the real voice helper: quit during a spoken reply (the live run on `daf228f` quit after
   the reply had ended).
 - [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first
