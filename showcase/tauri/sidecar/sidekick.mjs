@@ -416,7 +416,12 @@ function todoItems() {
   return [...openCommitments().map((c) => ({ id: c.id, text: c.text, kind: c.kind ?? 'commitment', status: 'open', due: c.due ?? null, doneAt: null, createdAt: c.createdAt ?? null })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, kind: i.kind, status: 'done', due: i.due ?? null, doneAt: i.doneAt ?? null, createdAt: i.createdAt ?? null }))];
 }
 const daily = createDaily({ home: HOME, userName, log: (kind, data) => logLine(kind, data), blocks: () => cal.blocks(), todos: () => todoItems() });
-const handover = createHandover({ home: HOME, log: (kind, data) => logLine(kind, data) });
+// The open items: item_dealt_with closes one at once on the owner's own words in this message (ownWords), else asks.
+let ownWords = '';
+const handover = createHandover({
+  home: HOME, userName, log: (kind, data) => logLine(kind, data), note: (lines) => daily.logged(lines), heard: () => ownWords, ask: (opts) => answers.ask(opts),
+  say: (text) => { say(text, 'happy'); if (flow.spoken()) voiceLine(forVoice(text)); },
+});
 // A failure of the daily note is logged once for each reason, never with a title, and never stops anything else.
 let dailyFailed = '';
 function dailyDo(what, fn) {
@@ -434,13 +439,14 @@ const dailyIO = {
   reschedule: (id, when) => cal.reschedule(id, when),
   say: (text) => { say(text, 'happy'); return lineDone(forVoice(text)); },
 };
-async function dailyAsk(kind) {
+async function inSeries(kind, fn) {
   for (let i = 0; i < 120; i++) {
-    try { if (await flow.series(() => daily.ask(kind, dailyIO))) return; } catch (e) { dailyDo('questions', () => { throw e; }); return; }
+    try { if (await flow.series(fn)) return; } catch (e) { dailyDo('questions', () => { throw e; }); return; }
     await new Promise((r) => setTimeout(r, 1000));
   }
   logLine('daily_questions_skipped', { kind });
 }
+const dailyAsk = (kind) => inSeries(kind, () => daily.ask(kind, dailyIO));
 // The day's review (daily.mjs): at "calendar.reviewAt", or when they ask for it. Written in today's note; the counts
 // are said in words worded by the app, then the missed to-dos are asked about.
 let reviewing = false;
@@ -452,6 +458,7 @@ async function dayReview(by) {
     if (!r) { const line = 'I couldn\'t write the day\'s review in the daily note: the activity log says why.'; say(line, 'concerned'); await lineDone(forVoice(line)); return; }
     say(r.line, 'happy'); await lineDone(forVoice(r.line));
     await dailyAsk('review');
+    await inSeries('items', () => handover.askStale(dailyIO)); // the open items open for limits.openItemAskDays
   } catch (e) { console.error('daily review', e); } finally { reviewing = false; }
 }
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
@@ -543,7 +550,7 @@ pageRebuild = createPageRebuild({
   log: (kind, data) => logLine(kind, data),
 });
 setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
-tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools])); // Local-only build: cal, flow
+tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools, ...handover.tools])); // Local-only build: cal, flow, the open items (feature 18)
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -1094,6 +1101,7 @@ async function dayTurn(byVoice) {
 }
 async function prompt(text, image = null, note = '', byVoice = false) {
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
+  ownWords = intro || text.startsWith('(') ? '' : text; // Local-only build (feature 18): for item_dealt_with
   let problem = await readyAgent();
   if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
   if (problem) return aloud(problem, 'concerned'); // Local-only build: said too, in an exchange started by voice
@@ -2230,4 +2238,5 @@ cal.startup().catch((e) => console.error('calendar', e));
 })();
 setInterval(calShow, 3000);
 // Local-only build (feature 18): to-dos finished since the last check get their Done line in the daily note.
-setInterval(() => dailyDo('tick', () => daily.tick()), 30_000);
+// The open items whose to-do is done, or whose box was ticked in a recent daily note, are closed.
+setInterval(() => { dailyDo('tick', () => daily.tick()); dailyDo('items', () => { handover.checkDone(todoItems()); handover.checkTicks(); }); }, 30_000);

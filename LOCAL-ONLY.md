@@ -285,6 +285,7 @@ setup guide is open, the bubble waits until it closes.
     "kokoroTimeoutSeconds": 20,
     "historyTokens": 40000,
     "kokoroSentenceChars": 120,
+    "openItemAskDays": 7,
     "reviewQuestions": 3,
     "pageRebuildQuietMinutes": 15
   },
@@ -411,6 +412,7 @@ setup guide is open, the bubble waits until it closes.
   | `kokoroTimeoutSeconds` | 20 | 2 to 120 | Seconds the natural voice may take over one sentence (six times that to start) before the Mac's voice takes over for the session. |
   | `historyTokens` | 40000 | 20000 to 500000, whole | Tokens sent in one request at which the older part of the conversation is folded into a summary (see "What goes with each request"). Never later than three quarters of what a request may hold. |
   | `kokoroSentenceChars` | 120 | 40 to 1000, whole | A sentence longer than this is split at a clause before the natural voice makes it. |
+  | `openItemAskDays` | 7 | 1 to 60, whole | Days an open item stays open before the evening review asks whether to keep it or let it go (see "The daily note"). |
   | `reviewQuestions` | 3 | 1 to 20, whole | The most to-dos the daily note's questions ask about each time, oldest first (see "The daily note"). |
   | `pageRebuildQuietMinutes` | 15 | 0 to 1440, whole; 0 is never | Quiet minutes after which the overlay page is made afresh (see "Where the character sits"). |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
@@ -765,7 +767,19 @@ after.
 - **Open items.** Each new "Left open" line becomes an open item, kept in `state.json` under `handover` with its
   day. A line that matches an open item makes nothing: the same words (small words aside), all of one's words in
   the other's, or at least 70 % of their words shared. The AI lists only new lines; the open items are carried
-  from one handover to the next by code.
+  from one handover to the next by code. An item is closed, with one line in that day's Log (`Closed: … (how)`),
+  when:
+  - the to-do or reminder it is about is done;
+  - you tick its box in one of the last 14 daily notes in Obsidian (read every 5 minutes at most);
+  - you say it's dealt with (`item_dealt_with`). It closes at once only when your own words in that message say so:
+    "done", "dealt with", "sorted", "finished", "close it" and the like (the full list is in
+    `reference.handover.openItems.dealtWith.doneWords`), not after a "not" in the three words before, and not in a
+    question. When the AI suggests it on its own, a bubble asks "Close the open item …?" first. Either way Roamies
+    says which item it closed.
+
+  After `limits.openItemAskDays` (7) days, the evening review asks about the item: "… has been open since …. Keep
+  it open?". "Keep it" asks again after as many days; "Let it go" closes it with a `Let go` line. At most
+  `limits.reviewQuestions` each time, oldest first; no answer ends the round and changes nothing.
 - Only to-dos count in the Plan, the Log and the Review. Reminders and timers appear only in the handover's part
   one; pi's work never appears (it stays in the records folder).
 - Nothing in the daily note is sent to the AI, and making it involves no request, apart from part two of the

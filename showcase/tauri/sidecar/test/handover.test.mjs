@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { HANDOVER_HEAD, HANDOVER_WORDS, PART_TWO_LINES, createHandover, handoverInput, handoverMessage, handoverPrompt, isHandover, oneMoment, parsePartTwo, sameItem } from '../handover.mjs';
+import { HANDOVER_HEAD, HANDOVER_WORDS, PART_TWO_LINES, createHandover, handoverInput, handoverMessage, handoverPrompt, isHandover, oneMoment, parsePartTwo, sameItem, saysDone } from '../handover.mjs';
+import { Unanswered } from '../answers.mjs';
 import { createDaily } from '../daily.mjs';
 import { createTaskPages } from '../notes.mjs';
-import { readState } from '../pi.mjs';
+import { codeReference, readState } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'handover-home-')));
 const vault = path.join(home, 'Documents', 'roamies-vault');
@@ -136,6 +137,72 @@ for (const [k, d] of logs) assert.ok(!/venue|reagents|parking|Bo/i.test(JSON.str
   assert.ok(!('snap' in (readState(path.join(home, 'Documents', 'roamies-pi')).daily.days['2026-11-26'] ?? {})), 'the list at the last check is kept once, not per day');
 }
 
+// ---- closing open items
+for (const [said, want] of [
+  ['I\'ve dealt with the venue', true], ['the venue is sorted', true], ['that\'s done', true], ['Done with the slides, thanks', true], ['the permit is no longer needed', true], ['close it', true],
+  ['not done yet', false], ['I haven\'t finished it', false], ['is it done?', false], ['remind me tomorrow', false], ['we never sorted that out', false], ['', false],
+]) assert.equal(saysDone(said), want, said);
+{
+  const home2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'handover-items-')));
+  const v2 = path.join(home2, 'Documents', 'roamies-vault', 'Daily');
+  let now2 = at(20, 10), words2 = '', answer = null, k = 0;
+  const lines = [], said = [], asked = [], logs2 = [];
+  const h2 = createHandover({
+    home: home2, userName: 'Tiago', now: () => now2, newId: () => `oi-x${++k}`, log: (kk, d) => logs2.push([kk, d]), note: (l) => lines.push(...l), heard: () => words2,
+    ask: async (o) => { asked.push(o); if (answer === 'nobody') throw new Unanswered(); return answer; }, say: async (t) => { said.push(t); },
+  });
+  h2.finish('2026-11-19', { decided: [], remember: [], open: [{ text: 'Pick a venue', todo: null }, { text: 'Ask Bo about the reagents', todo: 'c7' }, { text: 'Renew the parking permit', todo: null }, { text: 'Read the review', todo: null }] });
+  // its to-do is done
+  assert.equal(h2.checkDone([{ id: 'c7', status: 'open' }]), 0);
+  assert.equal(h2.checkDone([{ id: 'c7', status: 'done' }]), 1);
+  assert.deepEqual(lines, ['- 10:00 Closed: Ask Bo about the reagents (its to-do is done)']);
+  assert.equal(h2.checkDone([{ id: 'c7', status: 'done' }]), 0, 'logged once');
+  // ticked in a daily note in Obsidian; read every 5 minutes at most
+  fs.mkdirSync(v2, { recursive: true });
+  fs.writeFileSync(path.join(v2, '2026-11-19.md'), '### Left open\n- [x] Pick a venue (since Thursday 19 November) ^oi-x1\n- [ ] Renew the parking permit (since Thursday 19 November) ^oi-x3\n- [x] Something else ^oi-zzz\n');
+  assert.equal(h2.checkTicks(), 1); assert.equal(lines.at(-1), '- 10:00 Closed: Pick a venue (ticked in the note)');
+  fs.writeFileSync(path.join(v2, '2026-11-20.md'), '- [X] Renew the parking permit (since Thursday 19 November) ^oi-x3\n');
+  now2 = at(20, 10, 4); assert.equal(h2.checkTicks(), 0, 'not read again within 5 minutes');
+  now2 = at(20, 10, 5); assert.equal(h2.checkTicks(), 1); assert.deepEqual(h2.openItems().map((i) => i.id), ['oi-x4']);
+  h2.finish('2026-11-20', { decided: [], remember: [], open: [{ text: 'Book the train', todo: null }, { text: 'Call the bank', todo: null }] });
+  // item_dealt_with: at once on the owner's own words, else a yes or no first; the app says which item it closed
+  const tool = h2.tools[0];
+  assert.equal(tool.name, 'item_dealt_with');
+  await assert.rejects(tool.execute({ item: 'oi-nope' }), /There's no open item "oi-nope"/);
+  words2 = 'I booked it, that\'s sorted';
+  assert.equal(await tool.execute({ item: 'oi-x5' }), 'Closed "Book the train". The app has told Tiago which item it closed: don\'t repeat it.');
+  assert.deepEqual(asked, [], 'their own words said so: no question'); assert.deepEqual(said, ['Closed: Book the train.']); assert.equal(lines.at(-1), '- 10:05 Closed: Book the train (you said so)');
+  words2 = 'what is still open?'; answer = null;
+  assert.equal(await tool.execute({ item: 'oi-x6' }), 'They said to keep "Call the bank" open.'); assert.equal(asked.at(-1).placeholder, 'Close the open item "Call the bank"?'); assert.deepEqual(asked.at(-1).choices, ['Close it', 'Keep it']);
+  answer = 'nobody';
+  assert.equal(await tool.execute({ item: 'oi-x6' }), 'They gave no answer, so "Call the bank" stays open. Don\'t ask about it again now.');
+  answer = 'yes';
+  assert.equal(await tool.execute({ item: 'oi-x6' }), 'Closed "Call the bank". The app has told Tiago which item it closed: don\'t repeat it.'); assert.equal(lines.at(-1), '- 10:05 Closed: Call the bank (you said yes)');
+  assert.deepEqual(h2.openItems().map((i) => i.id), ['oi-x4']);
+  // after limits.openItemAskDays (7), the evening review asks: keep it, or let it go
+  h2.finish('2026-11-25', { decided: [], remember: [], open: [{ text: 'Write to Ana', todo: null }, { text: 'Sort the freezer', todo: null }] });
+  now2 = at(25, 18, 30); assert.deepEqual(h2.stale(), [], 'six days: not yet');
+  now2 = at(26, 18, 30); assert.deepEqual(h2.stale().map((i) => i.id), ['oi-x4']);
+  const io = { ask: async (o) => { asked.push(o); const a = script.shift(); if (a === 'nobody') throw new Unanswered(); return typeof a === 'string' ? o.parse(a) : a ?? null; }, say: async (t) => { said.push(t); } };
+  let script = ['keep it'];
+  assert.deepEqual(await h2.askStale(io), { asked: 1, left: 0 });
+  assert.equal(asked.at(-1).placeholder, '"Read the review" has been open since Thursday 19 November. Keep it open?'); assert.deepEqual(asked.at(-1).choices, ['Keep it', 'Let it go']);
+  assert.deepEqual(h2.stale(), [], 'kept: not asked again for 7 days');
+  now2 = at(33, 18, 30); script = ['banana', 'nobody'];
+  assert.deepEqual(h2.stale().map((i) => i.id), ['oi-x4', 'oi-x7', 'oi-x8']);
+  assert.equal(asked.at(-1).parse('banana'), null);
+  script = ['nobody'];
+  assert.deepEqual(await h2.askStale(io), { asked: 1, left: 2 }, 'no answer ends the round, and changes nothing');
+  script = [{ kind: 'go' }, 'let it go', 'keep'];
+  const before = said.length;
+  assert.deepEqual(await h2.askStale(io), { asked: 3, left: 0 });
+  assert.deepEqual(said.slice(before), ['I\'ve let go of "Read the review".', 'I\'ve let go of "Write to Ana".']);
+  assert.deepEqual(lines.slice(-2), ['- 18:30 Let go: Read the review', '- 18:30 Let go: Write to Ana']);
+  assert.deepEqual(h2.openItems().map((i) => i.id), ['oi-x8']);
+  for (const [kk, d] of logs2) assert.ok(!/venue|reagents|parking|train|bank|review|ana|freezer/i.test(JSON.stringify(d)), `${kk}: counts only`);
+  fs.rmSync(home2, { recursive: true, force: true });
+}
+
 // ---- the wiring (sidekick.mjs)
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /if \(!intro && !text\.startsWith\('\('\)\) dailyDo\('plan', \(\) => daily\.ensure\(\)\);/, 'the first request of the day, typed or spoken, writes the Plan');
@@ -146,6 +213,11 @@ assert.match(side, /logLine\('handover_failed'[^\n]*\n\s*return false;/, 'part t
 assert.match(side, /freshSession\('day'\);\n\s*if \(msg\) session\.messages = \[\{ role: 'user', content: msg \}\];/, 'the new conversation starts with the handover; the old one gets the memory pass');
 assert.match(side, /!isSummary\(m\) && !isHandover\(m\)/, 'the memory pass skips the handover message');
 assert.ok(!/handoverPartOne[^\n]*session\.messages|content: [^\n]*handoverPartOne/.test(side), 'part one never goes into the conversation');
+assert.match(side, /\.\.\.flow\.tools, \.\.\.handover\.tools\]/, 'item_dealt_with is one of the tools');
+for (const n of ['item_dealt_with', 'link_note', 'notes_for']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), `${n} works while pi is busy, like the notes`);
+assert.match(side, /ownWords = intro \|\| text\.startsWith\('\('\) \? '' : text;/, 'the owner\'s own words: never a note from the app');
+assert.match(side, /handover\.checkDone\(todoItems\(\)\); handover\.checkTicks\(\);/);
+assert.match(side, /await dailyAsk\('review'\);\n\s*await inSeries\('items', \(\) => handover\.askStale\(dailyIO\)\);/, 'the evening review asks about the old open items after the missed to-dos');
 
 fs.rmSync(home, { recursive: true, force: true });
 console.log('handover tests: passed');
