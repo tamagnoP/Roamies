@@ -1,7 +1,8 @@
 # Roamies, local-only build
 
 This is a personal fork of [KenKaiii/Roamies](https://github.com/KenKaiii/Roamies), a desktop AI companion built with
-Tauri. All work happens on the `local-only` branch of `tamagnoP/Roamies`. `LOCAL-ONLY.md` describes every change
+Tauri. All work happens on branches of `tamagnoP/Roamies`: `local-only` holds what has passed the owner's test
+sessions, `next` what is finished and waiting for one (see "Git"). `LOCAL-ONLY.md` describes every change
 made to upstream and is the user-facing reference: read it before changing anything.
 
 ## What this build must guarantee
@@ -141,9 +142,22 @@ The reset is what makes macOS ask again.
 
 ## Git
 
-- Work on a branch off `local-only`, named for the feature. Do not commit to `main`, and do not force-push.
-- One commit per coherent change, with a plain message saying what changed.
-- Push the branch and stop. The owner has it reviewed before it is merged into `local-only`.
+The way of working from 2026-11-25 (the owner's decision):
+
+- **Branches.** `local-only` holds what has passed a test session. `next` holds the finished features waiting for
+  one. Each new feature branches off `next`, named for the feature. (Feature 18's `daily-note` was made off
+  `local-only` before `next` existed.) Do not commit to `main`, and do not force-push.
+- **Plan first, for every feature.** The owner answers the plan. Then build the whole feature and report once, at
+  the end. Stop and ask before that only when something in the plan doesn't hold, or a guarantee would change.
+- **One commit per coherent change**, with a plain message saying what changed. Push the feature's branch.
+- **Into `next`:** when the feature is finished, `test:all` has passed, and the owner has said its review is
+  accepted, merge its branch into `next` (a fast-forward when it can be) and push `next`.
+- **Into `local-only`:** nothing, until the owner says a test session has passed. Then `next` is fast-forwarded
+  into `local-only` and pushed.
+- **Test sessions.** The owner tests by hand, one session per group of features, from `TESTS.md` in the repo root:
+  for each feature on `next`, the checks to run, in order, with what should be seen. A feature's entry is written
+  on its branch, in the same commits as the feature, so it reaches `next` with it. Group 1: features 18, 33, 25
+  and 31.
 - Never push to, or open a pull request against, `KenKaiii/Roamies`.
 
 ## Do not
@@ -159,4 +173,5 @@ The reset is what makes macOS ask again.
 - Do exactly what was asked. No unsolicited recommendations, refactors or extra features.
 - If a request is ambiguous or has more than one reasonable design, ask one clarifying question and stop.
 - Before a change that touches a guarantee above, or that cannot be tested on this Mac, say so and wait.
-- Reports are short and factual: what changed, what was tested and how, what was not tested.
+- Reports are short and factual: what changed, what was tested and how, what was not tested. One report per
+  feature, at its end (see "Git").
