@@ -53,7 +53,7 @@ Last updated: 2026-11-25.
 | 30 | Machine status: this Mac's memory, disk and battery, and whether the Mac mini answers | Agreed 2026-11-24, not designed; after 29 | |
 | 31 | Speaking budget and quiet queue | Agreed 2026-11-24, not designed; built with 25 | |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Agreed 2026-11-24, not designed; recorded with 23, shown in 21 | |
-| 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | Planning on `stand-down` (off `next`), next after 18 | `stand-down` |
+| 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | Built on `stand-down` (`ff2f9ef`), `test:all` passed; waiting for the owner's review, then into `next`; checks in `TESTS.md`, group 1 | `stand-down` |
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
@@ -813,27 +813,47 @@ the records folder. Replaces the "Daily log" note.
   - After `limits.openItemAskDays` (default 7), Roamies asks at the evening review whether to keep the item or let
     it go.
 
+### 33. Stand down (branch `stand-down`)
+
+Built 2026-11-25 on `stand-down`, off `next`, in one piece (`ff2f9ef`); `test:all` passed. Waiting for the owner's
+review, then into `next`. How it behaves is in `LOCAL-ONLY.md` ("Standing down"); the checks by hand are in
+`TESTS.md`, group 1. What was agreed (the owner, 2026-11-25), and how it was answered:
+
+- **Triggers.** The phrase (`standDown.phrase`, "stand down"), heard whenever the microphone is open, and a shortcut
+  (`standDown.shortcut`, Control+Alt+Period) that works at any moment. Handled by code, never by the model.
+  - The phrase counts only when it is all that was said, small words around it aside, in any order: "please",
+    "now", "okay", the persona's name and its form of address. In the middle or at the end of a longer sentence it
+    does nothing. The words heard are never logged.
+  - The shell matches it on the partial words (`src-tauri/src/stand.rs`, twin of `isStandDown` in
+    `standdown.mjs`, one table for both): it acts once the words have been the phrase alone for 0.7 s with nothing
+    more said, or on the final words. The wait was added in building, so the phrase opening a longer sentence
+    ("stand down the committee") does nothing either.
+- **What it stops:** speech at once (the page stops before the sidecar hears of it), the microphone and any answer
+  window, the request to the model (and any waiting behind it), pi and what its commands left running, bubbles,
+  cards, drawings, the list and the field.
+- **Questions.** Closed as if unanswered: one that is kept when unanswered is kept. A read-only hand-off whose
+  countdown was stopped is never sent by itself afterwards; it is asked again as a pending question. Pending
+  questions stay kept.
+- **While stood down** nothing is said or shown unasked; briefings, reminders, notices and questions are held. A
+  briefing whose window passes is skipped, as before. Calendar lines whose block has ended are dropped and counted.
+  Reminders are never dropped; they are given late. The day's review is written in the note at its time and its
+  line waits.
+- **Ending.** At the owner's next request, typed or spoken; or by itself at the day turn
+  (`standDown.endsAtDayTurn`, default true), saying nothing aloud. Then one summary line worded by code for what
+  happened meanwhile (pi stopped, processes ended, calendar lines that passed, questions kept), shown, and spoken if
+  `speakNotices` is on; then what was held, under the usual rules.
+- **Kept** in `state.json`: a restart and a page rebuild keep the state and the look. Hidden, it stays hidden;
+  shown again, it has the stood-down look.
+- **Look.** JARVIS in full: grey, dim, still, its heart a flat dash. The other looks: grey, dim and still (one line
+  in the LED painter covers them all).
+- **Record.** `stand_down` when it starts and `stand_down_end` when it ends, with true/false and counts only;
+  nothing in the daily note.
+
 ## 3. Queued, in this order
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27. The owner's order of
-2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24 and 18 are in section 2; the
-subsections below follow the rest, in order.
-
-### 33. Stand down
-
-Agreed 2026-11-25 (the owner). Planned on branch `stand-down`, off `next`.
-
-- The phrase "stand down" (a setting), heard whenever the microphone is open, and a keyboard shortcut (a setting)
-  that works at any moment, since the microphone is closed while Roamies speaks. Handled by code, never by the
-  model.
-- It stops speech at once, closes the microphone and any answer window, cancels a request to the model that is
-  under way, ends pi and everything pi started, and takes bubbles and cards off the screen.
-- While stood down nothing is said or shown unasked: briefings, nudges, notices and questions are held, not lost,
-  and pending questions stay kept.
-- It ends when the owner next starts a conversation the usual way. What was held is then given under the usual
-  rules.
-- The character shows a resting state that is visibly different from normal rest.
-- One line in the log (no content). The daily note gets nothing.
+2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24, 18 and 33 are in section 2;
+the subsections below follow the rest, in order.
 
 ### 25. Check-ins on progress
 
@@ -1530,10 +1550,36 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   - Build order after 18: 33, then 25 with 31, then 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
   - Test groups: (1) 18, 33, 25, 31; (2) 23, 32, 14, 29, 30; (3) 19, 21; (4) 17, 28, 15, 20, 27.
   - Next: 33, planned first on a branch off `next`.
+- **2026-11-25, night (feature 33, the owner).** The plan accepted, with his answers:
+  1. The phrase only when it is all that was said, small words around it in any order (the persona's name,
+     "please", "now", "okay", the form of address), acted on from the partial words; inside or at the end of a
+     longer sentence it does nothing; the words are never logged. The table holds his four cases.
+  2. The shortcut: Control+Alt+Period.
+  3. A briefing whose window passed is skipped, as now; calendar lines whose block has ended are dropped and
+     counted; reminders are never dropped, they are given late.
+  4. Kept in `state.json`, and it ends by itself at the day turn (`standDown.endsAtDayTurn`, default true), saying
+     nothing aloud.
+  5. `stand_down_end` is added to `stand_down`.
+  6. Hidden, it stays hidden; shown again, it has the stood-down look.
+  7. JARVIS in full; the other looks dim and still when that is a few lines.
+  8. pi's "Stopped pi." and the rest: one summary line worded by code when it ends, shown, and spoken if
+     `speakNotices` is on.
+  a. A read-only hand-off whose countdown was stopped is never sent by itself; it is asked again as a pending
+     question. b. A page rebuild or a restart keeps the look and the state.
+  Built whole on `stand-down` (`ff2f9ef`). Added in building: the phrase must stay the phrase alone for 0.7 s of
+  partial words (or be the final words), so it opening a longer sentence does nothing either; the review written
+  at its time while stood down, its line held; a line caught on its way to the screen kept (up to 20) and shown
+  after.
+- **2026-11-25, night (`rebuild-run.test.mjs`).** One cause found: at `calendar.reviewAt` (18:00 by default) the
+  day's review shows its line at the first one-minute check, which counts as shown and restarts the quiet minute, so
+  the test always failed when run after that time (reproduced with `reviewAt` two minutes earlier). The test now
+  sets `reviewAt` to "" and prints the activity log's kinds and times when the rebuild doesn't come. The failure
+  seen at 13:35 is not explained by it: recorded under "Known limits" as a flaky test.
 
 ## 6. Still to test
 
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
+- [ ] Feature 33 on `stand-down`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 24, fix 4 with the real voice helper: quit during a spoken reply (the live run on `daf228f` quit after
   the reply had ended).
 - [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first
@@ -1629,6 +1675,15 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - [ ] Little Snitch installed, with rules for Roamies and pi.
 
 ## 7. Known limits
+
+- `test/rebuild-run.test.mjs` is a known flaky test. It failed once in `test:all` (2026-11-25, 13:35): "the rebuild
+  is asked for" did not come within 100 s, where one quiet minute and the 15-second checks give 60 to 75 s; it
+  passed alone and on the rerun. Two restarts of the quiet minute are needed for that. Ruled out: the page rebuild
+  made after the first messages (the sidecar reads its input only once it is made); the calendar's first-time
+  question and the adoption offer (no to-dos in the test home, and no sync with `syncSeconds` 3600); briefings and
+  reminders (none); a settings read failing (one check, not a restart). Found and fixed: the day's review at
+  `calendar.reviewAt` (only after 18:00, so not that failure). If it fails again, the test prints the activity
+  log's kinds and times.
 
 - The natural voice's helper is refused these by its sandbox at every start, and runs all the same (seen
   2026-11-21): writing Metal's shader cache in the user's cache folder (`…/C/com.apple.metal`), so shaders are
