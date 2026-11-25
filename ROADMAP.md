@@ -8,7 +8,14 @@ rules for working on it; this file tracks the work itself.
 same commit: move it between sections, fill in the branch and commit, and add a dated line to the decisions log when
 something is decided or reversed.
 
-Last updated: 2026-11-21.
+**How work goes (from 2026-11-25).** Each feature branches off `next`. It is planned first, and the owner answers
+the plan; it is then built whole and reported once, at the end (earlier only when something doesn't hold or a
+guarantee would change). When `test:all` has passed and the owner has accepted its review, it is merged into `next`.
+The owner tests by hand in sessions, one per group of features, from `TESTS.md`; only when he says a session has
+passed is `next` merged into `local-only`. Group 1: features 18, 33, 25 and 31 (33 and 31 are not in this roadmap
+yet). The rules are in `CLAUDE.md`, under "Git".
+
+Last updated: 2026-11-25.
 
 ## Status at a glance
 
@@ -1415,6 +1422,15 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   applied at once; each change is measured with its cause. The test fails on the old code.
 - **2026-11-25, later (feature 24, the owner).** The orb did not move at the page rebuild on the installed
   `rebuild-still`. Merge approved: `test:all` passed (449 s), `rebuild-still` fast-forwarded into `local-only`.
+- **2026-11-25, evening (the owner: a change of method).** Testing moves to sessions, one per group of features,
+  instead of after every step.
+  - A branch `next` is made off `local-only`. Each new feature branches off `next`.
+  - Every feature is planned first and the owner answers the plan. It is then built whole and reported once at the
+    end, unless something doesn't hold or a guarantee would change: then stop and ask.
+  - A feature is merged into `next` when it is finished, `test:all` has passed and the owner has accepted its
+    review. Nothing is merged into `local-only` until the owner says a test session has passed.
+  - `TESTS.md` in the repo lists, for each feature on `next`, the checks to run by hand, in order, with what
+    should be seen. Group 1: features 18, 33, 25 and 31.
 
 ## 6. Still to test
 
