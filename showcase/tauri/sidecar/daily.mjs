@@ -20,8 +20,15 @@
 //     questions about that to-do and logs "Let go", leaving the to-do exactly as it is. No answer changes nothing.
 //     These questions are not kept as pending questions: they come back the next morning.
 //
-// Only to-dos count (kind "commitment"); reminders and timers never appear. pi's work is not in it (it stays in the
-// records folder). Nothing here makes a request to the model, and nothing of the note goes to it.
+//   - Handover: when the day turns, part one is written here by code in the last day of the conversation that
+//     ends (handoverPartOne): the to-dos and reminders made, changed, done or dropped that day, the questions still
+//     waiting, and the blocks kept until Super Productivity is open. Part two (handover.mjs) follows under fixed
+//     headings: Decided, Left open (every open item, oldest first, as a checkbox with its block id ^oi-…), Worth
+//     remembering.
+//
+// Only to-dos count in the Plan, the Log and the Review (kind "commitment"); reminders and timers appear only in
+// the handover's part one. pi's work is not in it (it stays in the records folder). Nothing here makes a request
+// to the model, and nothing of the note goes to it.
 // A day starts at "calendar.dayTurnsAt": before that time, it is still the day before.
 import os from 'node:os';
 import { only, unfilled } from './answers.mjs';
@@ -193,6 +200,8 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   //   answered: { to-do id: 'moved' | 'left' | 'dropped' } for the questions answered that day; morning: when the
   //   morning's questions were asked. letGo: { to-do id: the latest time it had when it was let go }: no question
   //   about it while that is still its latest time.
+  //   changes: { id: { title, kind, due, made, changed, done, dropped } }, what happened to the to-dos and
+  //   reminders that day, for the handover. snap: { id: { t, d, s, k } }, the list at the last check.
   const blank = () => ({ days: {}, letGo: {} });
   function get() {
     const d = readState(settings().dir).daily;
@@ -264,8 +273,33 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     vault.append(t0.rel, `${heads.at(-1)?.trim() === '## Log' ? '' : '\n## Log\n'}${lines.join('\n')}\n`);
   }
 
+  /** What happened to the to-dos and reminders since the last check, kept for the handover: made (that day),
+   *  changed (title or time), done, dropped (gone from the list while open). */
+  function track(t0) {
+    const all = (Array.isArray(todos()) ? todos() : []).filter((t) => t && (t.kind === 'commitment' || t.kind === 'reminder'));
+    const inDay = (ms) => typeof ms === 'number' && ms >= t0.w.from && ms < t0.w.until;
+    edit((d) => {
+      const snap = d.snap && typeof d.snap === 'object' && !Array.isArray(d.snap) ? d.snap : null;
+      const day = d.days[t0.key] = d.days[t0.key] && typeof d.days[t0.key] === 'object' ? d.days[t0.key] : {};
+      const changes = day.changes = { ...(day.changes ?? {}) };
+      const mark = (id, c, how) => { changes[id] = { ...(changes[id] ?? {}), ...c, [how]: true }; };
+      const seen = {};
+      for (const t of all) {
+        const now_ = { t: oneLine(t.text), d: typeof t.due === 'number' ? t.due : null, s: t.status, k: t.kind }, c = { title: now_.t, kind: t.kind, due: now_.d };
+        seen[t.id] = now_;
+        const was = snap?.[t.id];
+        if (!was && inDay(t.createdAt)) mark(t.id, c, 'made');
+        else if (was && (was.t !== now_.t || was.d !== now_.d)) mark(t.id, c, 'changed');
+        if (t.status === 'done' && inDay(t.doneAt) && !changes[t.id]?.done) mark(t.id, c, 'done');
+      }
+      if (snap) for (const [id, was] of Object.entries(snap)) if (!seen[id] && was?.s === 'open') mark(id, { title: was.t, kind: was.k, due: was.d }, 'dropped');
+      d.snap = seen;
+    });
+  }
+
   /** The regular check: to-dos finished since the last one get a Done line, and what is planned is noted. */
   function tick() {
+    track(today());
     const t0 = today(), day = get().days[t0.key] ?? {}, logged = day.done ?? {};
     const fresh = list().filter((t) => t.status === 'done' && typeof t.doneAt === 'number' && t.doneAt >= t0.w.from && t.doneAt < t0.w.until && !logged[t.id]).sort((a, b) => a.doneAt - b.doneAt);
     const p = planFor(t0);
@@ -403,6 +437,40 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     } catch { return false; }
   }
 
+  // ---- the handover (handover.mjs words part two; this writes both parts in the note)
+  /** A day's note, by its key: written to at its end, made (without a Plan) when it isn't there. */
+  function section(key, text) {
+    const [y, m, dd] = key.split('-').map(Number), t0 = today(new Date(y, m - 1, dd, 23, 59).getTime());
+    if (!vault.create(t0.rel, head(t0) + text.replace(/^\n+/, ''))) vault.append(t0.rel, text.startsWith('\n') ? text : `\n${text}`);
+  }
+  /** Part one, written by code in the last day of the conversation that ends. pending: the questions still waiting
+   *  ({ brief, at }), kept: the blocks kept until Super Productivity is open ({ brief }), link(id, title): a to-do's
+   *  title linked to its task page. → true. */
+  function handoverPartOne(key, { pending = [], kept = [], link = (id, title) => title } = {}) {
+    try { if (key === today().key) track(today()); } catch { /* counted as it was */ }
+    const changes = Object.entries(get().days[key]?.changes ?? {});
+    const how = (c) => { const w = [c.made && 'made', c.changed && !c.made && 'changed', c.done && 'done', c.dropped && 'dropped'].filter(Boolean).join(' and '); return w.charAt(0).toUpperCase() + w.slice(1); };
+    const when = (c) => (!c.done && !c.dropped && typeof c.due === 'number' ? ` (due ${dayLong(new Date(c.due))}, ${hm(c.due)})` : '');
+    const lines = [`\n## Handover (written ${dayLong(new Date(now()))}, ${hm(now())})`];
+    if (changes.length) lines.push('### To-dos and reminders', ...changes.map(([id, c]) => `- ${how(c)}${c.kind === 'reminder' ? ' (reminder)' : ''}: ${c.kind === 'commitment' ? link(id, c.title) : c.title}${when(c)}`));
+    if (pending.length) lines.push('### Questions still waiting', ...pending.map((q) => `- ${oneLine(q.brief || q.kind)}${q.at ? ` (asked ${String(q.at).slice(0, 10)})` : ''}`));
+    if (kept.length) lines.push('### Kept until Super Productivity is open', ...kept.map((a) => `- ${oneLine(a.brief)}`));
+    if (lines.length === 1) lines.push('- Nothing changed on the list, no question is waiting, and no block is kept.');
+    section(key, `${lines.join('\n')}\n`);
+    log('daily_handover', { part: 1, changes: changes.length, pending: pending.length, kept: kept.length });
+    return true;
+  }
+  /** Part two, under its fixed headings; Left open is every open item, oldest first, as a checkbox with its id. */
+  function handoverPartTwo(key, { decided = [], items = [], remember = [] } = {}) {
+    const list = (xs) => (xs.length ? xs.map((x) => `- ${oneLine(x)}`) : ['- Nothing.']);
+    const since = (k) => { const [y, m, dd] = String(k).split('-').map(Number); return y ? dayLong(new Date(y, m - 1, dd)) : k; };
+    section(key, `${['### Decided', ...list(decided), '### Left open', ...(items.length ? items.map((i) => `- [ ] ${oneLine(i.text)} (since ${since(i.day)}) ^${i.id}`) : ['- Nothing.']), '### Worth remembering', ...list(remember)].join('\n')}\n`);
+    log('daily_handover', { part: 2, decided: decided.length, open: items.length, remember: remember.length });
+    return true;
+  }
+  /** Lines for today's Log (feature 18: open items closed or let go). */
+  const logged = (lines) => logLines(today(), lines);
+
   const morningAsked = () => { try { return !!get().days[today().key]?.morning; } catch { return true; } };
   /** For the morning briefing's note: how many to-dos need a new time, counted, never named (the app asks about
    *  them itself after the briefing). '' when there are none, or they were asked about already today. */
@@ -419,5 +487,5 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   function reviewWithBriefing() {
     try { const t0 = today(); return t0.s.calendar.reviewAt !== null && !get().days[t0.key]?.review; } catch { return false; }
   }
-  return { tick, noted, ensure, review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, today, planFor, state: get };
+  return { tick, noted, ensure, review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, logged, today, planFor, state: get };
 }

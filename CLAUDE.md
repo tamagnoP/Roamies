@@ -20,7 +20,9 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    due today, due this week, overdue and without a date, and today's planned blocks in full. A title outside
    today's plan reaches the provider when the owner asks about it or names it (`list_commitments` with a filter,
    `SP.titlesShown` at most at a time, then "and N more"), never because a request was made. Do not put the list,
-   or any title from it, into the live state or a briefing note. A nudge for a due to-do is worded by code (`nudgeLine`), shown and
+   or any title from it, into the live state or a briefing note. The fresh conversation of each day (feature 18)
+   starts with the handover: part two, written by the model from the conversation that ended, and the open items'
+   text; never part one, the daily note or the list. A nudge for a due to-do is worded by code (`nudgeLine`), shown and
    spoken, and makes no request. What a sync has to say goes to a bubble, never into a tool's result. From a task in the app only title, done,
    start, length, deadline and the two matrix tags are read (and whether it repeats); only linked tasks are
    written to, only those fields; none is ever deleted.
@@ -64,7 +66,8 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/pi.mjs` | Ours. Hand-off to pi, Send approval, background job, records, settings loader, `gateTools`. |
 | `showcase/tauri/sidecar/leftovers.mjs` | Ours. The extension pi is given for a hand-off that can edit, its record, and ending the process groups it records when pi stops. |
 | `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools, the vault's one writer (`createVault`), and the task pages (`createTaskPages`). |
-| `showcase/tauri/sidecar/daily.mjs` | Ours. Feature 18: the daily note (Plan, Log, Review), built by code; nothing of it goes to the model. |
+| `showcase/tauri/sidecar/daily.mjs` | Ours. Feature 18: the daily note (Plan, Log, Review, the handover's two parts), built by code; nothing of it goes to the model. |
+| `showcase/tauri/sidecar/handover.mjs` | Ours. Feature 18: the handover's part two (one model request), the open items, the fresh conversation each day. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |

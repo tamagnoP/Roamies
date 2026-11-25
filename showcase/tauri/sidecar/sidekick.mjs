@@ -44,6 +44,7 @@ import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the e
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createDaily, isReviewAsk } from './daily.mjs'; // Local-only build (feature 18): the daily note
+import { PART_TWO_SECONDS, createHandover, handoverInput, handoverPrompt, isHandover, oneMoment, parsePartTwo } from './handover.mjs'; // and the handover
 import { WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; // Local-only build (feature 16): the natural voice
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
@@ -415,6 +416,7 @@ function todoItems() {
   return [...openCommitments().map((c) => ({ id: c.id, text: c.text, kind: c.kind ?? 'commitment', status: 'open', due: c.due ?? null, doneAt: null, createdAt: c.createdAt ?? null })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, kind: i.kind, status: 'done', due: i.due ?? null, doneAt: i.doneAt ?? null, createdAt: i.createdAt ?? null }))];
 }
 const daily = createDaily({ home: HOME, userName, log: (kind, data) => logLine(kind, data), blocks: () => cal.blocks(), todos: () => todoItems() });
+const handover = createHandover({ home: HOME, log: (kind, data) => logLine(kind, data) });
 // A failure of the daily note is logged once for each reason, never with a title, and never stops anything else.
 let dailyFailed = '';
 function dailyDo(what, fn) {
@@ -929,7 +931,7 @@ async function learnFacts(facts) {
   return added;
 }
 async function memoryPass(s, why) {
-  const turns = transcript(s.messages.filter((m) => !isSummary(m)), userName, stripNote);
+  const turns = transcript(s.messages.filter((m) => !isSummary(m) && !isHandover(m)), userName, stripNote); // Local-only build (feature 18): nor the handover
   if (!turns.trim() || !config.model) return [];
   const t0 = Date.now();
   try {
@@ -1053,8 +1055,47 @@ let frontSoon = null;
 // Auto-listen: the turn whose reply ended on a question, until the overlay says it's been typed out and said.
 let autoTurn = null;
 const autoListenOn = () => VOICE_OK && !!config.voice && !!config.autoListen && voiceReady() && !intro;
+// Local-only build (feature 18): the first request of a new day (handover.mjs). The conversation that ends is handed
+// over: part one written by code in its last day's daily note, part two by one model request (the fold's route),
+// while a "one moment" line worded by code is shown (and said, in an exchange started by voice). Then a new
+// conversation starts with the handover as its first message, and the old one gets the usual memory pass. If part
+// two fails, the old conversation carries on and part two is tried again at the next request. → true when a new
+// conversation was started.
+async function dayTurn(byVoice) {
+  let need;
+  try { need = handover.needed(session); } catch (e) { dailyDo('handover', () => { throw e; }); return false; }
+  if (!need) return false;
+  if (need.kind === 'quiet') {
+    const msg = handover.message();
+    freshSession(null); handover.given();
+    if (msg) session.messages = [{ role: 'user', content: msg }];
+    logLine('handover_new', { from: 'quiet', words: msg ? msg.split(/\s+/).length : 0 });
+    return true;
+  }
+  const old = session, key = need.key, t0 = Date.now();
+  if (!handover.partOneDone(old.id, key) && dailyDo('handover', () => daily.handoverPartOne(key, { pending: flow.pending(), kept: cal.kept(), link: (id, title) => notes.pages.link(id, title) }))) handover.markPartOne(old.id, key);
+  const line = oneMoment(key, need.today);
+  say(line, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(line));
+  let two, model;
+  try {
+    const known = new Set(todoItems().map((t) => t.id));
+    const r = await oneShot({ ...(await sideRoute()), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() }) });
+    two = parsePartTwo(r.text, { known: (id) => known.has(id) }); model = r.model;
+  } catch (e) {
+    logLine('handover_failed', { ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 300) });
+    return false;
+  }
+  const msg = handover.finish(key, two);
+  dailyDo('handover', () => daily.handoverPartTwo(key, { decided: two.decided, items: handover.openItems(), remember: two.remember }));
+  logLine('handover', { model, ms: Date.now() - t0, decided: two.decided.length, open: two.open.length, remember: two.remember.length, words: msg ? msg.split(/\s+/).length : 0 });
+  freshSession('day');
+  if (msg) session.messages = [{ role: 'user', content: msg }];
+  return true;
+}
 async function prompt(text, image = null, note = '', byVoice = false) {
-  const problem = await readyAgent();
+  if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
+  let problem = await readyAgent();
+  if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
   if (problem) return aloud(problem, 'concerned'); // Local-only build: said too, in an exchange started by voice
   busy = true; quiet = false; autoTurn = null;
   flow.activity(); // Local-only build (feature 22): the exchange's quiet time starts again after this reply

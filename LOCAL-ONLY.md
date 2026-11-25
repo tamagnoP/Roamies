@@ -613,6 +613,10 @@ and the conversation so far. Two things keep that from growing without end.
   stay on the Mac, next to the conversation's file. What is folded is planned on what was really sent (the live
   state included, and counted the way the provider counted), so a fold that is due can happen.
 - The log's `live` line says which parts were sent and how many characters, never their text.
+- **A fresh conversation each day** (feature 18, see "The daily note"). The first request of a new day starts a new
+  conversation. Its first message is the handover, marked as background: what was decided, what is worth
+  remembering, and the open items with their ids, at most 300 words. Part one of the handover, the daily note and
+  the to-do list are never in it.
 
 ## Safeguards
 
@@ -741,11 +745,34 @@ after.
       taken: the bubble shows what it heard and stays open.
   - No answer changes nothing and ends the round. These questions are not kept as pending questions; they come back
     the next morning.
-- Only to-dos count. Reminders and timers never appear, and neither does pi's work (it stays in the records folder).
-- Nothing in the daily note is sent to the AI, and making it involves no request. "Review my day" is answered by the
+- **The first request of the day**, typed or spoken, writes the day's Plan if it isn't written yet.
+- **Handover, and a fresh conversation each day.** At the first request of a new day (typed, spoken, or a
+  briefing), the conversation that ends is handed over in two parts, both written under `## Handover` in the daily
+  note of its last day:
+  - **Part one, by code:** the to-dos and reminders made, changed, done or dropped that day, each to-do linked to
+    its task page when it has one; the questions still waiting; the blocks kept until Super Productivity is open.
+  - **Part two, by one request to the AI** (the same route as the fold), given the conversation that ends and the
+    open items' text: at most 8 lines under **Decided**, **Left open** and **Worth remembering**. Under Left open the
+    note lists every open item, oldest first, as a checkbox with its block id (`- [ ] … ^oi-…`).
+  - While part two is made, Roamies shows "One moment: I'm wrapping up yesterday." (said too, in an exchange
+    started by voice). It waits at most 30 seconds.
+  - Then a new conversation starts, with the handover as its first message (see "What goes with each request"),
+    and your request goes on in it. The old conversation gets the usual memory pass.
+  - If part two fails, part one stays written, the old conversation carries on, and part two is tried again at the
+    next request.
+  - A day with no conversation makes no request. After a gap of several days, the new conversation gets the most
+    recent handover and the open items.
+- **Open items.** Each new "Left open" line becomes an open item, kept in `state.json` under `handover` with its
+  day. A line that matches an open item makes nothing: the same words (small words aside), all of one's words in
+  the other's, or at least 70 % of their words shared. The AI lists only new lines; the open items are carried
+  from one handover to the next by code.
+- Only to-dos count in the Plan, the Log and the Review. Reminders and timers appear only in the handover's part
+  one; pi's work never appears (it stays in the records folder).
+- Nothing in the daily note is sent to the AI, and making it involves no request, apart from part two of the
+  handover (above). "Review my day" is answered by the
   app and never reaches the model, and so are the questions and your answers. The activity log records counts
-  only (`daily_plan`, `daily_log`, `daily_review`, `daily_questions`); a failure is logged once per reason
-  (`daily_failed`).
+  only (`daily_plan`, `daily_log`, `daily_review`, `daily_questions`, `daily_handover`, `handover`,
+  `handover_items`, `handover_new`); a failure is logged once per reason (`daily_failed`, `handover_failed`).
 - `state.json` keeps, under `daily`, what was written for each of the last 14 days. This stops a line being written
   twice and lets the review find a to-do finished earlier in the day.
 
@@ -1028,6 +1055,8 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   the list, and `makeCommitment`, which turns a reminder into a to-do. `listItems` also gives `doneAt` for a finished
   item and `createdAt` (feature 18).
 - `showcase/tauri/sidecar/daily.mjs` (new): the daily note (feature 18).
+- `showcase/tauri/sidecar/handover.mjs` (new): the handover, the open items, and the fresh conversation each day
+  (feature 18).
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/kokorovoice.mjs` (new): the natural voice: starts and watches the helper, its sandbox
