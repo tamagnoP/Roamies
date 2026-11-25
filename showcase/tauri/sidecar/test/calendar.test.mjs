@@ -259,11 +259,11 @@ assert.ok(app.log.slice(mark).some((q) => q.query === '?includeDone=true&source=
 assert.equal(arch.status, 'done'); assert.equal(state().retired[arch.id], archTask); assert.deepEqual(writes(mark), []);
 assert.equal(state().links[gone.id], undefined); assert.equal(gone.status, 'open', 'the to-do is left alone until the owner answers');
 assert.deepEqual(state().held, [{ ask: { todo: gone.id, title: 'Delete me' } }], 'a question, kept until it can be shown');
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [{ todo: gone.id, title: 'Delete me' }], offers: [], blocks: [] }); assert.deepEqual(state().held, []);
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [{ todo: gone.id, title: 'Delete me' }], offers: [], blocks: [] }); assert.deepEqual(state().held, []);
 mark = app.log.length; await cal.sync('timer'); await cal.sync('tool');
-assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] }, 'asked once');
+assert.deepEqual(writes(mark), [], 'until the owner answers, the to-do gets no new task'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [], blocks: [] }, 'asked once');
 // the owner keeps it: it is a to-do without a task, so it gets a new one
-await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] });
+await cal.answered(gone.id); r = await cal.sync('timer'); assert.equal(taskOf(gone).title, 'Delete me'); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [], blocks: [] });
 
 // ---- 9. taken off Roamies' list: the time is cleared, the link dropped, the owner told; never a DELETE
 await cal.setLocal(gone.id, { start: at(19, 10), minutes: 30 }); await cal.sync('timer');
@@ -307,7 +307,7 @@ mark = app.log.length; assert.equal(await tool('draw').execute({}), 'drawn'); as
 third.text = 'Book room A'; taskOf(third).title = 'Book room B';
 const told = await tool('list_commitments').execute({ words: 'room' });
 assert.match(told, /^1 open to-do with "room" in the title:\n- c\d+: Book room B$/); assert.ok(!/changed both|I kept/.test(told));
-assert.deepEqual(cal.takeHeld(), { lines: ['"Book room B": the title changed both here and in Super Productivity. I kept what the app has.'], notices: ['"Book room B" changed both here and in Super Productivity, and I kept what the app has.'], asks: [], offers: [], blocks: [] }, 'shown, and said by the speakNotices rule');
+assert.deepEqual(cal.takeHeld(), { lines: ['"Book room B": the title changed both here and in Super Productivity. I kept what the app has.'], notices: ['"Book room B" changed both here and in Super Productivity, and I kept what the app has.'], items: [{ text: '"Book room B": the title changed both here and in Super Productivity. I kept what the app has.', say: '"Book room B" changed both here and in Super Productivity, and I kept what the app has.' }], asks: [], offers: [], blocks: [] }, 'shown, and said by the speakNotices rule');
 // a slow answer to a real request ends the run without half-made changes being lost or repeated
 app.hang = (m) => m === 'POST';
 fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, limits: { ...file0.limits, calendarTimeoutSeconds: 2 } }));
@@ -369,12 +369,15 @@ for (const busyWith of [{ ready: false }, { busy: true }, { queued: 1 }, { askin
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /asking: pending\.size > 0 \|\| calAsking/, 'any bubble waiting for an answer (Send, a plan) counts');
 const show = side.slice(side.indexOf('async function calShow()'), side.indexOf('tools.splice(0, tools.length'));
-assert.ok(show.includes('if (!calQuiet()) return;') && show.includes('say(lines.join') && !show.includes('enqueue'), 'shown in a bubble, when nothing else is going on: nobody talking, nothing being said, no bubble open');
-assert.ok(show.indexOf('if (!calQuiet()) return;') < show.indexOf('cal.takeHeld()'), 'nothing is taken off the pile, shown or said before that');
-assert.match(show, /const voiced = noticeVoice\(\{ lines, notices \}, \{ exchange: flow\.spoken\(\), speakNotices: noticesOn\(\) \}\);/); assert.match(show, /if \(voiced\) await lineDone\(forVoice\(voiced\)\);/, 'what is said is what noticeVoice gives, and nothing else');
+assert.ok(show.includes('if (!calQuietBase()) return;') && show.includes("await unasked({ kind: 'calendarLine', lines: items });") && !show.includes('enqueue'), 'shown in a bubble, when nothing else is going on: nobody talking, nothing being said, no bubble open (feature 31: through the speaking budget)');
+assert.ok(show.indexOf('if (!calQuietBase()) return;') < show.indexOf('cal.takeHeld('), 'nothing is taken off the pile, shown or said before that');
+assert.ok(show.indexOf("const { items, asks, offers, blocks } = cal.takeHeld({ linesOnly: !calQuiet() });") < show.indexOf('if (!calQuiet()) return;') && show.indexOf('if (!calQuiet()) return;') < show.indexOf('for (const a of asks)'), 'stood down, the lines go to the quiet queue and the questions wait');
+const give = side.slice(side.indexOf('async function giveItem('), side.indexOf('function unasked('));
+assert.ok(give.includes("say(lines.join('\\n'), 'concerned');"), 'given: the lines in one bubble');
+assert.match(give, /const voiced = noticeVoice\(\{ lines, notices \}, \{ exchange: flow\.spoken\(\), speakNotices: noticesOn\(\) \}\);/); assert.match(give, /if \(voiced\) await lineDone\(forVoice\(voiced\)\);/, 'what is said is what noticeVoice gives, and nothing else');
 assert.match(show, /const line = await cal\.placeKept\(b\)[^\n]*if \(line\) \{ say\(line, 'happy'\); if \(flow\.spoken\(\) \|\| noticesOn\(\)\) voiceLine\(forVoice\(line\)\); \}/, 'a kept block placed after its overlap question, or lost, is a notice too');
 assert.match(side, /const noticesOn = \(\) => \{ try \{ return loadSettings\(HOME\)\.speakNotices; \} catch \{ return false; \} \};/);
-assert.match(side, /if \(m\.type === 'voice_state'\) voiceState = /); assert.match(side, /lineUntil = Date\.now\(\) \+/);
+assert.match(side, /if \(m\.type === 'voice_state'\) \{ voiceState = /); assert.match(side, /lineUntil = Date\.now\(\) \+/);
 assert.match(side, /cal\.sync\('briefing'\)/, 'a sync before each briefing'); assert.match(side, /loadSettings\(HOME\)\.calendar\.syncSeconds/, 'the timer follows the setting');
 for (const hook of ["cal.changed(c); }, // Local-only build", 'cal.changed(after);', 'cal.changed(c); // Local-only build']) assert.ok(side.includes(hook), `a to-do changed in Roamies is told to the calendar: ${hook}`);
 
@@ -606,7 +609,7 @@ assert.deepEqual([linkOf(m3).local.urgent, linkOf(m3).local.important, linkOf(m4
 // ---- urgent and important, with no block: one is offered, once, as a question of the app's own (2026-11-19)
 assert.equal(out, 'Sorted 2 to-dos.', 'the tool\'s result has nothing of it');
 assert.deepEqual(state().held, [{ offer: { todo: m3.id, title: 'Matrix: reply to editor' } }]);
-let heldOffers = cal.takeHeld(); assert.deepEqual(heldOffers, { lines: [], notices: [], asks: [], offers: [{ todo: m3.id, title: 'Matrix: reply to editor' }], blocks: [] });
+let heldOffers = cal.takeHeld(); assert.deepEqual(heldOffers, { lines: [], notices: [], items: [], asks: [], offers: [{ todo: m3.id, title: 'Matrix: reply to editor' }], blocks: [] });
 // the question: the owner's wording, Yes and No, said, kept when unanswered
 askedFull.length = 0; booked.length = 0; answer = 'nobody';
 await assert.rejects(cal.askOffer(heldOffers.offers[0]), (e) => e.name === 'Unanswered');
@@ -631,7 +634,7 @@ out = await T('set_priority').execute({ todo: m1.id, urgent: true });
 assert.equal(out, '"Matrix: grant report": urgent and important.', 'one that has a block is offered none'); assert.deepEqual(cal.takeHeld().offers, []);
 // made urgent and important in the app, with nobody asking: the offer waits for a quiet moment, in a bubble
 app.tasks.get(linkOf(m5).task).tagIds = ['EM_URGENT', 'EM_IMPORTANT']; await cal.sync('timer'); await cal.sync('timer');
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [{ todo: m5.id, title: 'Matrix: call bank' }], blocks: [] });
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [{ todo: m5.id, title: 'Matrix: call bank' }], blocks: [] });
 // ---- with the app away, what is said is kept here and goes over at the next sync
 app.hang = (m, p) => p === '/health'; mark = app.log.length;
 out = await T('set_priority').execute({ todo: m4.id, important: true });
@@ -701,7 +704,7 @@ assert.deepEqual(tagsOf(m4), ['EM_IMPORTANT']);
   assert.deepEqual(held.blocks.map((b) => [b.todo, b.title, b.start, b.minutes]), [[ka.id, 'Kept: a', D(3, 10, 15), 30]], 'a clash becomes the usual question');
   // never twice: the next runs write nothing and say nothing
   mark = app.log.length; await cal.sync('timer'); await cal.sync('tool'); await make().sync('start');
-  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] });
+  assert.deepEqual(writes(mark), []); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [], blocks: [] });
   // the clash: asked as an overlap is; a no leaves it off, a yes places it
   answer = null; asked.length = 0;
   assert.equal(await cal.placeKept(held.blocks[0]), ''); assert.equal(linkOf(ka).local.start, null); assert.deepEqual(writes(mark), []);
@@ -1401,7 +1404,7 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   // Feature 22: speech.hush() where this was speech.stop(): what is playing still stops, but the reply's voice is no
   // longer ended, so what Roamies says after the answer is spoken (flow.test.mjs checks hush against stop).
   assert.match(side, /if \(pi\.listening\(\) \|\| answers\.listening\(\)\) speech\.hush\(\);[^\n]*\n\s*else \{ interruptQuietly\(\);/, 'starting to talk cancels the turn only when no such bubble is open');
-  assert.match(side, /if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n(?:  \/\/[^\n]*\n  if \(!area\?\.file && isReviewAsk\(text\)\)[^\n]*\n)?  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request, and the shell is told the words were dealt with');
+  assert.match(side, /if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n(?:  \/\/[^\n]*\n  if \(!area\?\.file && isReviewAsk\(text\)\)[^\n]*\n)?(?:  \/\/[^\n]*\n  if \(!area\?\.file && isWaitingAsk\(text\)\)[^\n]*\n)?  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request, and the shell is told the words were dealt with');
   assert.match(side, /m\.state === 'idle' && \(pi\.unheard\(\) \|\| answers\.unheard\(\)\)/);
   const shell = fs.readFileSync(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.match(shell.slice(shell.indexOf('fn shows_answer')), /^[^}]*Some\("summon" \| "say" \| "ask" \| "list" \| "heard"\) => true/, 'on "heard" the shell lets the listening pill go (to_overlays: handoff)');

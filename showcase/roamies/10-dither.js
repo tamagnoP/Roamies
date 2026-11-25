@@ -55,6 +55,9 @@
       let look = pickLook(typeof location !== 'undefined' ? new URLSearchParams(location.search).get('look') : null);
       // Local-only build (feature 33): stood down. Every look is drawn grey and dim, and holds still where it rests.
       let stood = false;
+      // Local-only build (feature 31): how many things wait in the quiet queue, as a small count by the body (0: none).
+      let queued = 0;
+      const badgeShown = () => (queued > 0 && !stood && pres.state === 'shown' ? queued : 0);
       const jst = { spin: 0, dt: 0.016 };
       const hands = [-1, 1].map((s) => ({ s, x: m.x, y: m.y, vx: 0, vy: 0 }));
       const parts = [];
@@ -617,6 +620,9 @@
         // Local-only build (feature 33): the stood-down look, on or off (host.js).
         setStood(v) { stood = !!v; },
         get stood() { return stood; },
+        // Local-only build (feature 31): the quiet queue's count (host.js); hidden while stood down.
+        setQueued(n) { queued = Math.max(0, Math.floor(Number(n) || 0)); },
+        get queued() { return queued; },
         resize(env) {
           lastEnv = env;
           const S = Roamie.unit(env);
@@ -897,10 +903,11 @@
             for (let y = pd[1] * K; y < pd[3] * K; y++) for (let i = y * IW + pd[0] * K, e = y * IW + pd[2] * K; i < e; i++) h = Math.imul(h ^ u32[i], 16777619);
             const glide = !!m.drive && pres.state === 'shown';
             const gx = glide ? Math.round((bx - Math.round(bx / P) * P) * 20) : 0, gy = glide ? Math.round((by - Math.round(by / P) * P) * 20) : 0;
-            sig = Math.imul(h ^ (gx * 31 + gy * 1009), 16777619);
+            sig = Math.imul(h ^ (gx * 31 + gy * 1009) ^ (badgeShown() * 7919), 16777619);
           }
-          // One cell extra each way: following slides the layer by up to half a cell.
-          return { x0: rect[0] * P - P, y0: rect[1] * P - P, x1: rect[2] * P + P, y1: rect[3] * P + P, sig };
+          // One cell extra each way: following slides the layer by up to half a cell. Feature 31: room for the count.
+          const b = badgeShown() ? R * 0.6 : 0;
+          return { x0: rect[0] * P - P, y0: rect[1] * P - P - b, x1: rect[2] * P + P + b, y1: rect[3] * P + P, sig };
         },
         draw(ctx, env) {
           if (!ready) this.prepare(env);
@@ -968,6 +975,15 @@
           if (sn) shiftAll(sn.dx, sn.dy);
           try { plug?.over?.(ctx, env); } finally { if (sn) shiftAll(-sn.dx, -sn.dy); }
           ctx.restore();
+          // Feature 31: the quiet queue's count, a small disc above and right of the body, while it is on screen.
+          if (badgeShown()) {
+            const r = Math.max(7, R * 0.2), x = bx + R * 0.85, y = by - R * 0.85;
+            ctx.save();
+            ctx.fillStyle = `rgb(${PAL[L].join(',')})`; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = `rgb(${PAL[0].join(',')})`; ctx.font = `bold ${Math.round(r * 1.25)}px -apple-system, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(queued > 9 ? '9+' : String(queued), x, y + r * 0.05);
+            ctx.restore();
+          }
           if (o.grid && !clear) {
             ctx.fillStyle = o.grid;
             for (let x = 0; x < env.w; x += P) ctx.fillRect(x, 0, 1, env.h);

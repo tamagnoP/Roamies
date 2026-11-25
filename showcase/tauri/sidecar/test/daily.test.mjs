@@ -52,15 +52,15 @@ date: 2026-11-26
 ← [[2026-11-25]] · [[2026-11-27]] →
 
 ## Plan
-- 09:00 to 10:00 Write methods
-- Send slides (due 17:00)
-- Call Ana (due 20:00)
+- [ ] 09:00 to 10:00 Write methods ^td-a
+- [ ] Send slides (due 17:00) ^td-b
+- [ ] Call Ana (due 20:00) ^td-c
 
 ### Needs a new time
-- Book room D (was Tuesday 24 November, 14:00)
+- [ ] Book room D (was Tuesday 24 November, 14:00) ^td-d
 
 ### Coming up
-- Saturday 28 November: Grant report (due 18:00)
+- [ ] Saturday 28 November: Grant report (due 18:00) ^td-e
 `;
 assert.equal(note(), plan);
 assert.ok(!note().includes('Stretch') && !note().includes('Someday') && !note().includes('Old done') && !note().includes('Far deadline'), 'reminders, to-dos with no time, earlier days and far deadlines are not in it');
@@ -71,7 +71,7 @@ assert.deepEqual(logs.filter(([k]) => k === 'daily_plan'), [['daily_plan', { pla
 // ---- the Log: Done lines, whoever finished it, and Note lines
 clock = at(26, 10, 5); finish('a', at(26, 10, 2));
 assert.equal(daily.tick(), 1);
-assert.ok(note().endsWith('### Coming up\n- Saturday 28 November: Grant report (due 18:00)\n\n## Log\n- 10:02 Done: Write methods\n'));
+assert.ok(note().endsWith('### Coming up\n- [ ] Saturday 28 November: Grant report (due 18:00) ^td-e\n\n## Log\n- 10:02 Done: Write methods\n'));
 assert.equal(daily.tick(), 0, 'one line for each');
 clock = at(26, 11, 5); daily.noted('Cellpose thresholds');
 assert.ok(note().endsWith('## Log\n- 10:02 Done: Write methods\n- 11:05 Note: [[Cellpose thresholds]]\n'), 'under the same Log heading');
@@ -128,14 +128,14 @@ date: 2026-11-27
 ← [[2026-11-26]] · [[2026-11-28]] →
 
 ## Plan
-- 08:00 to 08:30 Review chapter (done)
+- [x] 08:00 to 08:30 Review chapter (done) ^td-k
 
 ### Needs a new time
-- Book room D (was Tuesday 24 November, 14:00)
-- Send slides (was Thursday 26 November, 17:00)
+- [ ] Book room D (was Tuesday 24 November, 14:00) ^td-d
+- [ ] Send slides (was Thursday 26 November, 17:00) ^td-b
 
 ### Coming up
-- Saturday 28 November: Grant report (due 18:00)
+- [ ] Saturday 28 November: Grant report (due 18:00) ^td-e
 
 ## Log
 - 08:40 Done: Review chapter
@@ -242,7 +242,7 @@ for (const [said, want] of [
   now2 = at(27, 9);
   assert.equal(d2.morningDue(), true);
   d2.ensure();
-  assert.ok(note2('2026-11-27').includes('## Plan\n- 10:00 to 11:00 Draft abstract\n\n### Needs a new time\n- Old thing (was Tuesday 24 November, 10:00)\n- Order reagents (was Thursday 26 November, 12:00)\n- Book bench (was Thursday 26 November, 13:00)\n- Call Ana (was Thursday 26 November, 20:00)\n'));
+  assert.ok(note2('2026-11-27').includes('## Plan\n- [ ] 10:00 to 11:00 Draft abstract ^td-m1\n\n### Needs a new time\n- [ ] Old thing (was Tuesday 24 November, 10:00) ^td-n1\n- [ ] Order reagents (was Thursday 26 November, 12:00) ^td-m3\n- [ ] Book bench (was Thursday 26 November, 13:00) ^td-m4\n- [ ] Call Ana (was Thursday 26 November, 20:00) ^td-o1\n'));
   assert.equal(d2.morningNote(), '\n4 to-dos on the list need a new time: every time they had has passed. The app asks about each one itself right after you speak: mention how many in one short sentence, don\'t name them, and don\'t ask about them yourself.', 'the morning briefing counts them, never names them');
   asked.length = 0; said.length = 0; script = ['the 30th', { kind: 'leave' }];
   assert.deepEqual(await d2.ask('morning', io), { asked: 3, left: 1 });
@@ -315,10 +315,11 @@ for (const no of ['review my day and book a call', 'review the slides', 'what is
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /if \(b\.kind === 'morning'\) dailyDo\('plan', \(\) => daily\.ensure\(\)\);/, 'the morning briefing writes the Plan');
 assert.match(side, /if \(!area\?\.file && isReviewAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); flow\.start\(\);[^\n]*dayReview\('asked'\)[^\n]*return; \}/, 'asked for by voice: answered by the app, never sent to the model');
-assert.match(side, /daily\.reviewDue\(\) && calQuiet\(\)/, 'by the clock, when nothing else is going on');
+assert.match(side, /daily\.reviewDue\(\) && calQuietBase\(\)/, 'by the clock, when nothing else is going on (feature 31: stood down too; its line then waits in the quiet queue)');
+assert.match(side, /if \(by === 'time'\) \{ const t0 = dailyDo\('review', \(\) => daily\.today\(\)\); if \(t0 && !queue\.offer\(\{ kind: 'review', data: \{ key: t0\.key, line: r\.line \}, until: t0\.w\.until \}\)\) return; \}/, 'feature 31: its line goes through the speaking budget');
 assert.match(side, /afterExchange: \{ due: \(\) => daily\.morningDue\(\), run: \(\) => daily\.ask\('morning', dailyIO\) \}/, 'no morning briefing: the end of the first exchange asks');
 assert.match(side, /\.then\(\(\) => \(given\.given && b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'after the morning briefing (feature 33: when it was given)');
-assert.match(side, /say\(r\.line, 'happy'\); await lineDone\(forVoice\(r\.line\)\);\n\s*await dailyAsk\('review'\);/, 'after the review');
+assert.match(side, /say\(line, 'happy'\); await lineDone\(forVoice\(line\)\);\n\s*await dailyAsk\('review'\);/, 'after the review');
 assert.match(side, /reschedule: \(id, when\) => cal\.reschedule\(id, when\)/);
 assert.match(side, /const first = b\.kind === 'evening' && daily\.reviewWithBriefing\(\) \? dayReview\('briefing'\) : Promise\.resolve\(\);\n\s*first\.then/, 'the evening briefing writes the review first');
 assert.match(side, /\$\{b\.note\}\$\{cal\.dayNote\(\)\}\$\{daily\.morningNote\(\)\}/, 'the morning briefing counts the to-dos that need a new time');

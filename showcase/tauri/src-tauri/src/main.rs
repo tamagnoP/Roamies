@@ -6,6 +6,7 @@
 #[cfg(target_os = "linux")]
 mod linux;
 mod pipe;
+mod presence;
 mod sidecar;
 #[cfg(target_os = "macos")]
 mod snapshot;
@@ -1903,6 +1904,7 @@ fn main() {
             }
             build_overlays(app.handle())?;
             pump_cursor(app.handle().clone());
+            presence::start(app.handle().clone()); // Local-only build (feature 31): idle seconds and the microphone, for the sidecar
             #[cfg(target_os = "macos")]
             snapshot::watch_screenshots(app.handle().clone());
             spawn_sidecar(app.handle());

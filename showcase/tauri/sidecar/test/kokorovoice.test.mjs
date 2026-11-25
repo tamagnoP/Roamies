@@ -490,7 +490,7 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   assert.match(side, /if \(m\.type === 'voice_state' && m\.state === 'listening'\) kokoro\.wake\(m\.window != null \? 'answer window' : 'talk key'\);/, 'the talk key, and the answer window\'s listening');
   assert.match(side, /else if \(m\.type === 'voice' && m\.text\?\.trim\(\)\) kokoro\.wake\('spoken request'\);/, 'a spoken request');
   assert.match(side, /kokoro\.wake\('answer window'\); send\(\{ type: 'listen', seconds, window, again \}\);/, 'an answer window, as it opens');
-  assert.match(side, /if \(pi\.briefing\(new Date\(Date\.now\(\) \+ WAKE_BEFORE_BRIEFING_MINUTES \* 60_000\)\)\) kokoro\.wake\('briefing'\);/, 'shortly before a briefing');
+  assert.match(side, /if \(!stood\?\.on\(\) && pi\.briefing\(new Date\(Date\.now\(\) \+ WAKE_BEFORE_BRIEFING_MINUTES \* 60_000\)\)\) kokoro\.wake\('briefing'\);/, 'shortly before a briefing');
   assert.equal(WAKE_BEFORE_BRIEFING_MINUTES, 2);
   assert.equal((side.match(/kokoro\.wake\(/g) ?? []).length, 4, 'and nothing else');
 }

@@ -594,17 +594,30 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
   }
 
   /** What is waiting to be shown, taken off the pile: { lines: [text], notices: [the short sentence of each line
-   *  that is a notice], asks: [{ todo, title }], blocks }. */
-  function takeHeld() {
-    return edit((cal) => { const h = cal.held; cal.held = []; return { lines: h.filter((x) => x.text).map((x) => x.text), notices: h.filter((x) => x.text && x.say).map((x) => x.say), asks: h.filter((x) => x.ask).map((x) => x.ask), offers: h.filter((x) => x.offer).map((x) => x.offer), blocks: h.filter((x) => x.block).map((x) => x.block) }; });
+   *  that is a notice], items: [{ text, say, until }] (feature 31: the lines for the quiet queue, with the end of the
+   *  block each is about, so one whose block has ended is dropped there), asks: [{ todo, title }], blocks }.
+   *  linesOnly: the questions stay on the pile (stood down, they wait for a quiet moment). */
+  function takeHeld({ linesOnly = false } = {}) {
+    return edit((cal) => {
+      const h = linesOnly ? cal.held.filter((x) => x.text) : cal.held;
+      cal.held = linesOnly ? cal.held.filter((x) => !x.text) : [];
+      const lines = h.filter((x) => x.text);
+      return { lines: lines.map((x) => x.text), notices: lines.filter((x) => x.say).map((x) => x.say), items: lines.map((x) => ({ text: x.text, ...(x.say ? { say: x.say } : {}), ...(Number.isFinite(x.until) ? { until: x.until } : {}) })), asks: h.filter((x) => x.ask).map((x) => x.ask), offers: h.filter((x) => x.offer).map((x) => x.offer), blocks: h.filter((x) => x.block).map((x) => x.block) };
+    });
   }
   const hasHeld = () => get().held.length > 0;
-  /** Feature 33, as stand down ends: what is waiting to be shown about a block that has ended by now is dropped (the
-   *  owner, 2026-11-25). → how many were dropped. */
-  const heldEnd = (h) => (Number.isFinite(h.until) ? h.until : h.block ? h.block.start + h.block.minutes * 60_000 : Infinity);
-  const dropPassed = () => inTurn(() => edit((cal) => { const n = cal.held.length; cal.held = cal.held.filter((h) => !(heldEnd(h) <= now())); const gone = n - cal.held.length; if (gone) log('calendar_held_passed', { lines: gone }); return gone; }));
-  /** How many are waiting to be shown, leaving out the ones dropPassed would drop now. */
-  const heldCount = () => { try { return get().held.filter((h) => !(heldEnd(h) <= now())).length; } catch { return 0; } };
+  /** Feature 31: whether lines are waiting to be shown (the questions may wait longer). */
+  const hasLines = () => get().held.some((x) => x.text);
+  /** Feature 25: a to-do finished with a block still to come: the block is taken off the calendar (and a slot kept for
+   *  it), so the time is free. → whether there was one. */
+  const free = (id) => inTurn(() => edit((cal) => {
+    const l = cal.links[id], a = cal.actions.find((x) => x.todo === id), start = l?.local.start ?? a?.start ?? null;
+    if (!(start > now())) return false;
+    if (l) l.local.start = null;
+    unkeep(cal, id);
+    log('calendar_block', { what: 'freed' });
+    return true;
+  }));
 
   /** The first time: the to-dos that would be put in the app, or null when that's settled or the app isn't there. */
   async function firstRun() {
@@ -1415,5 +1428,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).${cal.adopt ? ' Every open task they have in the app is on the to-do list too, whoever made it; the app adds new ones itself.' : ''}` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, reschedule, resume, dayNote, outline, startup, takeHeld, hasHeld, dropPassed, heldCount, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, reschedule, resume, dayNote, outline, startup, takeHeld, hasHeld, hasLines, free, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
 }

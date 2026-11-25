@@ -8,8 +8,8 @@ Before a session: build the app from `next` and install it as `CLAUDE.md` says (
 
 ## Group 1: features 18, 33, 25 and 31
 
-Not on `next` yet: feature 25 (check-ins on progress), feature 31 (speaking budget and quiet queue). Feature 33 is
-built on `stand-down`, waiting for the owner's review.
+Features 18 and 33 are on `next`. Features 25 and 31 are built together on `check-ins`, waiting for the owner's
+review.
 
 ### Feature 18: the daily note, task pages, the handover
 
@@ -27,7 +27,8 @@ over (to be missed), one still ahead, and one with nothing planned.
 2. **Type a first request**, for example "What's on today?".
    You should see: the usual reply; `Daily/<today>.md` in the vault, with the date, links to the days before and
    after, and `## Plan` listing today's to-dos (with their times), then `### Needs a new time` (old to-dos whose
-   times have all passed), then `### Coming up` (deadlines in the next 14 days). Plain bullets, no boxes.
+   times have all passed), then `### Coming up` (deadlines in the next 14 days). With features 25 and 31: every line in those three lists is a box, `- [ ] …`,
+   ending in `^td-<id>`.
 3. **Tick a to-do done** in the list, or in Super Productivity.
    You should see: within 30 seconds, `- HH:MM Done: <title>` under `## Log`.
 4. **Say "note this down: <something>".**
@@ -88,12 +89,12 @@ over (to be missed), one still ahead, and one with nothing planned.
 
 ### Feature 33: stand down
 
-Built on `stand-down`; on `next` once its review is accepted. The look is JARVIS's (set it in the menu if another
-look is on).
+On `next` since `0dde9a9`. The look is JARVIS's (set it in the menu if another look is on). With features 25 and 31,
+what it holds waits in the quiet queue: the steps below are written for that.
 
 **Before.** Add to `~/Documents/roamies-pi/settings.json`:
-`"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true, "waitSeconds": 1.5 }`. Have one to-do
-due a few minutes after you start, and `speakNotices` true.
+`"standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true, "waitSeconds": 1.5 }`. Have one reminder
+("remind me in five minutes to stretch") due a few minutes after you start, and `speakNotices` true.
 
 1. **Start Roamies.**
    You should see: no bubble naming missing settings, and no bubble about the stand-down shortcut.
@@ -116,13 +117,13 @@ due a few minutes after you start, and `speakNotices` true.
 7. **Hand pi a task that takes a while** ("ask pi to run the tests and wait a minute first"), press Send, and while
    pi works press ⌃⌥. .
    You should see: pi's steps stop; no "Stopped pi." line.
-8. **While stood down, let the to-do come due.**
-   You should see and hear: nothing at its time.
+8. **While stood down, let the reminder come due.**
+   You should see and hear: nothing at its time, and no count on the character.
 9. **Restart Roamies while stood down** (Quit, open it again).
    You should see: the character comes back in the stood-down look, with no wave and no greeting.
 10. **Type a request in the ask field.**
-    You should see and hear: colour comes back; the reply; then, once it is quiet, one line such as "While I stood
-    down: pi was stopped…" (shown, and said); then the late nudge for the to-do, with the list.
+    You should see and hear: colour comes back; the reply; the late nudge for the reminder, with the list; then,
+    once it is quiet, one line such as "While I stood down: pi was stopped…" (shown, and said).
 11. **Say "that's enough for today, you can stand down".**
     You should see: an ordinary reply; nothing stood down.
 12. **Optional: the day turn.** Stand down, then set `calendar.dayStart` and `calendar.dayTurnsAt` a few minutes
@@ -131,7 +132,66 @@ due a few minutes after you start, and `speakNotices` true.
     the "While I stood down…" line, if anything happened meanwhile.
 13. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
     You should see: one `stand_down` line each time it began (by `key` or `phrase`, then true/false only) and one
-    `stand_down_end` line each time it ended (`by`, `minutes`, `held`); no words you said, no titles.
+    `stand_down_end` line each time it ended (`by`, `minutes`, `held`); `quiet_queued` lines with `"why":"stood"`
+    for what it held; no words you said, no titles.
+
+### Features 25 and 31: check-ins, the speaking budget and the quiet queue
+
+Built together on `check-ins`; on `next` once the review is accepted. Two numbers matter here: at most 3 things said
+unasked an hour, and a check-in at most 6 times a day.
+
+**Before.** Add to `~/Documents/roamies-pi/settings.json`:
+`"speaking": { "perHour": 3, "briefing": true, "review": true, "checkIn": true, "deadlineAtRisk": true, "calendarLine": true, "notice": true, "awayMinutes": 10, "quietInCalls": true }`,
+and in `limits`: `"checkInsPerDay": 6, "checkInAgainMinutes": 30, "atRiskHours": 24, "queueGiveMost": 3`. Have Super
+Productivity open, and in it: a to-do with a 15-minute block starting a few minutes from now; a to-do with no block
+due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotices` true.
+
+1. **Start Roamies.**
+   You should see: no bubble naming missing settings. Within a minute, said and shown: "<tomorrow's to-do> is due
+   tomorrow at HH:MM and has no time planned before then." (the other two are listed too if due within 24 hours
+   with no block before then).
+2. **Type a first request**, so the daily note has today's Plan.
+   You should see: every line of `## Plan`, `### Needs a new time` and `### Coming up` is `- [ ] …` ending in
+   `^td-<id>`.
+3. **Let the block end**, with nothing else going on.
+   You should see and hear, within 30 seconds: "Your block for <title> has ended. Is it done?", with the buttons
+   Done, Still on it and Not yet; the microphone opens for the answer. Say **"still on it"**.
+   You should see: the bubble goes; the Log gets `Check-in: <title>: still on it`. About 30 minutes later (after a
+   block that is running has ended) the question comes again: "Is <title> done now?".
+4. **Let the second to-do's due time pass.** No due-time nudge ("is due at") comes for it.
+   You should see and hear: "<title> was due at HH:MM. Is it done?". Say **"not yet, tomorrow at 10"**.
+   You should see: Roamies says the new time; Super Productivity shows it; the Log gets `Rescheduled: <title> → …`.
+5. **The budget.** By now three things were said unasked within the hour (the deadline line and two check-ins). Make
+   another one come: move the first to-do's block to end in two minutes, or set `speaking.perHour` to 1.
+   You should see and hear: nothing at its time; a small count on the character, "1".
+6. **Type "anything waiting?"**.
+   You should see: the check-in is asked now, and the count goes. Click **Done**: the to-do is done in Super
+   Productivity. Type "anything waiting?" again: "Nothing is waiting."
+7. **Away.** Set `speaking.awayMinutes` to 1. Have a check-in come due (a to-do due in three minutes), and don't
+   touch the keyboard or mouse for that time.
+   You should see: nothing said; the count shows 1. Touch the mouse: still nothing (the queue waits for your next
+   exchange). Then type a request: after its reply, the check-in is asked. Set `awayMinutes` back.
+8. **In a call.** Start a FaceTime or Zoom test call (or record a voice memo), and have a check-in come due.
+   You should see: nothing said; the count shows 1; the activity log has `presence {"away":false,"call":true}` and
+   `quiet_queued {"kind":"checkIn","why":"call"}`. End the call: `presence {"away":false,"call":false}`.
+9. **A kind off.** Set `speaking.deadlineAtRisk` to false and add a to-do due tomorrow with no block.
+   You should see: no line; the count; `quiet_queued {"kind":"deadlineAtRisk","why":"off"}`.
+10. **Stood down.** Press ⌃⌥. and let a check-in come due.
+    You should see: no count while stood down. Type a request: after its reply, the "While I stood down" line
+    (if anything was stopped or went out of date), then the check-in.
+11. **Out of date.** Let a check-in wait in the queue (as in 5), then tick that to-do done in Super Productivity
+    before your next exchange.
+    You should see, after the next reply: "Dropped as out of date: 1 check-in." and no question.
+12. **A box in Obsidian.** In today's Plan, tick the box of an open to-do that has a block later (today or under
+    Coming up).
+    You should see: within 5 minutes, the to-do done in the list and in Super Productivity, its block gone from the
+    calendar, and its Done line in the Log. Untick it: nothing changes.
+13. **The review.** At `calendar.reviewAt`: the to-do left "still on it" is "Still open today", not missed, and no
+    question asks about it.
+14. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
+    You should see: `checkin_due`, `checkin {how, answer}`, `deadline_at_risk`, `quiet_queued {kind, why}` (why one of
+    `stood`, `off`, `away`, `call`, `budget`), `quiet_given`, `quiet_stale`, `presence {away, call}`, `plan_ticked`;
+    counts and those words only, no titles.
 
 ## Group 2: features 23, 32, 14, 29 and 30
 

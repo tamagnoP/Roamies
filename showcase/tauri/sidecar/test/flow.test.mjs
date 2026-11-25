@@ -190,7 +190,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   await until(() => order.includes('end'), 'the end');
   assert.deepEqual(order, ['audio', 'mark 1', 'mark 2', 'audio', 'end'], 'what was cut is never said; what comes after is');
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
-  assert.match(side, /if \(problem\) return aloud\(problem, 'concerned'\)/); assert.match(side, /if \(flow\.spoken\(\)\) voice\?\.say\(forVoice\(sir\(msg, \{ said: true \}\)\)\)/, 'a failed request is said as well as shown');
+  assert.match(side, /if \(problem\) \{ aloud\(problem, 'concerned'\); flow\.settle\(\); return; \}/, 'said, and (feature 31) the exchange\'s quiet time starts, so it ends'); assert.match(side, /if \(flow\.spoken\(\)\) voice\?\.say\(forVoice\(sir\(msg, \{ said: true \}\)\)\)/, 'a failed request is said as well as shown');
   assert.match(side, /const aloud = \(text, mood\) => \{ say\(text, mood\); if \(flow\.spoken\(\)\) voiceLine\(forVoice\(text\)\); \};/);
   assert.match(side, /const voiced = noticeVoice\(\{ lines, notices \}, \{ exchange: flow\.spoken\(\), speakNotices: noticesOn\(\) \}\);\n[^\n]*\n\s*say\(lines\.join\('\\n'\), 'concerned'\);\n\s*if \(voiced\) await lineDone\(/, 'what a sync has to say is said too, inside an exchange (and a notice outside one: calendar.test.mjs)');
 }
@@ -912,7 +912,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.match(host, /else if \(m\.kind === 'ask_text'\) \{ if \(ask && !ask\.bar && ask\.choices\) ask\.h\.placeholder\?\.\(m\.text\); \}/);
   assert.match(host, /if \(ask\?\.choices && m\.again\) return;/, 'a reopened window makes no second listening sound');
   // a question between two things: the second button answers with what the sidecar gave (SECOND), and Y is not a yes there
-  assert.match(host, /const second = choices && typeof m\.second === 'string' && m\.second \? m\.second : null;\n\s*const pick = \(i\) => \(i === 0 \? 'yes' : i === 1 && second \? second : null\);/);
+  assert.match(host, /const second = choices && typeof m\.second === 'string' && m\.second \? m\.second : null;\n\s*const third = second && typeof m\.third === 'string' && m\.third \? m\.third : null;\n\s*const pick = \(i\) => \(i === 0 \? 'yes' : i === 1 && second \? second : i === 2 && third \? third : null\);/, 'feature 25: a third button answers with what the sidecar gave it');
   assert.match(host, /onChoose: \(i\) => finishAsk\(pick\(i\)\)/); assert.match(host, /if \(key === 'y' && !ask\.second\) finishAsk\('yes'\);/); assert.match(host, /finishAsk\(ask\.pick\(ask\.sel\)\);/);
 }
 

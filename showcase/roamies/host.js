@@ -120,8 +120,10 @@
     // A yes/no: Allow answers yes, any other button no. The field only takes keys then (Y, N, Tab, arrows, Enter).
     const choices = Array.isArray(m.choices) && m.choices.length ? m.choices.map(String) : null;
     // Local-only build: a question between two things (m.second): the second button answers with that, not with a no.
+    // Feature 25: a check-in's third button (m.third) answers with that.
     const second = choices && typeof m.second === 'string' && m.second ? m.second : null;
-    const pick = (i) => (i === 0 ? 'yes' : i === 1 && second ? second : null);
+    const third = second && typeof m.third === 'string' && m.third ? m.third : null;
+    const pick = (i) => (i === 0 ? 'yes' : i === 1 && second ? second : i === 2 && third ? third : null);
     const h = a.prompt({ placeholder: question, mask: m.mask, onPress: focusField, choices, onChoose: (i) => finishAsk(pick(i)) });
     ask = { id: m.id, h, choices, sel: -1, label: null, pick, second };
     if (choices) { ask.label = field.getAttribute('aria-label'); field.setAttribute('aria-label', second ? `${question} Press Tab to choose and Enter to confirm, or N for neither.` : `${question} Press Y to allow or N to decline.`); }
@@ -421,6 +423,7 @@
     if (m.kind === 'speech' && m.mark && !Roamie.voiceOut) { send({ type: 'speech_mark', mark: m.mark }); return; }
     if (m.kind === 'speech') { if (Roamie.voiceOut && !Roamie.voiceOut.onMark) Roamie.voiceOut.onMark = (mark) => send({ type: 'speech_mark', mark }); Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
     if (m.kind === 'stand') { standDown(m); return; } // Local-only build (feature 33): at once, even while it changes screens
+    if (m.kind === 'queue') { for (const t of Roamie.tiles ?? []) t.creature.setQueued?.(m.n); Roamie.wake?.(); return; } // feature 31: the quiet queue's count
     if (held) { held.q.push(m); return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
     if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }

@@ -49,7 +49,9 @@ import { WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, voiceFor as kokoroVoiceFor 
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
 import { createCalendar, noticeVoice, nudgeLine, quiet as nothingGoingOn } from './calendar.mjs'; // Local-only build: the to-do list mirrored in Super Productivity
-import { createStandDown, isStandDown, standFill, standSummary, standWords } from './standdown.mjs'; // Local-only build (feature 33): stand down
+import { createStandDown, isStandDown, standFill, standWords } from './standdown.mjs'; // Local-only build (feature 33): stand down
+import { createQuiet, isWaitingAsk } from './quiet.mjs'; // Local-only build (feature 31): the speaking budget and the quiet queue
+import { createCheckIns } from './checkin.mjs'; // Local-only build (feature 25): check-ins and deadlines at risk
 import { createPageRebuild, SETTLE_HOLD_SECONDS } from './rebuild.mjs'; // Local-only build (feature 24, fix 6): the overlay page rebuilt after a quiet stretch
 import { createGuard } from './guard.mjs'; // local-only build: apps that are never looked at // local-only build: notes in an Obsidian vault // local-only build: file work goes to pi
 import { activityLogs, buildReport, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
@@ -74,18 +76,20 @@ function releaseSpeech(drop) {
 // Local-only build (feature 24, fix 6): the overlay page's rebuild after a quiet stretch (rebuild.mjs), made below.
 // What is sent to the page counts as something shown or spoken, except its settings.
 let pageRebuild = null;
-const PAGE_SETTINGS = new Set(['sound', 'size', 'home', 'look', 'greet', 'settle', 'stand']);
+const PAGE_SETTINGS = new Set(['sound', 'size', 'home', 'look', 'greet', 'settle', 'stand', 'queue']);
 // Local-only build (feature 33): stand down (standdown.mjs), made once the activity log is (logLine). While it lasts,
-// what is on its way to the page unasked stops here, whatever sent it: a line for a bubble is kept to be shown when it
-// ends, speech is dropped (what waits for it to finish is answered, so nothing hangs), and the rest is dropped. What
-// the owner asks for meanwhile goes through: the list, Esc, closing a bubble, showing the character.
+// what is on its way to the page unasked stops here, whatever sent it: a line for a bubble is kept in the quiet queue
+// (feature 31, kind "caught") to be shown when it ends, speech is dropped (what waits for it to finish is answered, so
+// nothing hangs), and the rest is dropped. What the owner asks for meanwhile goes through: the list, Esc, closing a
+// bubble, showing the character.
 let stood = null;
+let queue = null; // Local-only build (feature 31): the quiet queue (quiet.mjs), made with stand down
 const STAND_PASS = new Set(['list', 'esc', 'cancel_ask', 'ask_text', 'heard', 'hands', 'summon']);
 function standCatch(msg) {
   if (!stood?.on() || PAGE_SETTINGS.has(msg.kind) || STAND_PASS.has(msg.kind) || (msg.kind === 'speech' && msg.stop)) return false;
   if (msg.kind === 'speech') { if (msg.mark) { const done = played.get(msg.mark); played.delete(msg.mark); done?.(); } return true; }
   if (msg.kind === 'ask') { logLine('stand_down_leak', { kind: 'ask' }); return false; } // a question is never dropped (its answer would never come); every one is held at its source
-  if (msg.kind === 'say' && typeof msg.text === 'string' && msg.text.trim()) { stood.caught(msg.text, msg.mood); logLine('stand_down_caught', { kind: 'say', chars: msg.text.length }); }
+  if (msg.kind === 'say' && typeof msg.text === 'string' && msg.text.trim()) { queue.hold({ kind: 'caught', text: String(msg.text).slice(0, 2000), mood: typeof msg.mood === 'string' ? msg.mood : null }, 'stood'); logLine('stand_down_caught', { kind: 'say', chars: msg.text.length }); }
   return true;
 }
 const ui = (msg) => {
@@ -373,7 +377,7 @@ const pi = createPi({
   onDone: async (r) => {
     // Local-only build (feature 33): stopped by stand down: said in the line given when it ends, not now.
     if (r.status === 'stopped' && piStood) { piStood = false; stood.add({ pi: true, processes: r.ended ?? 0 }); return; }
-    if (stood?.on()) { stood.caught(r.shown, r.status === 'error' ? 'concerned' : 'happy'); return; } // finished as it began: shown when it ends
+    if (stood?.on()) { queue.hold({ kind: 'caught', text: String(r.shown ?? '').slice(0, 2000), mood: r.status === 'error' ? 'concerned' : 'happy' }, 'stood'); return; } // finished as it began: shown when it ends
     if (r.status === 'stopped') { say(r.shown); voiceLine(r.shown); return; }
     await tellResult(r, {
       voiceOn: VOICE_ON(),
@@ -399,13 +403,15 @@ let uiReady = false, guideClosed = false;
 // Local-only build (feature 16): the natural voice is started here, once, when "voiceEngine" asks for it. What it has
 // to say when it fails is held like the settings bubble until it can be shown; it is spoken too (by the macOS voice).
 let kokoroSaid = () => false;
+// Feature 31: a notice is something said unasked: it goes through the speaking budget (unasked, below), and waits in the
+// quiet queue when it can't be given (while stood down among others).
 function kokoroNotice(text) {
-  kokoroSaid = heldNotice(text, (t) => { say(t, 'concerned'); if (noticesOn()) voiceLine(forVoice(t)); });
+  kokoroSaid = heldNotice(text, (t) => unasked({ kind: 'notice', text: t, mood: 'concerned', voice: true }));
   offerKokoroNotice();
 }
-const offerKokoroNotice = () => kokoroSaid(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on()); // feature 33: held while stood down
-const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('settings_notice', { chars: text.length }); say(text, 'concerned'); });
-const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on());
+const offerKokoroNotice = () => kokoroSaid(uiReady && !onboarding && (!!config.onboarded || guideClosed));
+const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('settings_notice', { chars: text.length }); unasked({ kind: 'notice', text, mood: 'concerned' }); });
+const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems() }); // Local-only build (feature 18): the to-dos, for their pages
@@ -474,10 +480,17 @@ async function dayReview(by) {
   try {
     const r = dailyDo('review', () => daily.review({ by }));
     if (!r) { const line = 'I couldn\'t write the day\'s review in the daily note: the activity log says why.'; say(line, 'concerned'); await lineDone(forVoice(line)); return; }
-    say(r.line, 'happy'); await lineDone(forVoice(r.line));
-    await dailyAsk('review');
-    await inSeries('items', () => handover.askStale(dailyIO)); // the open items open for limits.openItemAskDays
+    // Feature 31: written at its time, its line and questions go through the speaking budget (kind "review"); in the
+    // quiet queue they wait until the day turns.
+    if (by === 'time') { const t0 = dailyDo('review', () => daily.today()); if (t0 && !queue.offer({ kind: 'review', data: { key: t0.key, line: r.line }, until: t0.w.until })) return; }
+    await reviewSaid(r.line);
   } catch (e) { console.error('daily review', e); } finally { reviewing = false; }
+}
+/** The review's line, then the missed to-dos' questions and the open items open for limits.openItemAskDays. */
+async function reviewSaid(line) {
+  say(line, 'happy'); await lineDone(forVoice(line));
+  await dailyAsk('review');
+  await inSeries('items', () => handover.askStale(dailyIO));
 }
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
 // nothing else is going on: no reply being made or spoken, nobody talking, no bubble waiting for an answer. It is
@@ -494,15 +507,13 @@ const calQuietBase = () => nothingGoingOn({ ready: uiReady && !onboarding && (!!
 const calQuiet = () => calQuietBase() && !stood?.on();
 async function calShow() {
   try {
-    if (!calQuiet()) return;
-    if (cal.hasHeld()) {
-      const { lines, notices, asks, offers, blocks } = cal.takeHeld();
-      if (lines.length) {
-        const voiced = noticeVoice({ lines, notices }, { exchange: flow.spoken(), speakNotices: noticesOn() });
-        logLine('calendar_lines', { lines: lines.length, notices: notices.length, said: !!voiced });
-        say(lines.join('\n'), 'concerned');
-        if (voiced) await lineDone(forVoice(voiced));
-      }
+    if (!calQuietBase()) return;
+    // Feature 31: the lines go through the speaking budget (kind "calendarLine"); stood down, they go to the quiet queue
+    // and the questions stay on the pile until a quiet moment.
+    if (cal.hasLines() || (calQuiet() && cal.hasHeld())) {
+      const { items, asks, offers, blocks } = cal.takeHeld({ linesOnly: !calQuiet() });
+      if (items.length) await unasked({ kind: 'calendarLine', lines: items });
+      if (!calQuiet()) return;
       for (const a of asks) {
         calAsking = true;
         let yes;
@@ -525,6 +536,7 @@ async function calShow() {
       }
       return;
     }
+    if (!calQuiet()) return;
     // The first time, once per start: the to-dos that would go into the app, and a yes before any is created.
     if (!calOffered && !cal.state().started && await cal.there()) {
       calOffered = true; calAsking = true;
@@ -553,10 +565,11 @@ const flow = createFlow({
   cancel: () => send({ type: 'listen_cancel' }),
   bubbles: () => [pi, answers],
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),
-  onWindow: (open, by) => { if (open) micWindow = true; else releaseSpeech(by === 'key' || by === 'stand'); }, // feature 33: stood down, what was held is dropped
+  onWindow: (open, by) => { ownMicAt = Date.now(); if (open) micWindow = true; else releaseSpeech(by === 'key' || by === 'stand'); }, // feature 33: stood down, what was held is dropped
   actions: () => cal.kept(), // blocks kept until Super Productivity is open: listed by show_pending and the morning briefing
+  queue: { due: () => !!queue?.ready(), run: () => quietGive('exchange') }, // feature 31: the quiet queue first
   afterExchange: { due: () => daily.morningDue(), run: () => daily.ask('morning', dailyIO) }, // feature 18: no morning briefing: the first exchange's end asks
-  ended: () => stood?.exchanged(), // feature 33: the line left by a stand down that ended at the day turn comes after
+  ended: () => queue?.exchanged(), // features 31 and 33: what waits in the quiet queue is given at the end of the owner's next exchange
   log: (kind, data) => logLine(kind, data),
 });
 for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.resume(kind, run);
@@ -576,8 +589,8 @@ tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...
 
 // ---------- local-only build (feature 33): stand down (standdown.mjs) ----------
 // The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
-// microphone. Everything that is going on stops here; what would be said or shown unasked waits (calQuiet, the
-// briefings, the reminders, standCatch) until the owner's next request, typed or spoken, or the day turn.
+// microphone. Everything that is going on stops here; what would be said or shown unasked waits (the quiet queue,
+// calQuiet for questions, the reminders, standCatch) until the owner's next request, typed or spoken, or the day turn.
 function standSettings() { try { const s = loadSettings(HOME); return { ...s.standDown, persona: s.persona }; } catch { return { ...settingsDefaults(HOME).standDown, persona: personaNow() }; } }
 /** [the phrase's words, the small words allowed around it]. */
 function standPhrase() { const s = standSettings(); return [standWords(s.phrase), standFill(s.persona)]; }
@@ -606,65 +619,129 @@ function standDownNow(by) {
   speech.stop();
   ink.clear();
   trail.steps = []; trail.open.clear(); trail.errors = [];
+  queueCount();
   menu();
 }
-/** It ends (by: 'voice' | 'typed' | 'day'). What it held is given from here under the usual rules; the calendar lines
- *  whose block has ended by now are dropped and counted. */
+/** It ends (by: 'voice' | 'typed' | 'day'). What it stopped is handed to the quiet queue, which says it in one line with
+ *  what went out of date meanwhile, and gives what it held, at the end of the owner's next exchange. */
 function standUp(by) {
   if (!stood?.on()) return;
-  const due = openCommitments().filter((c) => c.due && c.due <= Date.now() && !c.remindedAt).length;
-  stood.end(by, cal.heldCount() + (stood.state()?.caught.length ?? 0) + due);
+  const due = openCommitments().filter((c) => c.kind === 'reminder' && c.due && c.due <= Date.now() && !c.remindedAt).length;
+  queue.prune(); // what went out of date meanwhile is dropped (and counted) before what is held is counted
+  const ended = stood.end(by, queue.count() + due);
   ui({ kind: 'stand', on: false });
-  cal.dropPassed().then((n) => { if (n) stood.add({ lines: n }); }, (e) => console.error('stand down', e));
-  offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice();
+  if (ended) queue.stoodDown(ended.counts);
+  queueCount();
   menu();
-}
-/** Stood down at "calendar.reviewAt": the review is written in the daily note, and its line waits. */
-function standReview() {
-  if (reviewing || !daily.reviewDue()) return;
-  const r = dailyDo('review', () => daily.review({ by: 'time' }));
-  const key = dailyDo('review', () => daily.today().key);
-  if (r && key) stood.reviewed(key, r.line);
-}
-/** Once it has ended and things are quiet: one line worded here for what happened meanwhile, with any line caught on
- *  its way to the screen; said too when "speakNotices" is on. Ended at the day turn, it waits for the end of the
- *  owner's first exchange after (stood.exchanged, from enqueue and flow's "ended"). Then the review written
- *  meanwhile, if its day is still today: its line, and its questions. → whether there was anything. */
-let standGiving = false;
-async function standGive() {
-  if (standGiving || !stood || stood.on() || !calQuiet()) return false;
-  const g = stood.give();
-  if (!g) return false;
-  standGiving = true;
-  try {
-    stood.given();
-    const today = dailyDo('review', () => daily.today().key);
-    const sameDay = !!g.review && g.review.key === today;
-    const line = standSummary({ ...g.counts, review: !!g.review && !sameDay });
-    const shown = [line, ...g.caught.map((c) => c.text)].filter(Boolean).join('\n');
-    const said = !!line && noticesOn();
-    logLine('stand_down_said', { chars: line.length, caught: g.caught.length, said, review: sameDay });
-    if (shown) { say(shown, g.caught.some((c) => c.mood === 'concerned') ? 'concerned' : 'happy'); await lineDone(said ? forVoice(line) : null); }
-    if (sameDay) {
-      reviewing = true;
-      try {
-        say(g.review.line, 'happy'); await lineDone(forVoice(g.review.line));
-        await dailyAsk('review');
-        await inSeries('items', () => handover.askStale(dailyIO));
-      } finally { reviewing = false; }
-    }
-  } finally { standGiving = false; }
-  return true;
 }
 // The shortcut refused (another app, or another Roamies shortcut, has it): said once, when it can be shown.
 let standKeySaid = () => false;
 function standKeyNotice(m) {
   logLine('stand_down_key_failed', {});
   const accel = String(m.accel ?? '').slice(0, 60), phrase = standSettings().phrase;
-  standKeySaid = heldNotice(`I couldn't set the stand-down shortcut, ${accel}: another app or another Roamies shortcut has it. Change "standDown.shortcut" in settings.json. Saying "${phrase}" still works.`, (t) => say(t, 'concerned'));
+  standKeySaid = heldNotice(`I couldn't set the stand-down shortcut, ${accel}: another app or another Roamies shortcut has it. Change "standDown.shortcut" in settings.json. Saying "${phrase}" still works.`, (t) => unasked({ kind: 'notice', text: t, mood: 'concerned' }));
   offerStandKeyNotice();
 }
-const offerStandKeyNotice = () => standKeySaid(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on());
+const offerStandKeyNotice = () => standKeySaid(uiReady && !onboarding && (!!config.onboarded || guideClosed));
+
+// ---------- local-only build (features 25 and 31): the speaking budget, the quiet queue, check-ins ----------
+// Everything said unasked goes through unasked(): given now when its kind is on, the hour's budget allows it, and the
+// owner is here and not on a call, or put in the quiet queue (quiet.mjs). The queue is given at the end of the owner's
+// next exchange (flow's "queue", and below for a typed request), or when they ask "anything waiting?".
+// The shell reports, every few seconds, the seconds since the last keyboard or mouse input and whether an input device
+// is running for some app (presence.rs). Only those two numbers are read; one older than PRESENCE_FRESH_MS counts as
+// unknown (here, and not on a call). Roamies' own listening (and a moment after it) is never taken for a call.
+const PRESENCE_FRESH_MS = 30_000, OWN_MIC_MS = 10_000;
+let presence = { idle: null, mic: false, at: 0 }, ownMicAt = 0, presenceLogged = '';
+function speakingNow() { try { return loadSettings(HOME).speaking; } catch { return settingsDefaults(HOME).speaking; } }
+const awayNow = () => { const s = speakingNow(); return s.awayMinutes > 0 && Date.now() - presence.at < PRESENCE_FRESH_MS && Number.isFinite(presence.idle) && presence.idle >= s.awayMinutes * 60; };
+const callNow = () => speakingNow().quietInCalls && Date.now() - presence.at < PRESENCE_FRESH_MS && presence.mic === true && voiceState === 'idle' && !micWindow && Date.now() - ownMicAt > OWN_MIC_MS;
+function presenceSeen(m) {
+  presence = { idle: Number.isFinite(m.idle) ? Math.max(0, m.idle) : null, mic: m.mic === true, at: Date.now() };
+  const now_ = JSON.stringify({ away: awayNow(), call: callNow() });
+  if (now_ !== presenceLogged) { presenceLogged = now_; logLine('presence', JSON.parse(now_)); } // true/false only, when it changes
+}
+/** The count on the character: hidden while stood down (the owner, 2026-11-25). */
+const queueCount = () => { if (queue) ui({ kind: 'queue', n: stood?.on() ? 0 : queue.count() }); };
+const checks = createCheckIns({ home: HOME, daily, todos: () => todoItems(), blocks: () => cal.blocks(), log: (kind, data) => logLine(kind, data) });
+/** A to-do marked done by a check-in or a ticked box in the Plan: a block it still has to come is freed first. */
+async function markDone(id) {
+  await cal.free(id).catch((e) => console.error('calendar', e));
+  const c = await updateCommitment(id, { status: 'done' });
+  menu(); scheduleReminders();
+  if (c) cal.changed(c);
+}
+const checkIO = { ask: (opts) => answers.ask(opts), say: dailyIO.say, done: markDone, reschedule: (id, when) => cal.reschedule(id, when) };
+let checking = false;
+/** Gives one thing now (an unasked one the gate let through, or one from the queue). */
+async function giveItem(item) {
+  if (item.kind === 'notice') { say(item.text, item.mood ?? 'concerned'); await lineDone(item.voice && noticesOn() ? forVoice(item.text) : null); return; }
+  if (item.kind === 'calendarLine') {
+    const lines = item.lines.map((l) => l.text), notices = item.lines.filter((l) => l.say).map((l) => l.say);
+    const voiced = noticeVoice({ lines, notices }, { exchange: flow.spoken(), speakNotices: noticesOn() });
+    logLine('calendar_lines', { lines: lines.length, notices: notices.length, said: !!voiced });
+    say(lines.join('\n'), 'concerned');
+    if (voiced) await lineDone(forVoice(voiced));
+    return;
+  }
+  if (item.kind === 'deadlineAtRisk') {
+    const text = item.lines.map((l) => l.text).join('\n'), said = noticesOn() || flow.spoken();
+    logLine('deadline_at_risk_said', { lines: item.lines.length, said });
+    say(text, 'concerned');
+    if (said) await lineDone(forVoice(text));
+    return;
+  }
+  if (item.kind === 'review') {
+    if (reviewing || item.data?.key !== dailyDo('review', () => daily.today().key)) return;
+    reviewing = true;
+    try { await reviewSaid(item.data.line); } finally { reviewing = false; }
+    return;
+  }
+  if (item.kind === 'checkIn') {
+    if (checks.stale(item)) return;
+    checking = true;
+    try { await inSeries('checkIn', () => checks.ask(item, checkIO)); } finally { checking = false; }
+    return;
+  }
+  if (item.kind === 'briefing') { const b = pi.briefing(); if (b?.kind === item.data?.kind && !busy && !queued && !briefingWaiting) runBriefing(b); }
+}
+/** Something unasked, ready now: given, or put in the quiet queue. */
+function unasked(item) { return queue.offer(item) ? giveItem(item).catch((e) => console.error('unasked', e)) : Promise.resolve(); }
+/** The quiet queue, given (by: 'exchange' | 'asked'): one line worded by the app for what stand down stopped and what
+ *  went out of date (said too when speakNotices is on), with what was caught on its way to the screen; then the rest,
+ *  most urgent first, at most limits.queueGiveMost; one line says how many still wait. → whether there was anything. */
+let quietGiving = false;
+async function quietGive(by = 'exchange') {
+  if (quietGiving || !queue) return false;
+  const g = queue.take(limitsFor(HOME).queueGiveMost, by);
+  if (!g) return false;
+  quietGiving = true;
+  try {
+    const caught = g.items.filter((i) => i.kind === 'caught'), rest = g.items.filter((i) => i.kind !== 'caught');
+    const shown = [g.summary, ...caught.map((c) => c.text)].filter(Boolean).join('\n');
+    const said = !!g.summary && noticesOn();
+    if (g.stood) logLine('stand_down_said', { chars: g.summary.length, caught: caught.length, said, review: rest.some((i) => i.kind === 'review') });
+    if (shown) { say(shown, caught.some((c) => c.mood === 'concerned') ? 'concerned' : 'happy'); await lineDone(said ? forVoice(g.summary) : null); }
+    for (const i of rest) { try { await giveItem(i); } catch (e) { console.error('quiet queue', e); } }
+    if (g.left) { const line = `${g.left} more ${g.left === 1 ? 'thing is' : 'things are'} waiting: ask "anything waiting?" for ${g.left === 1 ? 'it' : 'them'}.`; say(line, 'happy'); await lineDone(flow.spoken() ? forVoice(line) : null); }
+  } finally { quietGiving = false; queueCount(); }
+  return true;
+}
+/** "anything waiting?", said or typed alone: answered by the app, never by the model. */
+function waitingAsked(byVoice) {
+  if (byVoice) flow.start();
+  logLine('queue_asked', { items: queue.count() });
+  quietGive('asked').then((gave) => { if (!gave) aloud('Nothing is waiting.', 'happy'); }, (e) => console.error('quiet queue', e));
+}
+/** Check-ins due now (one at a time) and deadlines at risk, when nothing else is going on. Stood down, away or on a
+ *  call they are marked and go to the queue. */
+function checkTick() {
+  if (checking || reviewing || !calQuietBase() || pi.bubble() || answers.open() || flow.open() || flow.window()) return;
+  const due = dailyDo('checkins', () => checks.due()) ?? [];
+  if (due.length) { const item = dailyDo('checkins', () => checks.mark(due[0])); if (item) { logLine('checkin_due', { how: due[0].how }); unasked(item); return; } }
+  const risk = dailyDo('checkins', () => checks.atRisk());
+  if (risk) unasked(risk);
+}
 
 // The step trail: plan_steps names the parts; a part marked "now" ticks off when the other tool calls of that
 // turn succeed, or shows the first error (in plain words) when one fails. No extra round trips for progress.
@@ -914,8 +991,9 @@ function enqueue(text, { interrupt = false, image = null, note = '', byVoice = f
   running = running.then(() => prompt(text, image, note, byVoice, briefing)).catch((e) => console.error('prompt', e))
     .finally(() => {
       if (briefing) briefingWaiting = false;
-      // Feature 33: a typed request's reply is an exchange of the owner's (a spoken one ends in flow.mjs, "ended").
-      if (own && !flow.spoken()) stood?.exchanged();
+      // Features 31 and 33: a typed request's reply is an exchange of the owner's (a spoken one ends in flow.mjs,
+      // "ended"): what waits in the quiet queue is given after it.
+      if (own && !flow.spoken()) queue?.exchanged();
       if (--queued === 0) maybeCompact();
     });
   return running;
@@ -1094,6 +1172,12 @@ const logLine = (kind, data) => {
   fs.mkdir(LOG_DIR, { recursive: true, mode: 0o700 }).then(() => fs.appendFile(path.join(LOG_DIR, `${day}.log`), line, { mode: 0o600 })).catch(() => {});
 };
 stood = createStandDown({ home: HOME, log: (kind, data) => logLine(kind, data) }); // Local-only build (feature 33)
+// Local-only build (feature 31): the quiet queue. What went out of date is told by the kind's own rule: a check-in
+// (checkin.mjs), a deadline at risk, a briefing whose window has closed, a review whose day has turned.
+queue = createQuiet({
+  home: HOME, log: (kind, data) => logLine(kind, data), stood: () => !!stood?.on(), away: awayNow, call: callNow, onCount: () => queueCount(),
+  stale: (item, line) => (item.kind === 'checkIn' ? checks.stale(item) : item.kind === 'deadlineAtRisk' ? !!line && checks.riskStale(line) : item.kind === 'briefing' ? !pi.briefing.open(item.data?.kind) : item.kind === 'review' ? item.data?.key !== dailyDo('review', () => daily.today().key) : false),
+});
 async function pruneLogs() {
   const cutoff = Date.now() - 7 * 864e5;
   for (const f of await fs.readdir(LOG_DIR).catch(() => [])) {
@@ -1232,7 +1316,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   ownWords = intro || text.startsWith('(') ? '' : text; // Local-only build (feature 18): for item_dealt_with
   let problem = await readyAgent();
   if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
-  if (problem) return aloud(problem, 'concerned'); // Local-only build: said too, in an exchange started by voice
+  if (problem) { aloud(problem, 'concerned'); flow.settle(); return; } // Local-only build: said too, in an exchange started by voice; feature 31: its quiet time starts, so it ends (and the quiet queue is given)
   busy = true; quiet = false; autoTurn = null;
   flow.activity(); // Local-only build (feature 22): the exchange's quiet time starts again after this reply
   let replyDone = null; // resolves when the overlay reports that this reply has finished playing
@@ -1829,7 +1913,7 @@ function onVoice(m) {
   // window and a spoken request, so that it is ready by the time the reply is.
   if (m.type === 'voice_state' && m.state === 'listening') kokoro.wake(m.window != null ? 'answer window' : 'talk key');
   else if (m.type === 'voice' && m.text?.trim()) kokoro.wake('spoken request');
-  if (m.type === 'voice_state') voiceState = String(m.state ?? 'idle'); // Local-only build: sync lines wait while the owner talks (calQuiet)
+  if (m.type === 'voice_state') { voiceState = String(m.state ?? 'idle'); ownMicAt = Date.now(); } // Local-only build: sync lines wait while the owner talks (calQuiet); feature 31: Roamies' own listening is not a call
   // Local-only build (feature 22): m.window is the answer window the helper's session belongs to (none: a key press).
   if (m.type === 'voice_state') flow.voice(voiceState, m.window ?? null);
   if (m.type === 'voice_state' && m.state === 'listening' && m.window != null) { /* the answer window's own listening: nothing is interrupted, and no bubble is told that someone is talking */ }
@@ -1905,7 +1989,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   const ctl = barAsk = new AbortController();
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
-  if (text?.trim()) { standUp('typed'); enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down
+  if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
 }
 function onWriteTap() {
   if (onboarding) return;
@@ -2027,6 +2111,8 @@ async function onSpoken(text, area, window = null) {
   if (pi.heard(text) || answers.heard(text)) { ui({ kind: 'heard' }); return; }
   // Local-only build (feature 18): "review my day" (daily.mjs, said alone) is the app's to answer, not the model's.
   if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); flow.start(); logLine('review_asked', {}); dayReview('asked').catch((e) => console.error('daily review', e)); return; }
+  // Local-only build (feature 31): "anything waiting?" (quiet.mjs, said alone): the quiet queue, given by the app.
+  if (!area?.file && isWaitingAsk(text)) { ui({ kind: 'heard' }); waitingAsked(true); return; }
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);
@@ -2229,10 +2315,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
     if (stood?.on()) ui({ kind: 'stand', on: true }); // Local-only build (feature 33): a new page (a rebuild, a restart) keeps the stood-down look
+    queueCount(); // feature 31: and the quiet queue's count
     if (keep) ui({ kind: 'settle', hold: SETTLE_HOLD_SECONDS, ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
     else if (config.onboarded && !stood?.on()) ui({ kind: 'greet' });
     uiReady = true; offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type === 'stand_down') standDownNow(m.by === 'key' ? 'key' : 'phrase'); // Local-only build (feature 33): from the shell
+  else if (m.type === 'presence') presenceSeen(m); // Local-only build (feature 31): idle seconds and the microphone, from the shell
   else if (m.type === 'keybind_error' && m.which === 'stand') standKeyNotice(m);
   else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
   else if (m.type?.startsWith('voice')) onVoice(m);
@@ -2299,7 +2387,9 @@ if (config.onboarded) warmUp();
 // made or spoken or the owner is talking.
 async function remindTick() {
   if (busy || queued || loggingIn || onboarding || voiceState !== 'idle' || Date.now() < lineUntil || stood?.on()) { reminderRetry(); return; } // feature 33: given late, never dropped
-  const due = await takeDueReminders();
+  // Local-only build (feature 25, the owner, 2026-11-25): a to-do whose due time passes gets a check-in instead
+  // (checkin.mjs); reminders keep their nudge, always spoken and never counted against the speaking budget.
+  const due = (await takeDueReminders()).filter((c) => c.kind === 'reminder');
   if (!due.length) return;
   menu(); showList({ flash: due[0].id, seconds: 6 });
   const line = nudgeLine(due);
@@ -2347,27 +2437,33 @@ if (!config.onboarded) send({ type: 'onboarding' });
 // Local-only build: the briefings set up in ~/Documents/roamies-pi/settings.json ("briefings"). Checked once a minute;
 // given when nothing else is going on, once a day each.
 setInterval(() => {
-  // Local-only build (feature 33): stood down, no briefing (one whose window passes meanwhile is skipped, as before);
-  // the day's review is written in the note at its time, and its line waits.
-  if (stood?.on()) { standReview(); return; }
   // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken shortly before a briefing.
-  try { if (pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
+  try { if (!stood?.on() && pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
   try {
     // Local-only build (feature 18): the day's review, when its time has come and nothing else is going on. It needs
-    // no model, so it doesn't wait for a sign-in.
-    if (!reviewing && !pi.busy() && daily.reviewDue() && calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window()) { dayReview('time').catch((e) => console.error('daily review', e)); return; }
+    // no model, so it doesn't wait for a sign-in. Feature 31: stood down too: it is written, and its line waits in the
+    // quiet queue (feature 33: the day's review is written in the note at its time).
+    if (!reviewing && !pi.busy() && daily.reviewDue() && calQuietBase() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window()) { dayReview('time').catch((e) => console.error('daily review', e)); return; }
     if (busy || queued || briefingWaiting || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
     const b = pi.briefing();
-    if (!b) return;
-    // Feature 33: marked given (and logged) when its request is made (prompt); until then none other is chosen.
+    // Feature 31: a briefing goes through the speaking budget; in the quiet queue it waits while its window is open
+    // (stood down among others: one whose window passes meanwhile is skipped, as before).
+    if (!b || queue.has((i) => i.kind === 'briefing' && i.data?.kind === b.kind)) return;
+    if (queue.offer({ kind: 'briefing', data: { kind: b.kind } })) runBriefing(b);
+  } catch (e) { console.error('briefing', e); }
+}, 60_000);
+/** A briefing's request. Feature 33: marked given (and logged) when its request is made (prompt); until then none
+ *  other is chosen. */
+function runBriefing(b) {
+  try {
     const given = { kind: b.kind, given: false };
     briefingWaiting = true;
     if (b.kind === 'morning') dailyDo('plan', () => daily.ensure()); // feature 18: the morning briefing writes the day's Plan
     // Feature 18: the evening briefing writes the day's review first (said by the app), when today has none yet.
     const first = b.kind === 'evening' && daily.reviewWithBriefing() ? dayReview('briefing') : Promise.resolve();
     first.then(() => cal.sync('briefing')).catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}${daily.morningNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`, { briefing: given }).then(() => (given.given && b.kind === 'morning' && !daily.morningAsked() ? dailyAsk('morning') : null)).catch((e) => console.error('briefing', e))); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs) and counts the to-dos that need a new time (daily.mjs)
-  } catch (e) { console.error('briefing', e); }
-}, 60_000);
+  } catch (e) { briefingWaiting = false; console.error('briefing', e); }
+}
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the
 // settings), and what a sync had to say is shown once nothing else is going on.
 cal.startup().catch((e) => console.error('calendar', e));
@@ -2376,10 +2472,17 @@ cal.startup().catch((e) => console.error('calendar', e));
   try { wait = loadSettings(HOME).calendar.syncSeconds; } catch { /* the default */ }
   setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(calTick); }, wait * 1000);
 })();
-setInterval(() => { standGive().then((gave) => { if (!gave) calShow(); }, (e) => console.error('stand down', e)); }, 3000); // feature 33: what stand down left to say comes first
+// Features 31 and 33: the quiet queue, after a typed request's reply (a spoken exchange gives it at its end, flow.mjs),
+// comes before the calendar's lines.
+const queueIdle = () => calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window() && !reviewing && !checking;
+setInterval(() => { (queue.ready() && queueIdle() ? quietGive('exchange') : Promise.resolve(false)).then((gave) => { if (!gave) calShow(); }, (e) => console.error('quiet queue', e)); }, 3000);
 // Local-only build (feature 18): to-dos finished since the last check get their Done line in the daily note.
 // The open items whose to-do is done, or whose box was ticked in a recent daily note, are closed.
-setInterval(() => { dailyDo('tick', () => daily.tick()); dailyDo('items', () => { handover.checkDone(todoItems()); handover.checkTicks(); notes.pages.renames(); }); }, 30_000);
+// Feature 25: a to-do whose box was ticked in the Plan is marked done; then the check-ins and deadlines at risk.
+setInterval(() => {
+  dailyDo('tick', () => daily.tick()); dailyDo('items', () => { handover.checkDone(todoItems()); handover.checkTicks(); notes.pages.renames(); });
+  daily.checkTicks(markDone).catch((e) => dailyDo('ticks', () => { throw e; })).finally(() => { try { checkTick(); } catch (e) { console.error('check-ins', e); } });
+}, 30_000);
 // Local-only build (feature 33): stand down ends by itself at the day turn ("standDown.endsAtDayTurn"), saying nothing
 // aloud; and the shortcut and phrase follow settings.json when it changes.
 setInterval(() => { try { if (stood.turned()) standUp('day'); } catch (e) { console.error('stand down', e); } if (JSON.stringify(standKeys()) !== standKeysSent) sendKeys(); }, 30_000);

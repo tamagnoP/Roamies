@@ -26,7 +26,7 @@ assert.equal(nudgeLine(five.slice(0, 2), now), 'Task 1 was due at 16:51. Task 5 
 assert.equal(nudgeLine(five.slice(0, 4), now), 'Task 1 was due at 16:51. Task 2 was due at 16:52. Task 3 was due at 16:53. And 1 more is due: the list shows it.');
 assert.equal(nudgeLine(five, now), 'Task 1 was due at 16:51. Task 2 was due at 16:52. Task 3 was due at 16:53. And 2 more are due: the list shows them.');
 assert.equal(nudgeLine([], now), ''); assert.equal(nudgeLine([{ text: ' ', due: now }, { text: 'No time', due: null }], now), '');
-assert.deepEqual(codeReference().dueNudge, { wording: '"<title> is due at <time>." ("was due" once it is late; with the day when that isn\'t today), built by the app, shown and spoken', sentToTheModel: 'nothing', namedInOne: 3, thenCounted: 'and N more are due: the list shows them', wasDueAfterMinutes: 5 });
+assert.deepEqual(codeReference().dueNudge, { for: 'reminders; a to-do whose due time passes gets a check-in instead (feature 25)', wording: '"<title> is due at <time>." ("was due" once it is late; with the day when that isn\'t today), built by the app, shown and spoken, whatever the speaking budget says', sentToTheModel: 'nothing', namedInOne: 3, thenCounted: 'and N more are due: the list shows them', wasDueAfterMinutes: 5 });
 
 // sidekick.mjs: the nudge is shown and spoken, and no request is made for it
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');

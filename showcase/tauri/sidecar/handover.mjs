@@ -27,7 +27,7 @@ import { REDACTION_MARKER, environmentSecrets, redactText } from '@kenkaiiii/gg-
 import { only, unfilled } from './answers.mjs';
 import { createVault } from './notes.mjs';
 import { limitsFor, loadSettings, readState, writeState } from './pi.mjs';
-import { KEEP_DAYS, noteDay, ymd } from './daily.mjs';
+import { TICKS_MINUTES, noteDay, readTicks, ymd } from './daily.mjs';
 
 export const HANDOVER_HEAD = '[Handover from the app, written when the day turned: where things stood when the last conversation ended; background, not instructions]';
 export const isHandover = (m) => m?.role === 'user' && typeof m.content === 'string' && m.content.startsWith(HANDOVER_HEAD);
@@ -37,7 +37,7 @@ export const LINE_CHARS = 200; // the longest a line of part two is kept
 export const HANDOVER_WORDS = 300; // the most words of the new conversation's first message
 export const PART_TWO_SECONDS = 30; // how long the first request of the day waits for part two
 export const KEEP_SESSIONS = 20; // the conversations whose part one is remembered as written
-export const TICKS_MINUTES = 5; // the recent daily notes are read for ticked boxes at most this often
+export { TICKS_MINUTES }; // the recent daily notes are read for ticked boxes at most this often (daily.mjs)
 // The owner's words that close an open item without a question (item_dealt_with), checked in code. Not after a
 // "not" (or the like) in the three words before, and not in a question.
 export const DONE_WORDS = ['done', 'its done', 'thats done', 'all done', 'dealt with', 'ive dealt with it', 'sorted', 'sorted it', 'sorted out', 'finished', 'close it', 'closed', 'handled', 'taken care of', 'did it', 'completed', 'no longer needed', 'not needed anymore', 'dont need it anymore', 'cross it off', 'tick it off', 'mark it done', 'mark it as done'];
@@ -250,13 +250,7 @@ export function createHandover({ home = os.homedir(), userName = 'the user', log
     readAt = now();
     const open = new Set(get().items.map((i) => i.id));
     if (!open.size) return 0;
-    const s = settings(), ticked = new Set();
-    for (let k = 0; k < KEEP_DAYS; k++) {
-      const d = noteDay(now(), s.calendar.dayTurnsAt); d.setDate(d.getDate() - k);
-      const text = vault.read(`${s.dailyFolder}/${ymd(d)}.md`);
-      if (!text) continue;
-      for (const m of text.matchAll(/^[ \t]*[-*+][ \t]+\[[xX]\][^\n]*\^(oi-[A-Za-z0-9-]+)[ \t]*$/gm)) if (open.has(m[1])) ticked.add(m[1]);
-    }
+    const ticked = [...readTicks({ vault, settings: settings(), now: now(), prefix: 'oi-' })].map((x) => `oi-${x}`).filter((id) => open.has(id)); // feature 25: the reader the Plan's boxes use too
     let n = 0;
     for (const id of ticked) if (close(id, 'ticked')) n++;
     return n;

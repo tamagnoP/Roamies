@@ -63,12 +63,12 @@ assert.deepEqual(readNames, Object.keys(refSettings).sort(), 'loadSettings reads
 assert.deepEqual([...body.matchAll(/\braw\.(\w+)/g)].map((m) => m[1]), [], 'and none straight from the file, past the checks');
 assert.ok(body.includes('for (const name of Object.keys(defaults))') && body.includes('CLEAN[name](raw[name], defaults[name])'), 'each goes through its check');
 // the limits: all of them, each a default inside its range; every one is used somewhere, and nothing uses another
-assert.deepEqual(Object.keys(ref.limits), Object.keys(LIMITS)); assert.equal(Object.keys(LIMITS).length, 27); // 16, feature 22's five, feature 16's two, feature 24's fold point and page rebuild, and feature 18's questions and open items
+assert.deepEqual(Object.keys(ref.limits), Object.keys(LIMITS)); assert.equal(Object.keys(LIMITS).length, 31); // 16, feature 22's five, feature 16's two, feature 24's fold point and page rebuild, feature 18's questions and open items, and features 25 and 31's check-ins, their repeat, deadlines at risk and the queue's share
 // a limit starts above 0, unless 0 is a value of its own, said in the reference file (pageRebuildQuietMinutes: never)
 assert.deepEqual(Object.keys(LIMITS).filter((n) => LIMITS[n].min === 0), ['pageRebuildQuietMinutes']); assert.equal(reference.limitRanges.pageRebuildQuietMinutes.zero, 'never');
 for (const [name, l] of Object.entries(LIMITS)) { assert.equal(ref.limits[name], l.default); assert.ok(l.min <= l.default && l.default <= l.max && (l.min > 0 || !!l.zero), `${name}: a positive range around its default`); assert.deepEqual(reference.limitRanges[name], { min: l.min, max: l.max, ...(l.whole ? { wholeNumber: true } : {}), ...(l.zero ? { zero: l.zero } : {}) }); }
 const used = new Set();
-for (const f of ['pi.mjs', 'notes.mjs', 'sidekick.mjs', 'calendar.mjs', 'flow.mjs', 'kokorovoice.mjs', 'daily.mjs']) for (const m of fs.readFileSync(path.join(src, f), 'utf8').matchAll(/\b(?:limits|limitsFor\(\w*\))\.(\w+)/g)) used.add(m[1]);
+for (const f of ['pi.mjs', 'notes.mjs', 'sidekick.mjs', 'calendar.mjs', 'flow.mjs', 'kokorovoice.mjs', 'daily.mjs', 'checkin.mjs', 'quiet.mjs']) for (const m of fs.readFileSync(path.join(src, f), 'utf8').matchAll(/\b(?:limits|limitsFor\(\w*\))\.(\w+)/g)) used.add(m[1]);
 assert.deepEqual([...used].sort(), Object.keys(LIMITS).sort(), 'the limits the code uses are the limits there are');
 // what stays in code is there, built from the constants: the sandbox's lists as the profile really has them
 assert.match(reference.about, /never reads this file/i);
@@ -199,8 +199,11 @@ assert.match(startupSettings(home), /isn't valid JSON/); assert.deepEqual(limits
   const none = heldNotice('', (t) => shown.push(t)); assert.equal(none(true), false); assert.equal(shown.length, 1, 'nothing to say, nothing shown');
   // sidekick.mjs offers it when the overlay is up and when the setup guide closes, and works it out once, at start-up
   const side = fs.readFileSync(path.join(src, 'sidekick.mjs'), 'utf8');
-  assert.equal(side.match(/startupSettings\(/g).length, 1); assert.equal(side.match(/offerSettingsNotice\(\)/g).length, 3, 'offered at ui_ready, at ob_closed, and when stand down ends (feature 33)');
-  assert.ok(side.includes('settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed) && !stood?.on())'));
+  assert.equal(side.match(/startupSettings\(/g).length, 1); assert.equal(side.match(/offerSettingsNotice\(\)/g).length, 2, 'offered at ui_ready and at ob_closed');
+  // feature 31: a notice is said unasked: it goes through the speaking budget, and waits in the quiet queue when it
+  // can't be given (stood down among others), so it is no longer held back for stand down here
+  assert.ok(side.includes('settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed))'));
+  assert.match(side, /const settingsNotice = heldNotice\(startupSettings\(HOME\), \(text\) => \{ logLine\('settings_notice', \{ chars: text\.length \}\); unasked\(\{ kind: 'notice', text, mood: 'concerned' \}\); \}\);/);
 }
 
 // ---- 3. settings.json was never written, and settings.default.json never read

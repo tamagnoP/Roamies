@@ -45,13 +45,13 @@ Last updated: 2026-11-25.
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 25 with 31, built with 32 | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
-| 25 | Check-ins on progress | Agreed, not designed; after 33, built with 31 | |
+| 25 | Check-ins on progress | Built with 31 on `check-ins` (2026-11-25, plan answered by the owner); waiting for review | `check-ins` |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
 | 28 | Interrupting: only "wait" stops Roamies while it speaks | Agreed 2026-11-24, not designed; needs echo cancelling; after 17 | |
 | 29 | Run watcher: one named log file, watched by code | Agreed 2026-11-24, not designed; needs 14; after 14 | |
 | 30 | Machine status: this Mac's memory, disk and battery, and whether the Mac mini answers | Agreed 2026-11-24, not designed; after 29 | |
-| 31 | Speaking budget and quiet queue | Agreed 2026-11-24, not designed; built with 25 | |
+| 31 | Speaking budget and quiet queue | Built with 25 on `check-ins` (2026-11-25); waiting for review | `check-ins` |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Agreed 2026-11-24, not designed; recorded with 23, shown in 21 | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 
@@ -852,30 +852,56 @@ Built 2026-11-25 on `stand-down`, off `next`, in one piece (`ff2f9ef`); the revi
 - **Record.** `stand_down` when it starts and `stand_down_end` when it ends, with true/false and counts only;
   nothing in the daily note.
 
+### 25 with 31. Check-ins, speaking budget and quiet queue (branch `check-ins`)
+
+Built 2026-11-25 on `check-ins`, off `next`, in one piece, after the owner answered the plan. `test:all` passed.
+Waiting for review. How it behaves is in `LOCAL-ONLY.md` ("Check-ins", "Speaking budget and quiet queue"); the checks
+by hand are in `TESTS.md`, group 1.
+
+Agreed text for 25 (2026-11-18): Roamies asks when a calendar block ends ("is it done?"), and the answer marks the
+task done or reschedules it; a task ticked in the daily note in Obsidian is marked done without asking; a future
+task reported as finished frees its block; a maximum number of check-ins a day, none in the middle of a block. Mostly
+code; it uses the daily note (18) and the answer window (22).
+
+Agreed text for 31 (2026-11-24): Roamies speaks unasked only for the kinds the owner switched on, at most a set number
+of times an hour; the rest waits in a queue shown as a count, given when he next speaks or asks "anything waiting?".
+
+As built:
+
+- **Check-ins** (`checkin.mjs`). At a to-do's block end, or at its due time when it has no block today; once for
+  each time it had; at most `limits.checkInsPerDay` (6); none after the review. A block's own check-in comes at its
+  end even when the next one starts; one for a due time, and one asked again, waits for a block to end. Worded and
+  read by code. Buttons Done, Still on it, Not yet (a third button, `THIRD`, in `answers.mjs` and `host.js`).
+  - Done: marked done; a block still to come is freed (`cal.free`); the usual Done line.
+  - Not yet with a time: `parseWhen`, as the missed-task answers; alone: "When will you do it?" (`daily.answerWhen`).
+  - Still on it: again after `limits.checkInAgainMinutes` (30), twice at most; still open at the review.
+  - No answer: nothing changes; not pending. Each answer has its Log line.
+  - It replaces the due-time nudge for to-dos; reminders keep theirs.
+- **Plan boxes.** Every line of the Plan's three lists is `- [ ] … ^td-<id>`; a tick in Obsidian marks the to-do
+  done, once (`daily.checkTicks`, the reader shared with the open items, `readTicks`). An untick does nothing.
+- **Deadline at risk.** Due within `limits.atRiskHours` (24), no block ending before its due time; once per due time.
+- **The gate** (`quiet.mjs`): stood down, kind off, away (`speaking.awayMinutes`), on a call
+  (`speaking.quietInCalls`), budget (`speaking.perHour`), in that order; the reason logged as one word. Reminders
+  never go through it. Kinds: briefing, review, checkIn, deadlineAtRisk, calendarLine, notice.
+- **The queue.** Nothing said or shown; a count on the character (hidden while stood down). Given at the end of the
+  next exchange (typed: after the reply; spoken: at the exchange's end, before the morning questions and a pending
+  question) or on "anything waiting?" (answered by code), most urgent first, `limits.queueGiveMost` (3) at a time.
+  What went out of date is dropped and counted, said in one line.
+- **One mechanism with stand down.** Stand down keeps its triggers, what it stops, its look and counts; what it held
+  (calendar lines, caught lines, the review's line, briefings, notices) is in the queue with the reason `stood`, and
+  its summary is the queue's first line.
+- **Away and in a call** (`src-tauri/src/presence.rs`): every 5 s the shell sends the seconds since the last
+  keyboard or mouse input (`CGEventSourceSecondsSinceLastEventType`) and whether any input device is running
+  (`kAudioDevicePropertyDeviceIsRunningSomewhere`). Neither needs a permission (checked: both read without one, a
+  Rust test reads them). Roamies' own listening, and 10 s after, is left out.
+- **Never reaches the model:** check-ins, their answers, deadlines at risk, the queue, its count, "anything
+  waiting?".
+
 ## 3. Queued, in this order
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27. The owner's order of
-2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24, 18 and 33 are in section 2;
-the subsections below follow the rest, in order.
-
-### 25. Check-ins on progress
-
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
-
-Agreed 2026-11-18. Roamies checks on progress without nagging.
-
-- It asks when a calendar block ends ("is it done?"), and the answer marks the task done or reschedules it.
-- A task ticked in the daily note in Obsidian is marked done without asking.
-- A future task reported as finished frees its block.
-- The owner sets a maximum number of check-ins a day, and none happen in the middle of a block.
-- Mostly code, since comparing lists has a fixed shape. It uses the daily note (18) and the answer window (22).
-
-### 31. Speaking budget and quiet queue
-
-Agreed 2026-11-24 (the owner); recorded 2026-11-25. Built with 25.
-
-Roamies speaks unasked only for the kinds the owner switched on, at most a set number of times an hour. The rest
-waits in a queue shown as a count, given when he next speaks or asks "anything waiting?".
+2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24, 18, 33, 25 and 31 are in
+section 2; the subsections below follow the rest, in order.
 
 ### 23. Offline mode with a local model
 
@@ -1584,11 +1610,36 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   stood down is not marked given, and is held like any other (given later in its window, skipped after it); the
   phrase's wait is a setting, `standDown.waitSeconds` (1.5 s, 0.5 to 3). Built in `deb6bd8`, `test:all` passed,
   `stand-down` merged into `next`. Next: 25 with 31, planned first on one branch off `next`.
+- **2026-11-25, evening (features 25 and 31, the owner).** The plan accepted, with his answers: the check-in
+  replaces the due-time nudge for to-dos; a block's check-in comes at its end even when the next block starts, while
+  one for a due time and "still on it" repeats wait for the running block to end; a deadline at risk is an open to-do
+  due within 24 hours with no block ending before its due time, said once per due time; the queue's order is
+  deadline at risk, check-in, review, calendar line, briefing, notice; the count is hidden while stood down and shown
+  when it ends; anything given unasked counts against the budget, spoken or shown, and giving the queue doesn't;
+  "still on it" leaves the to-do still open at the review, not missed, and not done by the day turn it needs a new
+  time the next morning; `speaking.perHour` 3, `limits.checkInsPerDay` 6, the rest as proposed (`checkInAgainMinutes`
+  30, `atRiskHours` 24, `queueGiveMost` 3, every kind on); checkboxes in all three Plan lists. Three additions:
+  away (`speaking.awayMinutes`, 10, 0 off: no keyboard or mouse input for that long, read from the system's idle
+  time, only that number), in a call (`speaking.quietInCalls`, true: another app using the microphone; built only if
+  it can be read simply and reliably without a new permission), and the reason each line was queued logged as one
+  word. Built whole on `check-ins`.
+- **2026-11-25, evening (in a call, the build).** Read through CoreAudio, `kAudioDevicePropertyDeviceIsRunningSomewhere`
+  on every device with input streams: no permission is needed (it reads without one, and a Rust test reads it), it
+  doesn't open the microphone, and it covers a headset as well as the built-in microphone. Roamies' own listening
+  opens the device only while it listens, so the sidecar leaves out its own listening and the 10 s after. Built.
+  What it can't tell: a call from any other use of a microphone (dictation, a voice memo, an app that keeps it open
+  while muted all count as "in a call").
+- **2026-11-25, evening (features 25 and 31, in building).** An exchange whose request met a problem (no model
+  signed in) never started its quiet time, so it never ended; it now does (`flow.settle()` after the problem line),
+  so the queue and the check-ins it holds back come after it.
 
 ## 6. Still to test
 
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
+- [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone
+  reading seen to change live during a call (the build's shell had no way to open a microphone without a permission
+  prompt, so only "not in use" was seen).
 - [ ] Feature 24, fix 4 with the real voice helper: quit during a spoken reply (the live run on `daf228f` quit after
   the reply had ended).
 - [ ] Feature 24, the natural voice asleep, after an install and with `kokoro.sleepAfterMinutes` set: the first
@@ -1684,6 +1735,11 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - [ ] Little Snitch installed, with rules for Roamies and pi.
 
 ## 7. Known limits
+
+- Features 25 and 31: "away" is the Mac's keyboard and mouse idle time, so reading or watching something without
+  touching the Mac for `speaking.awayMinutes` counts as away. "In a call" is any app using a microphone, not only a
+  call. A check-in that can't be asked within two minutes of being given (something else keeps going on) is dropped
+  for that time, logged as `daily_questions_skipped`.
 
 - `test/rebuild-run.test.mjs` is a known flaky test. It failed once in `test:all` (2026-11-25, 13:35): "the rebuild
   is asked for" did not come within 100 s, where one quiet minute and the 15-second checks give 60 to 75 s; it

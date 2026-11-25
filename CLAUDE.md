@@ -22,8 +22,12 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    `SP.titlesShown` at most at a time, then "and N more"), never because a request was made. Do not put the list,
    or any title from it, into the live state or a briefing note. The fresh conversation of each day (feature 18)
    starts with the handover: part two, written by the model from the conversation that ended, and the open items'
-   text; never part one, the daily note or the list. A nudge for a due to-do is worded by code (`nudgeLine`), shown and
-   spoken, and makes no request. What a sync has to say goes to a bubble, never into a tool's result. From a task in the app only title, done,
+   text; never part one, the daily note or the list. A nudge for a due reminder is worded by code (`nudgeLine`), shown
+   and spoken, and makes no request. Check-ins, deadlines at risk and the quiet queue (features 25 and 31,
+   `checkin.mjs`, `quiet.mjs`) are worded, read and given by code: no question, answer, item, count or "anything
+   waiting?" reaches the model. The shell sends the sidecar two numbers for them and nothing else (`presence.rs`):
+   the seconds since the last keyboard or mouse input, and whether any input device is running; nothing is recorded,
+   and no app is named. What a sync has to say goes to a bubble, never into a tool's result. From a task in the app only title, done,
    start, length, deadline and the two matrix tags are read (and whether it repeats); only linked tasks are
    written to, only those fields; none is ever deleted.
 2. **Roamies does not touch files itself, and runs no command on the owner's behalf.** It starts only its own fixed
@@ -74,6 +78,8 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
 | `showcase/tauri/sidecar/standdown.mjs` | Ours. Feature 33: stand down: the phrase said alone, the state kept in `state.json`, the line said when it ends. The shell's half is `src-tauri/src/stand.rs` (the phrase) and `voice.rs` (the shortcut). |
+| `showcase/tauri/sidecar/quiet.mjs` | Ours. Feature 31: the speaking budget and the quiet queue: one gate for everything said unasked, the reasons, what goes out of date, "anything waiting?". Stand down holds through it. The shell's half is `src-tauri/src/presence.rs` (idle seconds, microphone in use). |
+| `showcase/tauri/sidecar/checkin.mjs` | Ours. Feature 25: check-ins ("Is it done?") and deadlines at risk: when, the answers, what each does. |
 | `showcase/tauri/sidecar/store.mjs` | Upstream's storage (sessions, to-dos, memory). Marked edits of ours: `renameCommitment`, `makeCommitment`, `reminded` in `addCommitment`, and `doneAt` and `createdAt` in `listItems`. |
 | `showcase/tauri/sidecar/reference.mjs` | Ours. Writes `settings.default.json`; the start-up bubble for missing or unusable settings. |
 | `showcase/tauri/sidecar/localvoice.mjs` | Ours. Spoken replies through `/usr/bin/say`. |

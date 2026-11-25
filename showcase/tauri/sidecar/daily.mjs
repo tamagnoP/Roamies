@@ -26,6 +26,12 @@
 //     headings: Decided, Left open (every open item, oldest first, as a checkbox with its block id ^oi-…), Worth
 //     remembering.
 //
+//   - Feature 25 (check-ins, checkin.mjs): every line of the Plan's three lists is a checkbox carrying the to-do's id
+//     (^td-<id>). A box ticked in Obsidian marks that to-do done (readTicks, at most every TICKS_MINUTES; an untick
+//     does nothing, and the note is never ticked by code after it is written). A to-do last answered "still on it" in
+//     a check-in is still open at the review, not missed; one answered in a check-in is not asked about again at the
+//     review that day.
+//
 // Only to-dos count in the Plan, the Log and the Review (kind "commitment"); reminders and timers appear only in
 // the handover's part one. pi's work is not in it (it stays in the records folder). Nothing here makes a request
 // to the model, and nothing of the note goes to it.
@@ -37,6 +43,7 @@ import { loadSettings, readState, writeState } from './pi.mjs';
 
 export const COMING_DAYS = 14; // "Coming up": the deadlines in this many days after today
 export const KEEP_DAYS = 14; // what is kept in state.json about each day
+export const TICKS_MINUTES = 5; // the recent daily notes are read for ticked boxes at most this often
 // Said alone (filler words around it are fine), these ask for the day's review. Checked here, never by the model.
 export const REVIEW_PHRASES = ['review my day', 'review the day', 'review today', 'day review', 'daily review', 'evening review', 'end of day review', 'do my review', 'do the review', 'run the review', 'run my review', 'my day review', 'how did my day go', 'how did today go'];
 const REVIEW = only(REVIEW_PHRASES);
@@ -164,6 +171,18 @@ export function parseWhen(text, { now = Date.now(), dayStart = 540, dayEnd = 108
   return null;
 }
 
+/** The ids whose box is ticked ("- [x] … ^<prefix><id>") in the daily notes of the last KEEP_DAYS days. Feature 25:
+ *  shared by the open items (^oi-, handover.mjs) and the Plan's to-dos (^td-). → a Set of what follows the prefix. */
+export function readTicks({ vault, settings, now = Date.now(), prefix }) {
+  const ticked = new Set(), re = new RegExp(`^[ \\t]*[-*+][ \\t]+\\[[xX]\\][^\\n]*\\^${prefix}([A-Za-z0-9-]+)[ \\t]*$`, 'gm');
+  for (let k = 0; k < KEEP_DAYS; k++) {
+    const d = noteDay(now, settings.calendar.dayTurnsAt); d.setDate(d.getDate() - k);
+    const text = vault.read(`${settings.dailyFolder}/${ymd(d)}.md`);
+    if (text) for (const m of text.matchAll(re)) ticked.add(m[1]);
+  }
+  return ticked;
+}
+
 /** A note day's stretch of time: from its turn to the next one. */
 export function dayWindow(day, turn = 0) {
   return { from: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, turn).getTime(), until: new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 0, turn).getTime() };
@@ -241,12 +260,14 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     const coming = open.filter((t) => typeof t.due === 'number' && t.due >= t0.w.until && t.due < soon).sort((a, c) => a.due - c.due);
     return { planned, needs, coming };
   }
+  // Feature 25: each line a checkbox with the to-do's id; one finished before the Plan is written is ticked.
+  const box = (t, text) => `- [${t.status === 'done' ? 'x' : ' '}] ${text} ^td-${t.id}`;
   function planText(t0, p) {
     const lines = ['## Plan'];
-    if (p.planned.length) for (const { t, x } of p.planned) lines.push(`- ${x.block ? `${span(x)} ${oneLine(t.text)}${x.block.kept && t.status !== 'done' ? ' (slot kept, not booked yet)' : ''}` : `${oneLine(t.text)} (${span(x)})`}${t.status === 'done' ? ' (done)' : ''}`);
+    if (p.planned.length) for (const { t, x } of p.planned) lines.push(box(t, `${x.block ? `${span(x)} ${oneLine(t.text)}${x.block.kept && t.status !== 'done' ? ' (slot kept, not booked yet)' : ''}` : `${oneLine(t.text)} (${span(x)})`}${t.status === 'done' ? ' (done)' : ''}`));
     else lines.push('- Nothing is planned.');
-    if (p.needs.length) lines.push('', '### Needs a new time', ...p.needs.map(({ t, last }) => `- ${oneLine(t.text)} (was ${dayLong(new Date(last))}, ${hm(last)})`));
-    if (p.coming.length) lines.push('', '### Coming up', ...p.coming.map((t) => `- ${dayLong(new Date(t.due))}: ${oneLine(t.text)} (due ${hm(t.due)})`));
+    if (p.needs.length) lines.push('', '### Needs a new time', ...p.needs.map(({ t, last }) => box(t, `${oneLine(t.text)} (was ${dayLong(new Date(last))}, ${hm(last)})`)));
+    if (p.coming.length) lines.push('', '### Coming up', ...p.coming.map((t) => box(t, `${dayLong(new Date(t.due))}: ${oneLine(t.text)} (due ${hm(t.due)})`)));
     return `${lines.join('\n')}\n`;
   }
   /** The note's top: the date, and links to the days before and after. */
@@ -335,7 +356,8 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
       if (!t || t.status !== 'open') continue; // dropped, or gone: not part of the day any more
       const x = timeOn(t, b[id], t0.w);
       if (!x) continue; // moved to another day
-      out.push({ id, title: oneLine(t.text), status: x.end <= now() ? 'missed' : 'open', x: { at: x.at, end: x.end, block: !!x.block } });
+      // Feature 25: last answered "still on it" in a check-in: still open today, not missed (the owner, 2026-11-25).
+      out.push({ id, title: oneLine(t.text), status: x.end <= now() && day.checks?.[id]?.answer !== 'still' ? 'missed' : 'open', x: { at: x.at, end: x.end, block: !!x.block } });
     }
     return out.sort((a, c) => a.x.at - c.x.at);
   }
@@ -396,36 +418,46 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
       return questions('morning', t0).length > 0;
     } catch { return false; }
   }
+  /** The bubble for "When will you do it?": two buttons, and a spoken answer judged by parseWhen. */
+  function whenOpts(question) {
+    const s = settings();
+    return { placeholder: question, spoken: question, choices: ['Leave it', 'Drop it'], clicks: [{ kind: 'leave' }, { kind: 'drop' }], hint: WHEN_HINT, parse: (text) => parseWhen(text, { now: now(), dayStart: s.calendar.dayStart, dayEnd: s.calendar.dayEnd }) };
+  }
+  /** What an answer to "When will you do it?" does (q: { id, title }; a: parseWhen's answer), with its Log line, and
+   *  marked as answered today. Feature 25: a check-in's "not yet" ends here too. → 'left' | 'dropped' | 'moved' | 'failed'. */
+  async function answerWhen(q, a, io) {
+    const mark = (how) => editDay(today().key, (d) => { d.answered = { ...(d.answered ?? {}), [q.id]: how }; });
+    if (a.kind === 'leave') { mark('left'); return 'left'; }
+    if (a.kind === 'drop') {
+      const t = list().find((x) => x.id === q.id), b = blocks()[q.id];
+      edit((d) => { d.letGo = { ...d.letGo, [q.id]: t ? latestTime(t, b) : null }; const open = new Set(list().filter((x) => x.status === 'open').map((x) => x.id)); for (const id of Object.keys(d.letGo)) if (!open.has(id)) delete d.letGo[id]; });
+      mark('dropped');
+      logLines(today(), [`- ${hm(now())} Let go: ${q.title}`]);
+      await io.say(`I'll stop asking about ${q.title}.`);
+      return 'dropped';
+    }
+    const r = await io.reschedule(q.id, a.kind === 'at' ? { start: a.start } : { day: a.day });
+    if (r.ok) {
+      mark('moved');
+      logLines(today(), [`- ${hm(now())} Rescheduled: ${q.title} → ${a.kind === 'at' ? `${dayLong(new Date(a.start))}, ${hm(a.start)}` : `due ${dayLong(a.day)}`}`]);
+    }
+    if (r.line) await io.say(r.line);
+    return r.ok ? 'moved' : 'failed';
+  }
   /** Asks about each to-do (kind: 'review' | 'morning'), at most limits.reviewQuestions of them, oldest first, one
    *  at a time; the first left unanswered ends the round. → { asked, left }. */
   async function ask(kind, io) {
     const t0 = ensure(today()), most = t0.s.limits.reviewQuestions, all = questions(kind, t0);
     if (kind === 'morning') editDay(t0.key, (d) => { d.morning = hm(now()); });
-    const mark = (id, how) => editDay(t0.key, (d) => { d.answered = { ...(d.answered ?? {}), [id]: how }; });
     const counts = { moved: 0, leave: 0, dropped: 0, failed: 0 };
     let asked = 0, ended = '';
     for (const q of all.slice(0, most)) {
-      const s = settings();
-      const opts = { placeholder: q.question, spoken: q.question, choices: ['Leave it', 'Drop it'], clicks: [{ kind: 'leave' }, { kind: 'drop' }], hint: WHEN_HINT, parse: (text) => parseWhen(text, { now: now(), dayStart: s.calendar.dayStart, dayEnd: s.calendar.dayEnd }) };
       let a;
-      try { a = await io.ask(opts); } catch (e) { if (e?.name !== 'Unanswered') throw e; ended = 'unanswered'; asked++; break; }
+      try { a = await io.ask(whenOpts(q.question)); } catch (e) { if (e?.name !== 'Unanswered') throw e; ended = 'unanswered'; asked++; break; }
       asked++;
       if (!a) { ended = 'closed'; break; }
-      if (a.kind === 'leave') { mark(q.id, 'left'); counts.leave++; continue; }
-      if (a.kind === 'drop') {
-        const t = list().find((x) => x.id === q.id), b = blocks()[q.id];
-        edit((d) => { d.letGo = { ...d.letGo, [q.id]: t ? latestTime(t, b) : null }; const open = new Set(list().filter((x) => x.status === 'open').map((x) => x.id)); for (const id of Object.keys(d.letGo)) if (!open.has(id)) delete d.letGo[id]; });
-        mark(q.id, 'dropped'); counts.dropped++;
-        logLines(today(), [`- ${hm(now())} Let go: ${q.title}`]);
-        await io.say(`I'll stop asking about ${q.title}.`);
-        continue;
-      }
-      const r = await io.reschedule(q.id, a.kind === 'at' ? { start: a.start } : { day: a.day });
-      if (r.ok) {
-        mark(q.id, 'moved'); counts.moved++;
-        logLines(today(), [`- ${hm(now())} Rescheduled: ${q.title} → ${a.kind === 'at' ? `${dayLong(new Date(a.start))}, ${hm(a.start)}` : `due ${dayLong(a.day)}`}`]);
-      } else counts.failed++;
-      if (r.line) await io.say(r.line);
+      const how = await answerWhen(q, a, io);
+      counts[{ left: 'leave', dropped: 'dropped', moved: 'moved', failed: 'failed' }[how]]++;
     }
     const left = all.length - asked;
     if (left > 0) await io.say(`${left} more ${left === 1 ? 'needs' : 'need'} a new time: ${left === 1 ? 'it\'s' : 'they\'re'} in today's note under Needs a new time.`);
@@ -492,5 +524,21 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   function reviewWithBriefing() {
     try { const t0 = today(); return t0.s.calendar.reviewAt !== null && !get().days[t0.key]?.review; } catch { return false; }
   }
-  return { tick, noted, ensure, review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, logged, today, planFor, state: get };
+  // ---- feature 25: the Plan's boxes ticked in Obsidian
+  let ticksAt = -Infinity;
+  /** The open to-dos whose box is ticked in a recent daily note, each once (state.json: daily.ticked), at most every
+   *  TICKS_MINUTES. done(id) marks one done. → how many. */
+  async function checkTicks(done) {
+    if (now() - ticksAt < TICKS_MINUTES * 60_000) return 0;
+    ticksAt = now();
+    const all = Array.isArray(todos()) ? todos() : [], open = new Set(all.filter((t) => t?.status === 'open' && t.kind === 'commitment').map((t) => t.id));
+    const seen = get().ticked ?? {}, ticked = [...readTicks({ vault, settings: settings(), now: now(), prefix: 'td-' })].filter((id) => open.has(id) && !seen[id]);
+    if (!ticked.length) return 0;
+    const known = new Set(all.map((t) => t?.id));
+    edit((d) => { d.ticked = Object.fromEntries([...Object.keys(d.ticked ?? {}).filter((id) => known.has(id)), ...ticked].map((id) => [id, true])); });
+    for (const id of ticked) await done(id);
+    log('plan_ticked', { todos: ticked.length });
+    return ticked.length;
+  }
+  return { tick, noted, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, logged, today, planFor, state: get };
 }

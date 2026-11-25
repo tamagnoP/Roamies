@@ -20,6 +20,7 @@
 //     bubble like the others: said, with an answer window, kept when unanswered.
 //   - Feature 18: a question whose answer is judged by the caller's own code (opts.parse: "When will you do it?",
 //     daily.mjs). What is said counts only when parse() takes it; its two buttons answer by position (opts.clicks).
+//     Feature 25: a check-in has three (checkin.mjs); the third answers with THIRD.
 
 // A click is never judged by words. The overlay answers a bubble with buttons by which button it was: FIRST for the
 // first one (also the Y key), nothing for any other. Should a page ever hand back the button's label instead, the
@@ -27,6 +28,8 @@
 export const FIRST = 'yes';
 // The second button of a question between two things (opts.which). Of a yes/no bubble the second button is a no.
 export const SECOND = 'second';
+// Feature 25: the third button of a question judged by the caller's code with three buttons (a check-in).
+export const THIRD = 'third';
 /** The answer to a question between two things, by which button it was: FIRST, SECOND, or null for neither. */
 export const whichButton = (answer, choices = []) => (firstButton(answer, choices) ? FIRST : answer === SECOND || (typeof answer === 'string' && choices.length > 1 && answer === choices[1]) ? SECOND : null);
 export const firstButton = (answer, choices = []) => answer === FIRST || (typeof answer === 'string' && choices.length > 0 && answer === choices[0]);
@@ -125,7 +128,7 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
     const closing = new AbortController();
     const inner = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
     const { spoken, pending, which = null, always = false, parse = null, clicks = [], hint = '', ...shown } = opts;
-    const button = (a) => { const w = whichButton(a, opts.choices); return w === FIRST ? clicks[0] ?? null : w === SECOND ? clicks[1] ?? null : null; };
+    const button = (a) => { const w = whichButton(a, opts.choices); return w === FIRST ? clicks[0] ?? null : w === SECOND ? clicks[1] ?? null : a === THIRD ? clicks[2] ?? null : null; };
     return new Promise((resolve, reject) => {
       const entry = {
         settle(answer, by) {
@@ -158,7 +161,7 @@ export function createAnswers({ ask, log = () => {}, question = null, retext = (
       waiting.push(entry);
       entry.window = question?.({ brief: spoken ?? briefOf(opts.placeholder), pending: pending ?? null, always, onTimeout: () => entry.unanswered() }) ?? null;
       // which: the overlay answers the second button with SECOND instead of nothing (host.js).
-      Promise.resolve(ask({ ...shown, ...(which || parse ? { second: SECOND } : {}), placeholder: `${opts.placeholder}\n${which ? `Say ${which.hint}, or click.` : parse ? `Say ${hint}, or click.` : SPOKEN_HINT}` }, inner)).then((a) => entry.settle(parse ? button(a) : which ? whichButton(a, opts.choices) : firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
+      Promise.resolve(ask({ ...shown, ...(which || parse ? { second: SECOND } : {}), ...(parse && clicks.length > 2 ? { third: THIRD } : {}), placeholder: `${opts.placeholder}\n${which ? `Say ${which.hint}, or click.` : parse ? `Say ${hint}, or click.` : SPOKEN_HINT}` }, inner)).then((a) => entry.settle(parse ? button(a) : which ? whichButton(a, opts.choices) : firstButton(a, opts.choices) ? FIRST : null, 'click'), () => entry.settle(null, 'click'));
     });
   }
   return {

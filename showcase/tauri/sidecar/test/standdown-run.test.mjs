@@ -1,10 +1,10 @@
 // Feature 33, stand down: the real sidecar, in a throwaway home folder, with a stand-in for the shell and the page on
 // its input. Run: npm run test:all (about a minute; not in npm test). No model is signed in and nothing leaves the Mac.
 //   - the shell's stand_down (the shortcut): the page is cleared, the microphone closed, one log line;
-//   - a to-do that comes due meanwhile is not nudged, nothing is shown, and the state is in state.json;
+//   - a reminder that comes due meanwhile is not nudged, nothing is shown, and the state is in state.json;
 //   - a new page, and a restart of the sidecar, keep it (the stood-down look, no greeting);
 //   - a spoken request ends it: one log line, the look back, the late nudge, and the line worded by the app for what
-//     happened meanwhile (a calendar line whose block ended went by).
+//     happened meanwhile (a calendar line whose block ended went by), from the quiet queue (feature 31).
 //   - the phrase said alone, when it reaches the sidecar as words, stands it down too;
 //   - it ends by itself at the day turn, with nothing said or shown; its line waits for the owner's first exchange
 //     after (here a typed request) and comes once it has ended.
@@ -32,7 +32,7 @@ execFileSync(process.execPath, ['--input-type=module', '-e', `
 // the calendar side as after its first start, so it asks nothing of Super Productivity during the run
 fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ calendar: { started: true, adopt: true } }));
 const dueAt = Date.now() + 25_000;
-fs.writeFileSync(path.join(home, '.gg', 'sidekick', 'memory.json'), JSON.stringify({ version: 1, commitments: [{ id: 'c1', text: 'Call the dentist', due: dueAt, createdAt: Date.now(), status: 'open', remindedAt: null, kind: 'commitment' }], facts: [] }));
+fs.writeFileSync(path.join(home, '.gg', 'sidekick', 'memory.json'), JSON.stringify({ version: 1, commitments: [{ id: 'c1', text: 'Call the dentist', due: dueAt, createdAt: Date.now(), status: 'open', remindedAt: null, kind: 'reminder' }], facts: [] }));
 fs.writeFileSync(path.join(home, '.gg', 'sidekick.json'), JSON.stringify({ sound: false, allowActions: false, voice: false, onboarded: true, onboardStep: 0, filesAsked: true, autoListen: false, setupVersion: 2, size: 'default', look: 'jarvis', introDone: true, replies: 'text' }));
 
 const out = [];
@@ -52,7 +52,9 @@ const state = () => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'ut
 const page = (from) => out.slice(from).filter((o) => o.m.type === 'ui').map((o) => o.m.msg);
 const shell = (from) => out.slice(from).map((o) => o.m);
 const reminded = () => JSON.parse(fs.readFileSync(path.join(home, '.gg', 'sidekick', 'memory.json'), 'utf8')).commitments[0].remindedAt;
-const waitFor = async (ok, ms, what) => { const t0 = Date.now(); while (!ok() && Date.now() - t0 < ms) await sleep(200); assert.ok(ok(), what); };
+// When it doesn't come: the activity log's last kinds and times, never their text, say what happened instead.
+const lastKinds = () => logText().trim().split('\n').slice(-15).map((l) => l.split(' ').slice(0, 2).join(' ')).join(' | ');
+const waitFor = async (ok, ms, what) => { const t0 = Date.now(); while (!ok() && Date.now() - t0 < ms) await sleep(200); assert.ok(ok(), `${what} (the log: ${lastKinds()})`); };
 try {
   start(); await sleep(3000);
   tell({ type: 'ui_ready' }); await sleep(1500);
@@ -70,10 +72,12 @@ try {
 
   // a calendar line about a block that ends while it lasts (put in as a sync would have left it)
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ ...state(), calendar: { ...state().calendar, held: [{ text: 'A placed block, now over.', until: Date.now() + 2000 }] } }));
-  // the to-do comes due meanwhile: nothing is said or shown, and it is not marked reminded
+  // the reminder comes due meanwhile (feature 25: a to-do would get a check-in): nothing is said or shown, and it is
+  // not marked reminded
   from = out.length;
   await sleep(Math.max(0, dueAt - Date.now()) + 6000);
-  assert.deepEqual(page(from).filter((m) => !['stand'].includes(m.kind)).map((m) => m.kind), [], 'nothing went to the page');
+  assert.deepEqual(page(from).filter((m) => !['stand', 'queue'].includes(m.kind)).map((m) => m.kind), [], 'nothing went to the page');
+  assert.ok(page(from).filter((m) => m.kind === 'queue').every((m) => m.n === 0), 'the quiet queue\'s count is hidden while stood down (feature 31)');
   assert.equal(reminded(), null, 'the nudge waits');
   assert.doesNotMatch(logText(), / nudge /);
 
@@ -98,14 +102,16 @@ try {
   await waitFor(() => / stand_down_end /.test(logText()), 5000, 'it ends');
   assert.match(logText(), / stand_down_end \{"by":"voice","minutes":\d+,"held":1\}\n/, 'the late nudge is what was held');
   assert.ok(page(from).some((m) => m.kind === 'stand' && m.on === false), 'the look is back');
-  assert.equal(state().standDown.on, false);
+  assert.equal(state().standDown, undefined, 'ended: what it stopped is in the quiet queue');
   await waitFor(() => reminded() !== null, 30_000, 'the nudge is given late');
   // the line about what happened meanwhile, worded by the app: the calendar line went by, and its text never showed
-  await waitFor(() => / stand_down_said /.test(logText()), 15_000, 'the line is said');
-  assert.match(logText(), / calendar_held_passed \{"lines":1\}\n/);
+  // feature 31: from the quiet queue, at the end of the exchange (limits.exchangeEndSeconds after the reply)
+  await waitFor(() => / stand_down_said /.test(logText()), 45_000, 'the line is said');
+  assert.match(logText(), / quiet_queued \{"kind":"calendarLine","why":"stood"\}\n/, 'it waited in the quiet queue');
+  assert.match(logText(), / quiet_stale \{"kind":"calendarLine","n":1\}\n/);
   assert.ok(page(from).some((m) => m.kind === 'say' && m.text === 'While I stood down: 1 calendar line went by, its block over.'), 'the line');
   assert.ok(!page(from).some((m) => m.kind === 'say' && /now over/.test(m.text)), 'the dropped line itself is not shown');
-  await waitFor(() => state().standDown === undefined, 10_000, 'given: forgotten');
+  await waitFor(() => state().quiet.stood === null, 10_000, 'given: forgotten');
   assert.match(logText(), / nudge \{"todos":1,/);
   assert.ok(page(from).some((m) => m.kind === 'list'), 'with the list');
 
@@ -130,7 +136,7 @@ try {
   await sleep(8000);
   assert.equal(saidLines(), saidBefore, 'not at the day turn');
   assert.ok(!page(from).some((m) => ['say', 'speech'].includes(m.kind)), `nothing shown or said (${page(from).map((m) => m.kind).join(', ')})`);
-  assert.equal(state().standDown.exchanged, false, 'it waits, in state.json');
+  assert.equal(state().standDown, undefined); assert.deepEqual([state().quiet.due, state().quiet.stood], [false, { lines: 2 }], 'it waits, in state.json');
   // a typed request (no model is signed in: its reply is the app's own): once it is over, the line comes
   from = out.length;
   tell({ type: 'menu', id: 'ask' });
@@ -140,7 +146,7 @@ try {
   const said = page(from).filter((m) => m.kind === 'say').map((m) => m.text);
   assert.ok(said.indexOf('While I stood down: 2 calendar lines went by, their blocks over.') > 0, `after the reply (${said.join(' | ')})`);
   assert.match(logText().split('\n').filter((l) => / stand_down_said /.test(l)).at(-1), / stand_down_said \{"chars":64,"caught":0,"said":(true|false),"review":false\}$/);
-  await waitFor(() => state().standDown === undefined, 10_000, 'given: forgotten');
+  await waitFor(() => state().quiet.stood === null, 10_000, 'given: forgotten');
 } finally {
   await stop();
   fs.rmSync(home, { recursive: true, force: true });

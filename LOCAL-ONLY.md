@@ -627,34 +627,35 @@ answers is kept in `pending` and asked again after a later exchange. A read-only
 is kept the same way and never sent by itself: it is asked again in full, with no countdown. A missed-task round
 ends unanswered, and its to-dos come back the next morning. Pending questions stay kept.
 
-**While it lasts nothing is said or shown unless you ask.** Briefings, reminders, calendar lines, notices and
-questions wait, as they always waited for a quiet moment; standing down is one more reason to wait. Three things
-change:
+**While it lasts nothing is said or shown unless you ask.** Since features 25 and 31, what would be said or shown
+unasked goes to the quiet queue (see "Speaking budget and quiet queue" below), the same queue the speaking budget
+fills, logged with the reason `stood`. Questions wait for a quiet moment, as they always did. Three things are as
+the owner chose them:
 
 - a briefing whose window passes meanwhile is skipped, as before. One that was already waiting behind a request
   when you stood down is not counted as given: it is held like the others, given later if its window is still open;
-- a calendar line about a block that has ended by the time it ends is dropped and counted;
+- a calendar line about a block that has ended by then is dropped and counted;
 - reminders are never dropped: they are given late.
 
-The day's review is written in the daily note at `calendar.reviewAt` as usual; its line waits. What you ask for
-still works: the list shortcut, the panel, Esc. A line that would have gone to the screen from anywhere else is kept
-(up to 20) and shown afterwards.
+The day's review is written in the daily note at `calendar.reviewAt` as usual; its line waits in the queue. What you
+ask for still works: the list shortcut, the panel, Esc. A line that would have gone to the screen from anywhere else
+is kept in the queue (up to 20) and shown afterwards. The count on the character is hidden while it lasts.
 
 **It ends** when you next start a conversation the usual way: a request, spoken or typed. Pressing the talk keys
 alone doesn't end it. With `standDown.endsAtDayTurn` (on by default) it also ends by itself at `calendar.dayTurnsAt`,
-saying nothing aloud. Then, once things are quiet, one line worded by the app says what happened meanwhile ("While I
-stood down: pi was stopped and 2 processes it had left running were ended; 1 calendar line went by, its block
-over."), shown, and said when `speakNotices` is on. When it ended at the day turn, that line is not given then: it
-waits (over a restart too) for the end of your first exchange after it: a typed request once its reply is done, a
-spoken one when the exchange ends. If the review was written
-meanwhile and it is still that day, its line and its questions follow. Then what was held comes under the usual
-rules.
+saying nothing aloud. What it stopped goes to the queue, which is given at the end of your next exchange: a typed
+request once its reply is done, a spoken one when the exchange ends (when it ended at the day turn, the first one
+after it; over a restart too). First comes one line worded by the app for what happened meanwhile ("While I stood
+down: pi was stopped and 2 processes it had left running were ended; 1 calendar line went by, its block over."),
+shown, and said when `speakNotices` is on; then what was held, most urgent first, with the review's line and
+questions if it is still that day.
 
 **The look.** Grey, dim and still: every look is drawn in grey at about half its brightness and holds still where it
 rests, so the page stops drawing. JARVIS's globe stops turning and its heart is a flat dash. Normal rest is in colour
 with JARVIS's globe turning slowly and its heart a dot.
 
-**Kept** in `state.json` under `standDown`: a restart and a new overlay page keep it, look and all.
+**Kept** in `state.json` under `standDown` while it lasts, and what it held under `quiet`: a restart and a new
+overlay page keep both, look and all.
 
 **Recorded** as two log lines, with true/false and counts only: `stand_down {by, speech, request, pi, window,
 bubbles}` when it starts and `stand_down_end {by, minutes, held}` when it ends. Nothing goes in the daily note.
@@ -669,6 +670,88 @@ bubbles}` when it starts and `stand_down_end {by, minutes, held}` when it ends. 
 - `endsAtDayTurn`: `true` or `false`.
 - `waitSeconds`: 0.5 to 3. How long the words heard so far must have been the phrase alone before it counts. Shorter
   acts sooner; longer leaves more time to go on past it (a pause after "stand down" in a longer sentence).
+
+## Check-ins
+
+When a to-do's block ends, or its due time passes, Roamies asks whether it is done. Code words the question, reads
+the answer and acts on it; nothing of it reaches the model. (`checkin.mjs`, with the daily note's `daily.mjs`.)
+
+**When.** At the end of a to-do's block today ("Your block for Write methods has ended. Is it done?"), or, for a to-do
+with no block today, when its due time today passes ("Send slides was due at 11:30. Is it done?"). For to-dos this
+takes the place of the due-time nudge; reminders keep theirs. Once for each time a to-do had. At most
+`limits.checkInsPerDay` (6) a day, and none after the day's review.
+
+**Not in the middle of a block.** A block's own check-in comes at its end, even when the next block starts right
+then. One for a due time, and one asked again, waits until a block has ended or none is running.
+
+**The answers**, by button (Done, Still on it, Not yet) or by voice:
+
+- **done** ("done", "yes", "it's done", "finished"…): the to-do is marked done and its "Done" line follows in the
+  Log. A block it still had to come is taken off the calendar, so the time is free.
+- **not yet** with a time ("not yet, Friday at 10"): read the way the answers to "When will you do it?" are; the
+  block moves there, or the due time is set, with a "Rescheduled" line. "Not yet" alone, or the button, asks "When
+  will you do it?" with Leave it and Drop it, as after the review.
+- **still on it**: asked again `limits.checkInAgainMinutes` (30) later, twice at most, with a "Check-in: … still on
+  it" line. At the review it counts as still open, not missed; not done by the day turn, it needs a new time the
+  next morning.
+- **no answer**: nothing changes, and it is not kept as a pending question ("Check-in: … no answer").
+
+A to-do answered in a check-in is not asked about again at that day's review.
+
+**The Plan's boxes.** Every line of the Plan's three lists (planned, needs a new time, coming up) is a checkbox with
+the to-do's id at its end (`^td-<id>`). Tick one in Obsidian and that to-do is marked done (the recent notes are read
+every 5 minutes at most). Unticking does nothing, and the app never ticks a box after it has written the Plan.
+
+**Deadlines at risk.** An open to-do due within `limits.atRiskHours` (24) with no block that ends before its due time
+is said once for each due time it has: "Grant report is due tomorrow at 10:00 and has no time planned before then."
+
+## Speaking budget and quiet queue
+
+Everything Roamies says or shows unasked goes through one gate (`quiet.mjs`). It is given only when:
+
+1. Roamies is not stood down;
+2. its kind is switched on (`speaking.briefing`, `review`, `checkIn`, `deadlineAtRisk`, `calendarLine`, `notice`);
+3. you are not away: there has been keyboard or mouse input in the last `speaking.awayMinutes` (10; 0 is off);
+4. no other app is using a microphone, with `speaking.quietInCalls` on;
+5. fewer than `speaking.perHour` (3) things were given unasked in the last hour, spoken or shown.
+
+Anything else waits in the **quiet queue**: nothing is said, nothing is shown, and the character carries a small
+count (hidden while stood down). The log says which rule held it back, as one word: `quiet_queued {kind, why}` with
+`why` one of `stood`, `off`, `away`, `call`, `budget`, checked in that order.
+
+**Reminders you set** never go through it: they always speak (after a stand down, late) and are not counted. Neither
+does what you asked for (a reply, pi's result).
+
+**The queue is given** at the end of your next exchange (a typed request once its reply is done, a spoken one when
+the exchange ends), before the morning questions and any pending question; or when you say or type "anything
+waiting?" alone, which the app answers ("Nothing is waiting." when nothing is). Most urgent first: deadlines at risk,
+check-ins, the review, calendar lines, briefings, notices. At most `limits.queueGiveMost` (3) at a time; one line says
+how many still wait. Giving the queue doesn't count against the budget.
+
+**Out of date.** A calendar line whose block has ended, a check-in whose to-do was done or moved (or the review has
+run, or the day turned), a deadline that passed or got a block, a briefing whose window closed, a review line from
+another day: each is dropped and counted, and one line worded by the app says so before the rest ("Dropped as out of
+date: 2 calendar lines and 1 check-in."). After a stand down that line is stand down's.
+
+**Away and in a call.** Every 5 seconds the shell reads two numbers and sends them to the sidecar: the seconds since
+the last keyboard or mouse input, and whether any input device is running for some app (`src-tauri/src/presence.rs`,
+macOS only). Neither needs a permission: nothing is recorded or listened to and no app is named. Roamies' own
+listening, and 10 seconds after it, is not taken for a call. A change is logged as `presence {away, call}`, true or
+false only.
+
+**Kept** in `state.json` under `quiet` (the queue, and the last hour's count), over a restart.
+
+```json
+"speaking": { "perHour": 3, "briefing": true, "review": true, "checkIn": true, "deadlineAtRisk": true,
+              "calendarLine": true, "notice": true, "awayMinutes": 10, "quietInCalls": true }
+```
+
+- `perHour`: 0 to 30. 0: nothing is given unasked; it all waits.
+- the six kinds: `true` or `false`.
+- `awayMinutes`: 0 to 240, whole minutes. 0: off.
+- `quietInCalls`: `true` or `false`.
+
+Nothing of the queue reaches the model: not its items, its count, "anything waiting?" or the answer.
 
 ## What goes with each request
 
@@ -729,7 +812,8 @@ provider. They do when you ask about them, not with every request:
 - What the app shows you itself never goes through the provider: the list on screen, and every bubble (the first-time
   question with its titles, an overlap, a deleted task, the offer of a block), and every line a sync leaves (a
   conflict, a failed step, a to-do taken off the list).
-- A to-do that comes due: Roamies builds the nudge itself, from a fixed pattern ("Write report is due at 17:00.";
+- A reminder that comes due (since feature 25 a to-do gets a check-in instead, see Check-ins): Roamies builds the
+  nudge itself, from a fixed pattern ("Write report is due at 17:00.";
   "was due" once it is five minutes late, with the day when that isn't today), shows it and says it. No request is
   made for it and nothing about it is sent to the AI provider, whether the to-do was yours or came from Super
   Productivity. Up to three are named in one nudge; more are counted ("And 2 more are due: the list shows them.").
@@ -901,8 +985,8 @@ ways like a to-do of its own.
   spaces and a leading "the" aside), one of each, are linked instead of a second task being made; where they
   differ, the app's title and deadline are taken. Two tasks of the same title in the app are two to-dos: nothing is
   merged, because merging would mean deleting one. Asked for by that title, Roamies asks which.
-- A deadline in the app is the to-do's due time. An adopted task whose deadline had already passed gets no nudge;
-  one that comes due later is nudged like any to-do (see Safeguards).
+- A deadline in the app is the to-do's due time. An adopted task whose deadline had already passed gets no check-in;
+  one that comes due later gets one like any to-do (see Check-ins).
 - How a link came about is kept with it in `state.json`: `from: "app"` for an adopted task, nothing for one Roamies
   made; `repeats: true` for a repeating one. `calendar.adopt` is the yes; `calendar.released` lists the tasks taken
   off Roamies' list.
@@ -1154,6 +1238,10 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
 - `showcase/tauri/sidecar/standdown.mjs` (new), `sidekick.mjs`, `flow.mjs`, `calendar.mjs`, `pi.mjs`,
   `showcase/roamies/host.js`, `10-dither.js`, `jarvis.js`, `showcase/tauri/src-tauri/src/stand.rs` (new), `voice.rs`,
   `main.rs`: stand down (feature 33).
+- `showcase/tauri/sidecar/quiet.mjs` (new), `checkin.mjs` (new), `sidekick.mjs`, `daily.mjs`, `handover.mjs`,
+  `flow.mjs`, `calendar.mjs`, `answers.mjs`, `standdown.mjs`, `pi.mjs`, `showcase/roamies/host.js`, `10-dither.js`,
+  `showcase/tauri/src-tauri/src/presence.rs` (new), `main.rs`: check-ins, the speaking budget and the quiet queue
+  (features 25 and 31).
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/kokorovoice.mjs` (new): the natural voice: starts and watches the helper, its sandbox

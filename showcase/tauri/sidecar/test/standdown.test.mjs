@@ -71,7 +71,8 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   put(made);
 }
 
-// ---- the state: one log line when it starts and one when it ends, kept over a restart, and the line said at the end
+// ---- the state: one log line when it starts and one when it ends, kept over a restart; at its end what it stopped is
+// handed to the quiet queue (feature 31, quiet.test.mjs), which says it and gives what it held
 {
   let t = new Date(2026, 10, 25, 22, 0).getTime();
   const logs = [];
@@ -82,48 +83,28 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   assert.deepEqual(logs, [['stand_down', { by: 'key', speech: true, request: true, pi: false, window: false, bubbles: true }]], 'true/false only');
   assert.equal(sd.start('phrase', { speech: true }), false, 'already stood down: nothing more'); assert.equal(logs.length, 1);
   sd.add({ pi: true, processes: 2 }); sd.add({ questions: 1 }); sd.add({ pi: false, processes: 1 });
-  assert.equal(sd.caught('A line on its way.', 'concerned'), true);
-  for (let i = 0; i < STAND_CAUGHT + 5; i++) sd.caught(`line ${i}`);
   // a restart: it is still on, with what it had gathered
   const again = make();
-  assert.equal(again.on(), true); assert.deepEqual(again.state().counts, { pi: true, processes: 3, questions: 1 }); assert.equal(again.state().caught.length, STAND_CAUGHT);
-  assert.equal(again.give(), null, 'nothing is given while it lasts');
+  assert.equal(again.on(), true); assert.deepEqual(again.state().counts, { pi: true, processes: 3, questions: 1 });
   t += 95 * 60_000;
   assert.equal(again.turned(), false, 'the day has not turned');
   const ended = again.end('voice', 4);
-  assert.equal(ended.endedBy, 'voice'); assert.deepEqual(logs.at(-1), ['stand_down_end', { by: 'voice', minutes: 95, held: 4 }]);
+  assert.deepEqual(ended, { by: 'voice', minutes: 95, counts: { pi: true, processes: 3, questions: 1 } }, 'what it stopped, for the queue');
+  assert.deepEqual(logs.at(-1), ['stand_down_end', { by: 'voice', minutes: 95, held: 4 }]);
   assert.equal(again.end('voice'), null, 'once');
-  const g = again.give();
-  assert.deepEqual(g.counts, { pi: true, processes: 3, questions: 1 }); assert.equal(g.caught[0].text, 'A line on its way.'); assert.equal(g.caught[0].mood, 'concerned');
-  assert.equal(again.exchanged(), false, 'ended by a request: nothing waits for an exchange');
-  again.given();
-  assert.equal(readState(dir).standDown, undefined, 'given: forgotten'); assert.equal(make().give(), null);
+  assert.equal(readState(dir).standDown, undefined, 'ended: forgotten here'); assert.equal(make().on(), false);
   // the day turn ends it when the setting says so (calendar.dayTurnsAt, 04:00 by default)
   const sd2 = make(); t = new Date(2026, 10, 25, 23, 30).getTime();
   sd2.start('phrase');
   t = new Date(2026, 10, 26, 3, 59).getTime(); assert.equal(sd2.turned(), false, '03:59: still the same day');
   t = new Date(2026, 10, 26, 4, 0).getTime(); assert.equal(sd2.turned(), true, '04:00: the day has turned');
   put({ ...made, standDown: { ...made.standDown, endsAtDayTurn: false } }); assert.equal(sd2.turned(), false, 'endsAtDayTurn false: it lasts'); put(made);
-  sd2.add({ lines: 2 }); sd2.end('day');
-  // ended at the day turn (the owner, 2026-11-25): its line is not given then; it waits, over a restart, for the end
-  // of the owner's first exchange after, and is then given like the others
-  assert.equal(sd2.give(), null, 'not at the day turn');
-  assert.equal(make().give(), null, 'nor after a restart');
-  const sd2b = make();
-  assert.equal(sd2b.exchanged(), true, 'the first exchange after it has ended');
-  assert.deepEqual(make().give().counts, { lines: 2 }, 'now it is given, after a restart too'); assert.equal(sd2b.exchanged(), false, 'once');
-  sd2b.given();
-  // stood down again before that exchange: it ends by a request, and everything is given after it, under the usual rules
-  const sd5 = make(); sd5.start('key'); sd5.add({ lines: 1 }); sd5.end('day'); assert.equal(sd5.give(), null);
-  sd5.start('phrase'); sd5.add({ pi: true }); sd5.end('voice');
-  assert.deepEqual(sd5.give().counts, { lines: 1, pi: true }); sd5.given();
-  // nothing happened meanwhile: nothing to give
-  const sd3 = make(); sd3.start('key'); sd3.end('typed'); assert.equal(sd3.give(), null);
-  // the review written meanwhile waits with its day
-  const sd4 = make(); sd4.start('key'); sd4.reviewed('2026-11-26', 'Today: 2 done, 1 missed.'); sd4.end('voice');
-  assert.deepEqual(sd4.give().review, { key: '2026-11-26', line: 'Today: 2 done, 1 missed.' }); sd4.given();
+  assert.deepEqual(sd2.end('day').counts, {});
+  // an old state.json, from before the queue (ended, its line not given yet): not taken for a stand down that lasts
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ ...readState(dir), standDown: { on: false, since: new Date(t).toISOString(), counts: { lines: 1 }, caught: [], exchanged: false } }));
+  assert.equal(make().on(), false);
   // the logs hold no words: only these two kinds, with true/false and numbers
-  for (const [k, d] of logs) { assert.ok(['stand_down', 'stand_down_end'].includes(k)); for (const v of Object.values(d)) assert.ok(typeof v === 'boolean' || typeof v === 'number' || ['key', 'phrase', 'voice', 'typed', 'day'].includes(v), `${k}: ${v}`); }
+  for (const [k, d] of logs) { assert.ok(['stand_down', 'stand_down_end'].includes(k)); for (const v of Object.values(d)) assert.ok(typeof v === 'boolean' || typeof v === 'number' || ['key', 'phrase', 'voice', 'typed', 'day'].includes(v)); }
 }
 
 // ---- the line said when it ends, worded here
@@ -133,29 +114,30 @@ assert.equal(standSummary({ pi: true, processes: 1 }), 'While I stood down: pi w
 assert.equal(standSummary({ pi: true, processes: 3, questions: 2, lines: 1 }), 'While I stood down: pi was stopped and 3 processes it had left running were ended; 2 questions I had open were kept for later; 1 calendar line went by, its block over.');
 assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I stood down: 1 question I had open was kept for later; 4 calendar lines went by, their blocks over; the day\'s review was written in the daily note.');
 
-// ---- the calendar: what is waiting about a block that has ended is dropped and counted; the rest stays
+// ---- the calendar: stood down, its lines are taken for the quiet queue with the end of the block each is about (one
+// whose block has ended is dropped there, and counted); its questions stay on the pile for a quiet moment
 {
   let clock = new Date(2026, 10, 25, 12, 0).getTime();
   const logged = [];
-  const cal = createCalendar({ home, todos: { all: () => [], update: async () => {}, rename: async () => {}, commit: async () => {}, add: async () => ({}), adopt: async () => ({}) }, port: 1, tokenFile: path.join(home, 'no-token'), now: () => clock, log: (kind, data) => logged.push([kind, data]) });
+  const cal = createCalendar({ home, todos: { all: () => [], update: async () => {}, rename: async () => {}, commit: async () => {}, add: async () => ({}), adopt: async () => ({}) }, port: 1, tokenFile: path.join(home, 'none'), log: (k, d) => logged.push([k, d]), now: () => clock });
   const h = clock - 3600_000, later = clock + 3600_000;
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ calendar: { started: true, held: [
     { text: 'A conflict line, about no block.' },
-    { text: 'Placed, its block over.', until: h },
-    { text: 'Placed, its block still to come.', until: later },
-    { block: { todo: 'c1', title: 'x', start: h - 1800_000, minutes: 30, at: new Date(h).toISOString() } },
+    { text: 'Placed, its block over.', until: h, say: 'Placed.' },
     { block: { todo: 'c2', title: 'y', start: later, minutes: 30, at: new Date(h).toISOString() } },
     { ask: { todo: 'c3', title: 'z' } },
   ], actions: [{ id: 'a1', at: new Date(clock - 7200_000).toISOString(), todo: 'c4', title: 'Kept', start: clock - 5400_000, minutes: 30 }] } }));
-  assert.equal(cal.heldCount(), 4, 'what would stay');
-  assert.equal(await cal.dropPassed(), 2);
-  assert.deepEqual(cal.state().held.map((x) => x.text ?? x.block?.todo ?? x.ask?.todo), ['A conflict line, about no block.', 'Placed, its block still to come.', 'c2', 'c3']);
-  assert.deepEqual(logged.at(-1), ['calendar_held_passed', { lines: 2 }]);
+  assert.equal(cal.hasLines(), true);
+  const got = cal.takeHeld({ linesOnly: true });
+  assert.deepEqual(got.items, [{ text: 'A conflict line, about no block.' }, { text: 'Placed, its block over.', say: 'Placed.', until: h }]);
+  assert.deepEqual([got.asks, got.blocks], [[], []], 'no question is taken');
+  assert.deepEqual(cal.state().held.map((x) => x.block?.todo ?? x.ask?.todo), ['c2', 'c3'], 'they stay');
+  assert.equal(cal.hasLines(), false); assert.equal(cal.hasHeld(), true);
   // a kept slot whose time has passed is said in a line that carries its block's end, so it can be dropped too
   await cal.sync('timer');
   const lost = cal.state().held.find((x) => /I had kept a slot/.test(x.text ?? ''));
   assert.equal(lost.until, clock - 5400_000 + 30 * 60_000);
-  assert.equal(await cal.dropPassed(), 1);
+  assert.equal(cal.takeHeld().items.find((x) => /I had kept a slot/.test(x.text)).until, lost.until);
 }
 
 // ---- sidekick.mjs: what waits while it lasts, and what goes through
@@ -163,12 +145,15 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   const side = read('sidekick.mjs');
   assert.match(side, /const calQuiet = \(\) => calQuietBase\(\) && !stood\?\.on\(\);/, 'never a quiet moment: calendar lines, questions and the review wait');
   assert.match(side, /if \(busy \|\| queued \|\| loggingIn \|\| onboarding \|\| voiceState !== 'idle' \|\| Date\.now\(\) < lineUntil \|\| stood\?\.on\(\)\) \{ reminderRetry\(\); return; \}/, 'reminders: given late, never dropped');
-  assert.match(side, /setInterval\(\(\) => \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(stood\?\.on\(\)\) \{ standReview\(\); return; \}/, 'no briefing');
+  // feature 31: what is said unasked goes to the quiet queue while stood down: briefings, the review's line, calendar
+  // lines, notices (the queue's first rule, quiet.test.mjs)
+  assert.match(side, /if \(queue\.offer\(\{ kind: 'briefing', data: \{ kind: b\.kind \} \}\)\) runBriefing\(b\);/, 'a briefing');
+  assert.match(side, /stood: \(\) => !!stood\?\.on\(\), away: awayNow, call: callNow,/, 'the queue knows');
   assert.match(side, /async function prompt\([^)]*\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(stood\?\.on\(\)\) \{ if \(briefing\) [^\n]*else logLine\('stand_down_dropped', \{ what: 'request' \}\); return; \}/, 'no request is made');
   assert.match(side, /const ui = \(msg\) => \{\n\s*if \(standCatch\(msg\)\) return;/, 'everything for the page goes through the catch');
   assert.match(side, /const STAND_PASS = new Set\(\['list', 'esc', 'cancel_ask', 'ask_text', 'heard', 'hands', 'summon'\]\);/, 'what the owner asks for goes through');
-  assert.match(side, /settingsNotice\(uiReady && !onboarding && \(!!config\.onboarded \|\| guideClosed\) && !stood\?\.on\(\)\)/); assert.match(side, /kokoroSaid\(uiReady && !onboarding && \(!!config\.onboarded \|\| guideClosed\) && !stood\?\.on\(\)\)/);
-  assert.match(side, /if \(text\?\.trim\(\)\) \{ standUp\('typed'\); enqueue/, 'a typed request ends it'); assert.match(side, /if \(window == null\) standUp\('voice'\);/, 'and a spoken one');
+  assert.match(side, /settingsNotice\(uiReady && !onboarding && \(!!config\.onboarded \|\| guideClosed\)\)/); assert.match(side, /kokoroSaid\(uiReady && !onboarding && \(!!config\.onboarded \|\| guideClosed\)\)/); assert.match(side, /kokoroSaid = heldNotice\(text, \(t\) => unasked\(\{ kind: 'notice', text: t, mood: 'concerned', voice: true \}\)\);/, 'feature 31: notices wait in the quiet queue');
+  assert.match(side, /if \(text\?\.trim\(\)\) \{ standUp\('typed'\); if \(isWaitingAsk\(text\)\) waitingAsked\(false\); else enqueue/, 'a typed request ends it'); assert.match(side, /if \(window == null\) standUp\('voice'\);/, 'and a spoken one');
   // questions are closed (and kept) before the request they belong to is cut off, which would take them down as no answer
   const body = side.slice(side.indexOf('function standDownNow('), side.indexOf('function standUp('));
   assert.ok(body.indexOf('flow.standDown()') < body.indexOf('interruptQuietly()') && body.indexOf('flow.standDown()') < body.indexOf('pending.delete(id)'), 'questions first');
@@ -177,7 +162,7 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   assert.match(side, /if \(stood\?\.on\(\)\) ui\(\{ kind: 'stand', on: true \}\);/, 'a new page keeps the look');
   // a briefing chosen just before, waiting behind a request (the owner, 2026-11-25): marked given only once its request
   // is made, so a stand down holds it like the others (given after while its window is open, skipped when not)
-  const tick = side.slice(side.indexOf('const b = pi.briefing();'), side.indexOf('}, 60_000);'));
+  const tick = side.slice(side.lastIndexOf('const b = pi.briefing();'), side.indexOf('// Local-only build: the to-do list and Super Productivity are synced on a timer'));
   assert.ok(!tick.includes('pi.briefing.done('), 'not marked given when chosen'); assert.ok(!tick.includes("logLine('briefing'"), 'nor logged');
   assert.match(tick, /const given = \{ kind: b\.kind, given: false \};\n\s*briefingWaiting = true;/);
   assert.match(tick, /, \{ briefing: given \}\)\.then\(\(\) => \(given\.given && b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'its questions only when it was given');
@@ -185,8 +170,9 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   assert.match(side, /if \(stood\?\.on\(\)\) \{ if \(briefing\) logLine\('stand_down_held', \{ what: 'briefing', kind: briefing\.kind \}\); else logLine\('stand_down_dropped', \{ what: 'request' \}\); return; \}\n\s*if \(briefing\) \{ pi\.briefing\.done\(briefing\.kind\); briefing\.given = true; logLine\('briefing', \{ kind: briefing\.kind \}\); \}/, 'held while stood down, marked given when made');
   assert.match(side, /if \(briefing\) briefingWaiting = false;/, 'its turn over, the next minute may choose it again');
   // the line left by a stand down that ended at the day turn: after a typed request's reply, or a spoken exchange's end
-  assert.match(side, /if \(own && !flow\.spoken\(\)\) stood\?\.exchanged\(\);/); assert.match(side, /ended: \(\) => stood\?\.exchanged\(\),/);
-  assert.match(side, /const said = !!line && noticesOn\(\);/, 'said under the usual rule');
+  assert.match(side, /if \(own && !flow\.spoken\(\)\) queue\?\.exchanged\(\);/); assert.match(side, /ended: \(\) => queue\?\.exchanged\(\),/);
+  assert.match(side, /const said = !!g\.summary && noticesOn\(\);/, 'said under the usual rule');
+  assert.match(side, /queue\.prune\(\);[^\n]*\n\s*const ended = stood\.end\(by, queue\.count\(\) \+ due\);\n\s*ui\(\{ kind: 'stand', on: false \}\);\n\s*if \(ended\) queue\.stoodDown\(ended\.counts\);/, 'what it stopped goes to the queue');
   assert.match(side, /else if \(config\.onboarded && !stood\?\.on\(\)\) ui\(\{ kind: 'greet' \}\);/, 'and is not greeted');
 }
 

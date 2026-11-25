@@ -73,12 +73,14 @@ export const sameKey = (q) => `${q?.kind}:${JSON.stringify((SAME[q?.kind] ?? ((d
  * onPending(event, question): 'pending' | 'answered' | 'dropped'. The daily note's hook (feature 18); unused for now.
  * actions(): what is kept until Super Productivity is open (calendar.mjs), [{ at, brief }]. show_pending and the
  *   morning briefing's note list them. They are not questions: nothing here asks or runs them.
+ * queue: { due(), run() }. Feature 31: when an exchange ends and due() is true, run() gives the quiet queue
+ *   (quiet.mjs), before anything else that follows an exchange.
  * afterExchange: { due(), run() }. Feature 18: when an exchange ends and due() is true, run() asks its questions
  *   (the daily note's morning questions) as a series, before any pending question is raised.
  * ended(by): an exchange started by voice has ended (feature 33: the line left by a stand down that ended at the day
  *   turn waits for it).
  */
-export function createFlow({ home = os.homedir(), settings = () => loadSettings(home), speak = async () => {}, announce = async () => {}, listen = () => {}, cancel = () => {}, bubbles = () => [], idle = () => true, onWindow = () => {}, onPending = () => {}, actions = () => [], afterExchange = { due: () => false, run: async () => {} }, ended = () => {}, log = () => {}, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) } } = {}) {
+export function createFlow({ home = os.homedir(), settings = () => loadSettings(home), speak = async () => {}, announce = async () => {}, listen = () => {}, cancel = () => {}, bubbles = () => [], idle = () => true, onWindow = () => {}, onPending = () => {}, actions = () => [], queue = { due: () => false, run: async () => {} }, afterExchange = { due: () => false, run: async () => {} }, ended = () => {}, log = () => {}, now = () => Date.now(), timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) } } = {}) {
   let ex = null; // the exchange started by voice, while it is open: { gen, timer }
   let raising = false; // a pending question is being asked again
   let replyQ = null; // the model's own question, until its reply has finished playing
@@ -192,8 +194,11 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
     return true;
   }
   const afterDue = () => { try { return !!afterExchange.due(); } catch { return false; } };
-  /** An exchange has ended: the questions that follow one, then the oldest pending question. */
+  const queueDue = () => { try { return !!queue.due(); } catch { return false; } };
+  /** An exchange has ended: the quiet queue (feature 31), the questions that follow one, then the oldest pending
+   *  question. */
   async function wrapUp(skip) {
+    if (queueDue()) { log('after_exchange', { what: 'queue' }); await Promise.resolve(queue.run()).catch((e) => console.error('quiet queue', e)); }
     if (afterDue()) { log('after_exchange', {}); await series(() => afterExchange.run()).catch((e) => console.error('after exchange', e)); }
     return raise(skip);
   }
@@ -201,7 +206,7 @@ export function createFlow({ home = os.homedir(), settings = () => loadSettings(
   /** After the closing line: the microphone and the request that carried the phrase may need a moment to settle. */
   async function raiseSoon(skip, tries = 10) {
     if (ex) return; // they went on talking: a new exchange is open, and its own end raises the question
-    if (!raising && !win && !idle() && tries > 0 && (pending().some((x) => !skip.has(x.id)) || afterDue())) { timers.set(() => { raiseSoon(skip, tries - 1).catch((e) => console.error('pending question', e)); }, 1000); return; }
+    if (!raising && !win && !idle() && tries > 0 && (pending().some((x) => !skip.has(x.id)) || afterDue() || queueDue())) { timers.set(() => { raiseSoon(skip, tries - 1).catch((e) => console.error('pending question', e)); }, 1000); return; }
     await wrapUp(skip);
   }
 

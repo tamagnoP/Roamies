@@ -97,7 +97,7 @@ assert.equal(state().adopt, false);
 await cal.sync('timer'); assert.equal(cal.adoptable(), 13);
 assert.equal(list.length, n, 'no to-do is made before the yes'); assert.deepEqual(writes(mark), []); assert.equal(Object.keys(state().links).length, 2);
 assert.ok(cal.others().some((o) => o.title === 'Dentist') && cal.others().every((o) => Object.keys(o).join() === 'title,start,minutes,done'));
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] });
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [], blocks: [] });
 
 // ---- 2. the first time: the count, the first ten titles, "and N more"; a yes before anything is linked
 answer = null;
@@ -131,13 +131,13 @@ assert.equal(linkOf(todoOf(standup)).repeats, true, 'a repeating task is adopted
 assert.equal(todoOf(child), null); assert.equal(todoOf(doneOne), null); assert.ok(!list.some((c) => /figures|Already done|Archived/.test(c.text) || !c.text.trim()));
 assert.deepEqual(cal.others().filter((o) => !o.done).map((o) => o.title), ['Thesis chapter: figures', ''], 'a sub-task still counts as taken time; an adopted task is no longer "another task"');
 assert.deepEqual(logged.filter((l) => l.kind === 'calendar_adopted').map((l) => l.data), [{ tasks: 13, byTitle: 0, repeating: 1 }], 'the log has how many, never a title');
-assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] }, 'no block is offered for an adopted task, and nothing else is said');
+assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [], blocks: [] }, 'no block is offered for an adopted task, and nothing else is said');
 
 // ---- 3. afterwards: a task added in the app is adopted at the next sync, without a bubble or a line
 const later = hand('Added later', { dueWithTime: at(17, 14), timeEstimate: 45 * M });
 n = list.length; asked.length = 0; mark = app.log.length;
 await cal.sync('timer');
-assert.equal(list.length, n + 1); assert.equal(todoOf(later).text, 'Added later'); assert.equal(asked.length, 0); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], asks: [], offers: [], blocks: [] }); assert.deepEqual(writes(mark), []);
+assert.equal(list.length, n + 1); assert.equal(todoOf(later).text, 'Added later'); assert.equal(asked.length, 0); assert.deepEqual(cal.takeHeld(), { lines: [], notices: [], items: [], asks: [], offers: [], blocks: [] }); assert.deepEqual(writes(mark), []);
 await cal.sync('timer'); assert.equal(list.length, n + 1, 'once: a task is one to-do');
 
 // ---- 4. the pair is synced both ways like any other; only the seven fields are written, and only what changed here
