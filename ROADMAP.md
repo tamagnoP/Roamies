@@ -37,7 +37,7 @@ Last updated: 2026-11-21.
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
-| 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). Next: the page rebuild without the orb moving (`rebuild-still`, built 2026-11-25, pushed, not merged; waiting for the owner's measured rebuild) | `local-only` |
+| 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
 | 25 | Check-ins on progress | Agreed, not designed; after 18 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
@@ -1413,6 +1413,8 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   higher and 72 px to the right on a 1440 × 900 screen, and the next frame worked it out again with the small radius and glided there.
   Settle now uses the newest size, edges and radius, and for `SETTLE_HOLD_SECONDS` (3) any change of the spot is
   applied at once; each change is measured with its cause. The test fails on the old code.
+- **2026-11-25, later (feature 24, the owner).** The orb did not move at the page rebuild on the installed
+  `rebuild-still`. Merge approved: `test:all` passed (449 s), `rebuild-still` fast-forwarded into `local-only`.
 
 ## 6. Still to test
 
@@ -1427,10 +1429,10 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   character sits where it was dragged; not while a question is on screen or an answer window is open. A question
   kept in `state.json` doesn't hold it off and is asked again at the end of the next exchange. (The live run on
   `daf228f` quit 2.5 minutes after the last reply, before its 3-minute rebuild.)
-- [ ] Feature 24, `rebuild-still`, after an install, with `"measurePageRebuild": true` in `settings.json`: one
+- [x] Feature 24, `rebuild-still`, after an install, with `"measurePageRebuild": true` in `settings.json`: one
   rebuild watched; the orb does not move. If it does, the `rebuild_measure` lines of that rebuild from
   `~/.gg/sidekick/logs` (the `created` frame against the old windows' `old` frame, any `home` row after `place
-  settle`, and `page_drawn` against `retire`).
+  settle`, and `page_drawn` against `retire`). Done 2026-11-25: it did not move.
 - [ ] Features 16 and 21a on the Mac, after an install (none of it has been heard in the app): a reply in
   `bm_george`; the Mac's voice while the helper loads at start-up; a beat before a slow step, with no words from the
   model before it; a long sentence cut at a clause without an audible seam; talking over a reply; the answer window
