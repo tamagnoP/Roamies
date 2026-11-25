@@ -122,13 +122,13 @@ export function parsePartTwo(text, { known = () => false } = {}) {
 
 const STOP = new Set(['a', 'an', 'the', 'to', 'of', 'for', 'and', 'or', 'on', 'in', 'at', 'with', 'about', 'still', 'whether', 'if', 'is', 'be', 'it', 'their', 'his', 'her', 'my', 'your']);
 const bag = (t) => new Set(String(t ?? '').toLowerCase().replace(/['’`]/g, '').split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w)));
-/** Whether a new "Left open" line is one of the open items already: the same words (small words aside), one's words
- *  all in the other's, or at least 70 % of their words shared. */
+/** Whether a new "Left open" line is one of the open items already: the same words (small words aside), or one's
+ *  words all in the other's. Nothing looser: a duplicate is harmless, a lost item is not. */
 export function sameItem(a, b) {
   const x = bag(a), y = bag(b);
   if (!x.size || !y.size) return oneLine(a).toLowerCase() === oneLine(b).toLowerCase();
   const both = [...x].filter((w) => y.has(w)).length;
-  return both === x.size || both === y.size || both / new Set([...x, ...y]).size >= 0.7;
+  return both === x.size || both === y.size;
 }
 
 /** The new conversation's first message: Decided, Worth remembering, and the open items with their ids, oldest

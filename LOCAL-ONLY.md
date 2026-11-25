@@ -769,8 +769,8 @@ after.
   - A day with no conversation makes no request. After a gap of several days, the new conversation gets the most
     recent handover and the open items.
 - **Open items.** Each new "Left open" line becomes an open item, kept in `state.json` under `handover` with its
-  day. A line that matches an open item makes nothing: the same words (small words aside), all of one's words in
-  the other's, or at least 70 % of their words shared. The AI lists only new lines; the open items are carried
+  day. A line that matches an open item makes nothing: the same words (small words aside), or all of one's words
+  in the other's. Nothing looser, since a duplicate is harmless and a lost item is not. The AI lists only new lines; the open items are carried
   from one handover to the next by code. An item is closed, with one ticked line in that day's Log
   (`- [x] HH:MM Closed: … (how)`; earlier notes are not rewritten), when:
   - the to-do or reminder it is about is done;

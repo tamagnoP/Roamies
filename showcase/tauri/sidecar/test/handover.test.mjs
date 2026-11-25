@@ -33,6 +33,7 @@ assert.ok(sameItem('Decide on the venue for the retreat', 'Decide the retreat ve
 assert.ok(sameItem('Email the committee', 'Email the committee about the extension'), 'all of one\'s words in the other');
 assert.ok(!sameItem('Ask Bo about the reagents', 'Order the reagents'));
 assert.ok(!sameItem('Book the room', 'Book the flights'));
+assert.ok(!sameItem('Send Ana the signed travel form today', 'Send Ana the signed travel form tomorrow'), 'most words shared is not enough: kept as a new item');
 
 // ---- the prompt and what goes with it: the ending conversation and the open items' text, nothing else
 assert.match(handoverPrompt('Tiago'), /^You write the end-of-day handover for a conversation between Tiago/);
