@@ -43,6 +43,7 @@ import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSett
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
+import { createDaily, isReviewAsk } from './daily.mjs'; // Local-only build (feature 18): the daily note
 import { WAKE_BEFORE_BRIEFING_MINUTES, createKokoro, voiceFor as kokoroVoiceFor } from './kokorovoice.mjs'; // Local-only build (feature 16): the natural voice
 import { PERSONA_DEFAULT, addressRule, createAddressClock, nameRule, opening, personaText, restyle, unaddressed } from './persona.mjs'; // Local-only build (feature 21a): the personality
 import { createAnswers } from './answers.mjs'; // Local-only build: yes/no bubbles that take a spoken answer
@@ -388,7 +389,7 @@ const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('se
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
-const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data) });
+const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title) => dailyDo('note', () => daily.noted(title)) });
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
@@ -407,6 +408,33 @@ const cal = createCalendar({
     adopt: async (text, due) => { const c = await addCommitment(text, due, 'commitment', { reminded: due !== null && due <= Date.now() }); menu(); scheduleReminders(); return c; }, // a task taken over from Super Productivity: added without the list being put on screen
   },
 });
+// Local-only build (feature 18): the daily note (daily.mjs). It reads the to-do list (with when each was finished) and
+// the blocks the calendar side knows; it never makes a request to the model.
+const daily = createDaily({
+  home: HOME, userName, log: (kind, data) => logLine(kind, data), blocks: () => cal.blocks(),
+  todos: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, kind: c.kind ?? 'commitment', status: 'open', due: c.due ?? null, doneAt: null })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, kind: i.kind, status: 'done', due: i.due ?? null, doneAt: i.doneAt ?? null }))]; },
+});
+// A failure of the daily note is logged once for each reason, never with a title, and never stops anything else.
+let dailyFailed = '';
+function dailyDo(what, fn) {
+  try { const out = fn(); dailyFailed = ''; return out; } catch (e) {
+    const why = String(e?.message ?? e).slice(0, 200);
+    if (why !== dailyFailed) { dailyFailed = why; logLine('daily_failed', { what, error: why }); }
+    return null;
+  }
+}
+// The day's review (daily.mjs): at "calendar.reviewAt", or when they ask for it. Written in today's note; the counts
+// are said in words worded by the app.
+let reviewing = false;
+async function dayReview(by) {
+  if (reviewing) return;
+  reviewing = true;
+  try {
+    const r = dailyDo('review', () => daily.review({ by }));
+    if (!r) { const line = 'I couldn\'t write the day\'s review in the daily note: the activity log says why.'; say(line, 'concerned'); await lineDone(forVoice(line)); return; }
+    say(r.line, 'happy'); await lineDone(forVoice(r.line));
+  } catch (e) { console.error('daily review', e); } finally { reviewing = false; }
+}
 // What a sync has to say when nobody asked (a clash, a task deleted in the app, the first-time question) waits until
 // nothing else is going on: no reply being made or spoken, nobody talking, no bubble waiting for an answer. It is
 // shown in a bubble then, and never dropped (it is kept in state.json until shown). Feature 22: inside an exchange
@@ -1797,6 +1825,8 @@ async function onSpoken(text, area, window = null) {
   // it, anything else leaves it open. Either way no reply follows these words, so the shell is told they were dealt
   // with ("heard"): the listening pill by the cursor goes, instead of waiting for an answer that isn't coming.
   if (pi.heard(text) || answers.heard(text)) { ui({ kind: 'heard' }); return; }
+  // Local-only build (feature 18): "review my day" (daily.mjs, said alone) is the app's to answer, not the model's.
+  if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); flow.start(); logLine('review_asked', {}); dayReview('asked').catch((e) => console.error('daily review', e)); return; }
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);
@@ -2118,9 +2148,12 @@ setInterval(() => {
   try { if (pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
   try {
     if (busy || queued || loggingIn || onboarding || pi.busy() || !signedIn.size || ![...signedIn.values()].some(Boolean)) return;
+    // Local-only build (feature 18): the day's review, when its time has come and nothing else is going on.
+    if (!reviewing && daily.reviewDue() && calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window()) { dayReview('time').catch((e) => console.error('daily review', e)); return; }
     const b = pi.briefing();
     if (!b) return;
     pi.briefing.done(b.kind);
+    if (b.kind === 'morning') dailyDo('plan', () => daily.ensure()); // feature 18: the morning briefing writes the day's Plan
     logLine('briefing', { kind: b.kind });
     cal.sync('briefing').catch(() => {}).then(() => (b.kind === 'morning' ? flow.tidy() : null)).catch(() => {}).finally(() => enqueue(`${b.kind === 'morning' ? `${b.note}${cal.dayNote()}` : b.note}${b.kind === 'morning' ? flow.note() : ''}`)); // Local-only build: the to-do list is in step with Super Productivity first; the morning one also names the questions still pending (flow.mjs)
   } catch (e) { console.error('briefing', e); }
@@ -2134,3 +2167,5 @@ cal.startup().catch((e) => console.error('calendar', e));
   setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(calTick); }, wait * 1000);
 })();
 setInterval(calShow, 3000);
+// Local-only build (feature 18): to-dos finished since the last check get their Done line in the daily note.
+setInterval(() => dailyDo('tick', () => daily.tick()), 30_000);

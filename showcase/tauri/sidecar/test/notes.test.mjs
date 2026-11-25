@@ -98,6 +98,14 @@ fs.mkdirSync(path.join(vault, 'Papers', 'Deep'), { recursive: true }); fs.writeF
 assert.equal(await tool('write_note').execute({ title: 'Inner', content: 'more', append: true }), 'Added to the note "Inner".', 'a note in a real folder is added to');
 assert.ok(read('Papers/Deep/Inner.md').endsWith('inner\n\n## 2026-11-12 14:30\n\nmore\n'));
 
+// Feature 18: each note made or added to is told to the daily note, by its title.
+const told = [];
+const notes2 = createNotes({ home, userName: 'Tiago', now: () => clock, onNote: (t) => told.push(t) });
+await notes2.tools.find((t) => t.name === 'write_note').execute({ title: 'Told once', content: 'x' });
+await notes2.tools.find((t) => t.name === 'write_note').execute({ title: 'told once', content: 'y', append: true });
+await assert.rejects(notes2.tools.find((t) => t.name === 'write_note').execute({ title: 'Told once', content: 'z' }));
+assert.deepEqual(told, ['Told once', 'Told once'], 'made and added to; a refused one is not told');
+
 // A vault set outside the home folder is refused.
 fs.writeFileSync(path.join(home, 'Documents', 'roamies-pi', 'settings.json'), JSON.stringify({ vault: '/tmp' }));
 await assert.rejects(tool('write_note').execute({ title: 'a', content: 'b' }), /inside the home folder/);

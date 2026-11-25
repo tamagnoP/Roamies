@@ -292,7 +292,8 @@ export const startOfDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 
 export function listItems(now = Date.now()) {
   const today = startOfDay(now), tomorrow = startOfDay(today + 36 * 36e5);
   const shown = loadMemory().commitments.filter((c) => c.status === 'open' || (c.status === 'done' && (c.doneAt ?? 0) >= today));
-  const item = (c) => ({ id: c.id, text: c.text, due: c.due, done: c.status === 'done', overdue: c.status === 'open' && !!c.due && c.due < now, kind: c.kind ?? 'commitment' });
+  // Local-only build (feature 18): doneAt, for the daily note's Done lines.
+  const item = (c) => ({ id: c.id, text: c.text, due: c.due, done: c.status === 'done', overdue: c.status === 'open' && !!c.due && c.due < now, kind: c.kind ?? 'commitment', doneAt: c.status === 'done' ? c.doneAt ?? null : null });
   const order = (a, b) => ((a.status === 'done') - (b.status === 'done')) || ((a.due ?? Infinity) - (b.due ?? Infinity)) || a.createdAt - b.createdAt;
   const isToday = (c) => (c.status === 'done' ? (c.due == null || c.due < tomorrow) : c.due != null && c.due < tomorrow);
   return {

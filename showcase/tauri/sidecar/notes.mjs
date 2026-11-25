@@ -92,7 +92,9 @@ function endsWithNewline(file, size) {
   return b[0] === 10;
 }
 
-export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now() } = {}) {
+export function createNotes({ home = os.homedir(), userName = 'the user', log = () => {}, now = () => Date.now(), onNote = () => {} } = {}) {
+  // onNote(title): a note was made or added to (feature 18: its line in the daily note's Log).
+  const told = (title) => { try { onNote(title); } catch (e) { console.error('daily note', e); } };
   const box = createVault({ home, userName });
   const vault = () => box.root();
 
@@ -153,11 +155,13 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
             throw e;
           }
           log('note_append', { chars: body.length });
+          told(there.title);
           return `Added to the note "${there.title}".`;
         }
         // Never writes over a file that appeared meanwhile.
         if (!box.create(`${name}.md`, `---\ncreated: ${when}\n---\n\n${body}\n`)) throw new Error(`Something called "${name}.md" is already in the vault and isn't a note I can add to. Pick another title.`);
         log('note_new', { chars: body.length });
+        told(name);
         return `Saved the note "${name}" in the vault.`;
       },
     },

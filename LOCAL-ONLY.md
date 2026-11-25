@@ -247,6 +247,7 @@ setup guide is open, the bubble waits until it closes.
   "voice": "",
   "voices": { "jarvis": "Daniel (Enhanced)" },
   "vault": "~/Documents/roamies-vault",
+  "dailyFolder": "Daily",
   "autoListenQuestions": true,
   "closingReply": "Any time.",
   "speakNotices": true,
@@ -286,7 +287,8 @@ setup guide is open, the bubble waits until it closes.
     "kokoroSentenceChars": 120,
     "pageRebuildQuietMinutes": 15
   },
-  "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60 }
+  "calendar": { "dayStart": "09:00", "dayEnd": "18:00", "lunch": ["12:30", "13:30"], "gapMinutes": 0, "syncSeconds": 60,
+                "dayTurnsAt": "04:00", "reviewAt": "18:00" }
 }
 ```
 
@@ -308,7 +310,8 @@ setup guide is open, the bubble waits until it closes.
 - `routines`: phrases that run a list of steps. Say the phrase and Roamies does each step in order with its usual
   tools, rules and confirmations, stopping at the first one that fails or is refused.
 - `briefings`: times, as `"HH:MM"`, for a morning rundown (your to-dos, and what pi was asked yesterday) and an
-  end-of-day summary (saved to the vault as "Daily log <date>"). Each is given once a day, when Roamies is idle: the
+  end-of-day summary (what pi was asked that day; since feature 18 it writes no note: the daily note replaces the
+  "Daily log <date>" notes, which stay as they are). Each is given once a day, when Roamies is idle: the
   morning one within four hours of its time (`limits.morningBriefingWindowHours`), the evening one any time after it. Leave a time out to switch it off.
 - `sandbox`: `true` unless you write `false`. Switch it off only if it breaks pi; the Send bubble then warns on
   every hand-off (see "The sandbox pi runs in").
@@ -326,6 +329,8 @@ setup guide is open, the bubble waits until it closes.
   `"bottom-left"`; anything else written there means the default. An edit shows from your next request.
 - `neverLook`: apps Roamies never screenshots, reads or works in (see Safeguards). `[]` switches the check off.
 - `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
+- `dailyFolder`: the folder in the vault for the daily notes (see "The daily note"). Default `"Daily"`. One plain
+  folder name: no slash, not starting with a dot.
 - `voice`: the Mac voice every character speaks in; `""` means the system voice.
 - `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
   `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
@@ -415,6 +420,8 @@ setup guide is open, the bubble waits until it closes.
   | `lunch` | ["12:30", "13:30"] | two times in order, or `[]` or `null` | The break a day plan keeps free; `[]` or `null` means no break. |
   | `gapMinutes` | 0 | 0 to 240, whole | Minutes left between blocks in a day plan. |
   | `syncSeconds` | 60 | 15 to 3600 | How often the to-do list is synced with Super Productivity. |
+  | `dayTurnsAt` | "04:00" | a time, not after `dayStart` | When one day's daily note ends and the next one's starts (see "The daily note"). Before it, it is still the day before. |
+  | `reviewAt` | `dayEnd`'s value | a time, or `""` | When the day's review is written and said. `""`: only when you ask for it. Left out, it is `dayEnd`'s value. |
 
 `settings.default.json`: the reference described above. Written by Roamies at every start, never read by it.
 
@@ -677,6 +684,31 @@ Everything Roamies writes in the vault goes through one writer in `notes.mjs` (`
 only make a file that isn't there or add to the end of one that is, on a line of its own. It never writes over,
 renames or deletes anything. It refuses a path with an empty part, a part that starts with a dot, or `..`. It also
 refuses a folder or file that is a link, and anything that would land outside the vault.
+
+## The daily note
+
+Feature 18. Roamies keeps one note per day in the vault: `Daily/YYYY-MM-DD.md` (the `dailyFolder` setting). Code
+alone writes it, through the vault's one writer. It is only ever added to, so what you type in it stays. A day starts
+at `calendar.dayTurnsAt` (04:00): at 02:00 it is still the day before. The note links to the day before and the day
+after.
+
+- **Plan.** Written once a day, by the morning briefing, or by the first thing written in the note that day. It holds:
+  - the to-dos with a block or a due time that day, with "(done)" for one already finished;
+  - **Needs a new time:** open to-dos whose every time (block and due time) has passed, oldest first;
+  - **Coming up:** deadlines in the next 14 days.
+- **Log.** A line when a to-do is finished, whether in Roamies or in Super Productivity (seen at the next check,
+  every 30 seconds), and when a note is taken (`[[its title]]`). A Log line after another section starts a new
+  `## Log`.
+- **Review.** At `calendar.reviewAt` (18:00), or when you say "review my day" (or another phrase in
+  `reference.dailyNote.reviewPhrases`) on its own. It lists each planned to-do as **done**, **missed** (its time is
+  over) or **still open today** (its time is still ahead). Two sentences worded by code follow. Roamies then says
+  the counts. A second review adds `## Review update (HH:MM)` with only what changed.
+- Only to-dos count. Reminders and timers never appear, and neither does pi's work (it stays in the records folder).
+- Nothing in the daily note is sent to the AI, and making it involves no request. "Review my day" is answered by the
+  app and never reaches the model. The activity log records counts only (`daily_plan`, `daily_log`,
+  `daily_review`); a failure is logged once per reason (`daily_failed`).
+- `state.json` keeps, under `daily`, what was written for each of the last 14 days. This stops a line being written
+  twice and lets the review find a to-do finished earlier in the day.
 
 ## To-dos in Super Productivity
 
@@ -954,7 +986,9 @@ Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition
   words, closing phrases, the "Heard" line.
 - `showcase/tauri/sidecar/flow.mjs` (new): the exchange, the answer window, pending questions, `show_pending`.
 - `showcase/tauri/sidecar/store.mjs`: two functions added: `renameCommitment`, so a title changed in the app reaches
-  the list, and `makeCommitment`, which turns a reminder into a to-do.
+  the list, and `makeCommitment`, which turns a reminder into a to-do. `listItems` also gives `doneAt` for a finished
+  item (feature 18).
+- `showcase/tauri/sidecar/daily.mjs` (new): the daily note (feature 18).
 - `showcase/tauri/sidecar/reference.mjs` (new): writes `settings.default.json` and words the start-up bubble.
 - `showcase/tauri/sidecar/localvoice.mjs` (new): the built-in voice.
 - `showcase/tauri/sidecar/kokorovoice.mjs` (new): the natural voice: starts and watches the helper, its sandbox

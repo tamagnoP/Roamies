@@ -267,7 +267,7 @@ assert.ok(side.includes('if (!adoptOffered && cal.adoptable()) {'), 'the first-t
 assert.ok(side.includes('for (const o of offers) {') && side.includes('await cal.askOffer(o)'));
 assert.ok(/book: \(\{ todo, title \}\) => enqueue\(`\(System, not \$\{userName\}: in a bubble of the app's own, \$\{userName\} has just said yes to booking a calendar block for the to-do "\$\{title\}" \[\$\{todo\}\]/.test(side));
 const pi = fs.readFileSync(new URL('../pi.mjs', import.meta.url), 'utf8');
-assert.ok(pi.includes('from the outline at the end of this note (its numbers and today\'s plan; call no tool, and name no to-do that isn\'t in it)') && pi.includes('call list_commitments with no filter first: it gives the outline'));
+assert.ok(pi.includes('from the outline at the end of this note (its numbers and today\'s plan; call no tool, and name no to-do that isn\'t in it)') && pi.includes('The app writes the day\'s review in their daily note itself: write no note, and call no tool.'), 'the evening briefing names no to-do and writes no note (feature 18)');
 
 server.close(); server.closeAllConnections();
 console.log('adoption tests: passed');

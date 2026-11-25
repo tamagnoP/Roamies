@@ -19,6 +19,7 @@ import { CLOSING_PHRASES, FILLER_WORDS, MOVE_WORDS, NEW_WORDS, NO_WORDS, SECOND_
 import { WAKE_BEFORE_BRIEFING_MINUTES } from './kokorovoice.mjs'; // feature 24: shown in settings.default.json
 import { MEASURE_SECONDS, SETTLE_HOLD_SECONDS } from './rebuild.mjs'; // feature 24, fix 6: shown in settings.default.json
 import { CHFLAGS, EXTENSION, PS, PS_ARGS, RECORD, START_SLACK, endedNotice, offNotice, prepareLeftovers } from './leftovers.mjs'; // feature 24
+import { COMING_DAYS, KEEP_DAYS, REVIEW_PHRASES } from './daily.mjs'; // feature 18: shown in settings.default.json
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -329,7 +330,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -373,6 +374,7 @@ const CLEAN = {
   voice: when(isStr),
   voices: (v, d) => { if (!isObj(v)) return [d, false]; const kept = Object.entries(v).filter(([, name]) => isStr(name)); return [Object.fromEntries(kept), kept.length === Object.keys(v).length]; },
   vault: when(full),
+  dailyFolder: when((v) => isStr(v) && /^[^/\\:*?"<>|#^[\]\u0000-\u001f]{1,60}$/.test(v) && !v.startsWith('.') && v.trim() === v),
   neverLook: when(strs),
   sandbox: when((v) => typeof v === 'boolean'),
   readOnly: list, toolFolders: list, toolFoldersOff: list, docker: list,
@@ -397,6 +399,11 @@ export const CALENDAR = {
   lunch: { default: ['12:30', '13:30'], ok: (v) => v === null || (Array.isArray(v) && (v.length === 0 || (v.length === 2 && clock(v[0]) !== null && clock(v[1]) !== null && clock(v[0]) < clock(v[1])))) },
   gapMinutes: { default: 0, min: 0, max: 240, ok: (v) => whole(v, 0, 240) },
   syncSeconds: { default: 60, min: 15, max: 3600, ok: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 15 && v <= 3600 },
+  // Feature 18. dayTurnsAt: when one day's note ends and the next one's starts (and, later, the conversation turns
+  // over); not after dayStart. reviewAt: when the day's review is written and its questions asked; "" for only when
+  // asked. When it is missing it is dayEnd's value.
+  dayTurnsAt: { default: '04:00', ok: (v) => clock(v) !== null },
+  reviewAt: { default: '18:00', ok: (v) => v === '' || clock(v) !== null },
 };
 function calendarDefaults() { return Object.fromEntries(Object.entries(CALENDAR).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : v.default])); }
 
@@ -449,6 +456,11 @@ export function loadSettings(home) {
     if (clock(cal.dayStart) >= clock(cal.dayEnd)) {
       for (const name of ['dayStart', 'dayEnd']) { cal[name] = CALENDAR[name].default; if (!invalid.some((i) => i.name === `calendar.${name}`)) invalid.push({ name: `calendar.${name}`, using: cal[name] }); }
     }
+    if (!Object.hasOwn(set.calendar, 'reviewAt')) cal.reviewAt = cal.dayEnd;
+    if (clock(cal.dayTurnsAt) > clock(cal.dayStart)) {
+      cal.dayTurnsAt = clock(CALENDAR.dayTurnsAt.default) <= clock(cal.dayStart) ? CALENDAR.dayTurnsAt.default : '00:00';
+      if (!invalid.some((i) => i.name === 'calendar.dayTurnsAt')) invalid.push({ name: 'calendar.dayTurnsAt', using: cal.dayTurnsAt });
+    }
   }
   // kokoro and persona: part by part, the same way.
   const parts = {};
@@ -462,7 +474,7 @@ export function loadSettings(home) {
     }
   }
   parts.kokoro.python = parts.kokoro.python.trim(); // as written: it is used only if it is a full path (kokorovoice.mjs)
-  const calendar = { dayStart: clock(cal.dayStart), dayEnd: clock(cal.dayEnd), lunch: cal.lunch?.length ? cal.lunch.map(clock) : null, gapMinutes: cal.gapMinutes, syncSeconds: cal.syncSeconds };
+  const calendar = { dayStart: clock(cal.dayStart), dayEnd: clock(cal.dayEnd), lunch: cal.lunch?.length ? cal.lunch.map(clock) : null, gapMinutes: cal.gapMinutes, syncSeconds: cal.syncSeconds, dayTurnsAt: clock(cal.dayTurnsAt), reviewAt: cal.reviewAt === '' ? null : clock(cal.reviewAt) };
   // projects: a list of folders (named by their last part), or { name: folder }.
   const listed = Array.isArray(set.projects) ? set.projects.map((p) => [base(expand(p, home)), p]) : Object.entries(set.projects);
   // The settings folder itself used to be pi's default project. It no longer can be one (pi could rewrite these
@@ -492,7 +504,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -1020,7 +1032,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       return { kind: 'morning', note: `(System, not ${userName}: it's time for the morning briefing they set up. In a few short spoken sentences, in character: greet them, say how their to-do list stands and what is planned today, from the outline at the end of this note (its numbers and today's plan; call no tool, and name no to-do that isn't in it), and what pi worked on yesterday, from this list. Don't read the list out line by line.)\nWhat pi was asked yesterday:\n${list(tasksOn(y))}` };
     }
     if (due('evening', 24 * 60)) {
-      return { kind: 'evening', note: `(System, not ${userName}: it's time for the end-of-day summary they set up. Save a note titled "Daily log ${today}" with write_note (append true): a short Markdown summary of what pi was asked today, from this list, and of how their to-do list stands (call list_commitments with no filter first: it gives the outline, the numbers and today's plan, and that is all that goes in the note). Then tell them in one or two spoken sentences that the day's log is saved and what stood out. No other tools.)\nWhat pi was asked today:\n${list(tasksOn(d))}` };
+      return { kind: 'evening', note: `(System, not ${userName}: it's time for the end-of-day summary they set up. Tell them in one or two spoken sentences what pi was asked today, from this list, and what stood out. The app writes the day's review in their daily note itself: write no note, and call no tool.)\nWhat pi was asked today:\n${list(tasksOn(d))}` };
     }
     return null;
   }
@@ -1059,7 +1071,7 @@ export function codeReference() {
     kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts', sleepAfterMinutes: { min: KOKORO.sleepAfterMinutes.min, max: KOKORO.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps', wakes: `on the talk key, an answer window, a spoken request, and ${WAKE_BEFORE_BRIEFING_MINUTES} minutes before a briefing; meanwhile the Mac's voice speaks` } },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],
-    calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max } },
+    calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max }, dayTurnsAt: 'HH:MM, not after dayStart: when one day\'s note ends and the next one\'s starts', reviewAt: 'HH:MM, or "" for only when asked; when it is missing it is dayEnd\'s value' },
     superProductivity: {
       address: `http://${SP.host}:${SP.port}`, tokenFile: `${h}/${SP.tokenFile}`, tokenKept: 'read from that file for each request; never stored, logged or shown',
       requestsSent: [...SP.requests], neverSent: 'DELETE',
@@ -1099,6 +1111,7 @@ export function codeReference() {
     dontSendWords: [...DONT_WORDS],
     spokenAnswers: { yes: [...YES_WORDS], no: [...NO_WORDS], whenABubbleIsOpen: 'only these phrases, alone, answer a yes/no bubble; anything else leaves it open', betweenTwoDays: 'a question between two days ("next friday") is answered by the day of the month ("the 20th", "Friday the twentieth"), by "the first one" or "the later one", or by a no word for neither', moveOrSecond: { move: [...MOVE_WORDS], second: [...SECOND_WORDS], rule: 'a block asked for by the title of an open to-do that already has a block: these phrases, alone, say whether it moves or a second to-do is made; a no word changes nothing' }, thatOrNew: { that: [...THAT_WORDS], new: [...NEW_WORDS], rule: 'a block asked for by a title that holds the title of an open to-do, or is held by it, as whole words: these phrases, alone, say whether it is that to-do or a new task; a no word changes nothing' }, titleMatch: 'a title is matched with an open to-do ignoring capitals, the spaces around it and a leading "the". A title that is not the same but holds an open to-do\'s title as whole words, or is held by it, is asked about; titles of fewer than two words never match that way' },
     pageRebuild: { settleHoldSeconds: SETTLE_HOLD_SECONDS, settle: 'the new page puts the character on its home spot at once, with no entrance and no glide; for settleHoldSeconds after that, a change of the home spot moves it there at once too', oldWindowsGo: 'once the new page reports that it has drawn the character, or 10 seconds after it has its settings if it never does', measureSeconds: MEASURE_SECONDS, measured: 'with measurePageRebuild on: from the rebuild until measureSeconds after the old windows have gone, both windows\' position, size and visibility, their events (created, moved, resized, focus, close, destroyed), the character\'s drawn position in every frame on both pages, the page\'s edges and size, and every change of the home spot with its cause; numbers only, in the activity log (~/.gg/sidekick/logs) as rebuild_measure' },
+    dailyNote: { place: 'the vault\'s "dailyFolder" folder, one note a day named YYYY-MM-DD.md', writtenBy: 'the app alone, through the vault\'s one writer: only ever added to', dayTurnsAt: 'calendar.dayTurnsAt', plan: 'the to-dos with a block or a due time on the day, the ones whose every time has passed (Needs a new time), and the deadlines coming up', comingUpDays: COMING_DAYS, log: ['Done: a to-do finished, in Roamies or in Super Productivity', 'Note: a note taken, linked'], review: 'at calendar.reviewAt, or when asked by one of reviewPhrases said alone: each planned to-do as done, missed or still open today, and two sentences worded by the app; a second review adds only what changed', reviewPhrases: [...REVIEW_PHRASES], counted: 'to-dos only; reminders and timers never appear', notIn: 'pi\'s work (it stays in the records folder)', keptDaysInState: KEEP_DAYS, sentToTheModel: 'nothing' },
     home: { corners: [...HOME_CORNERS], cornerMargins: { ...HOME_MARGINS.corner }, pointMargins: { ...HOME_MARGINS.edge }, marginsUnit: 'body radii' },
     paths: { folder: dir, settings: PATHS.settings, reference: PATHS.reference, state: PATHS.state, records: `${PATHS.log}/`, defaultProject: `${PATHS.workspace}/`, longPrompt: PATHS.pending },
   };

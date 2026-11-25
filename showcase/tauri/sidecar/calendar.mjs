@@ -772,6 +772,17 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     sync('change').catch(() => {});
     return `${quote(t.text)} is on the calendar ${slot(b)}.`;
   }
+  /** Feature 18: each to-do's block as it is known here, for the daily note: { to-do id: { start, minutes, kept } }.
+   *  A block on the calendar comes first; else a slot kept until the app is open. */
+  function blocks() {
+    const out = {};
+    try {
+      const cal = get();
+      for (const a of cal.actions) out[a.todo] = { start: a.start, minutes: a.minutes, kept: true };
+      for (const [id, l] of Object.entries(cal.links)) if (l.local.start !== null) out[id] = { start: l.local.start, minutes: l.local.minutes, kept: false };
+    } catch { /* nothing known */ }
+    return out;
+  }
   /** The kept blocks, for show_pending and the morning briefing: [{ at, brief }]. */
   function kept() {
     try { return get().actions.map((a) => ({ at: a.at, brief: `Put ${quote(a.title)} on the calendar ${slot(a)}` })); } catch { return []; }
@@ -1370,5 +1381,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).${cal.adopt ? ' Every open task they have in the app is on the to-do list too, whoever made it; the app adds new ones itself.' : ''}` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, resume, dayNote, outline, startup, takeHeld, hasHeld, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, resume, dayNote, outline, startup, takeHeld, hasHeld, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
 }

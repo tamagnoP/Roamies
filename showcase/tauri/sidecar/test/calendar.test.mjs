@@ -97,10 +97,10 @@ const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 
 // ---- 1. the settings: "calendar" and the request timeout, shown in settings.default.json
 let s = loadSettings(home);
-assert.deepEqual(s.calendar, { dayStart: 540, dayEnd: 1080, lunch: [750, 810], gapMinutes: 0, syncSeconds: 60 });
+assert.deepEqual(s.calendar, { dayStart: 540, dayEnd: 1080, lunch: [750, 810], gapMinutes: 0, syncSeconds: 60, dayTurnsAt: 240, reviewAt: 1080 });
 assert.equal(s.limits.calendarTimeoutSeconds, 20); assert.deepEqual(LIMITS.calendarTimeoutSeconds, { default: 20, min: 2, max: 60 });
 const ref = settingsReference(home);
-assert.deepEqual(ref.calendar, { dayStart: '09:00', dayEnd: '18:00', lunch: ['12:30', '13:30'], gapMinutes: 0, syncSeconds: 60 });
+assert.deepEqual(ref.calendar, { dayStart: '09:00', dayEnd: '18:00', lunch: ['12:30', '13:30'], gapMinutes: 0, syncSeconds: 60, dayTurnsAt: '04:00', reviewAt: '18:00' });
 assert.equal(ref.limits.calendarTimeoutSeconds, 20);
 assert.deepEqual(ref.reference.superProductivity.requestsSent, SP.requests); assert.equal(ref.reference.superProductivity.neverSent, 'DELETE');
 assert.equal(ref.reference.superProductivity.address, 'http://127.0.0.1:3876'); assert.ok(!JSON.stringify(ref).includes(TOKEN));
@@ -111,7 +111,7 @@ const withCalendar = (calendar) => { const f = { ...file0 }; if (calendar === un
 s = withCalendar(undefined);
 assert.deepEqual(s.missing, ['calendar'], 'no "calendar" at all is one missing setting'); assert.equal(s.calendar.syncSeconds, 60);
 s = withCalendar({ dayStart: '08:00', dayEnd: '20:00', lunch: [], gapMinutes: 5 });
-assert.deepEqual(s.missing, ['calendar.syncSeconds']); assert.deepEqual(s.calendar, { dayStart: 480, dayEnd: 1200, lunch: null, gapMinutes: 5, syncSeconds: 60 });
+assert.deepEqual(s.missing, ['calendar.syncSeconds', 'calendar.dayTurnsAt', 'calendar.reviewAt']); assert.deepEqual(s.calendar, { dayStart: 480, dayEnd: 1200, lunch: null, gapMinutes: 5, syncSeconds: 60, dayTurnsAt: 240, reviewAt: 1200 }, 'feature 18: a missing reviewAt is dayEnd\'s value');
 assert.equal(withCalendar({ ...file0.calendar, lunch: null }).calendar.lunch, null, 'null: no break'); assert.deepEqual(withCalendar({ ...file0.calendar, lunch: null }).invalid, []);
 for (const [part, bad] of [['dayStart', '25:00'], ['dayEnd', 'six'], ['lunch', ['13:00', '12:00']], ['lunch', ['12:00']], ['lunch', 'none'], ['gapMinutes', -1], ['gapMinutes', 2.5], ['syncSeconds', 5], ['syncSeconds', 4000], ['syncSeconds', '60']]) {
   s = withCalendar({ ...file0.calendar, [part]: bad });
@@ -1388,7 +1388,7 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   // Feature 22: speech.hush() where this was speech.stop(): what is playing still stops, but the reply's voice is no
   // longer ended, so what Roamies says after the answer is spoken (flow.test.mjs checks hush against stop).
   assert.match(side, /if \(pi\.listening\(\) \|\| answers\.listening\(\)\) speech\.hush\(\);[^\n]*\n\s*else \{ interruptQuietly\(\);/, 'starting to talk cancels the turn only when no such bubble is open');
-  assert.match(side, /if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request, and the shell is told the words were dealt with');
+  assert.match(side, /if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n(?:  \/\/[^\n]*\n  if \(!area\?\.file && isReviewAsk\(text\)\)[^\n]*\n)?  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request, and the shell is told the words were dealt with');
   assert.match(side, /m\.state === 'idle' && \(pi\.unheard\(\) \|\| answers\.unheard\(\)\)/);
   const shell = fs.readFileSync(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.match(shell.slice(shell.indexOf('fn shows_answer')), /^[^}]*Some\("summon" \| "say" \| "ask" \| "list" \| "heard"\) => true/, 'on "heard" the shell lets the listening pill go (to_overlays: handoff)');

@@ -396,7 +396,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   pi.briefing.done('morning', at(9, 0));
   assert.equal(pi.briefing(at(9, 5)), null, 'given once');
   const today = new Date(); const evening = pi.briefing(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 19, 0));
-  assert.equal(evening.kind, 'evening'); assert.match(evening.note, /Daily log \d{4}-\d\d-\d\d.*What pi was asked today:\n- \d\d:\d\d \(read only, done\): /s);
+  assert.equal(evening.kind, 'evening'); assert.match(evening.note, /write no note, and call no tool.*What pi was asked today:\n- \d\d:\d\d \(read only, done\): /s); assert.ok(!/Daily log|write_note|list_commitments/.test(evening.note), 'feature 18: the daily note replaces the "Daily log" note');
   assert.ok(pi.tasksOn(today).some((t) => t.prompt === 'auto one' && t.status === 'done'));
 }
 { // the undo snapshot: everything as it was, kept as a ref, with the branch, the index and the files untouched
@@ -472,7 +472,7 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   assert.deepEqual([...labels].sort(), ["Don't send", "Don't switch", 'Send', 'Send now', 'Switch']);
   assert.ok(!isSend('Switch') && !isDontSend("Don't switch"), 'a label judged as speech would not resolve: it never is');
   // Every bubble with buttons in the local-only files goes through the position rule, and none through a word check.
-  for (const f of ['pi.mjs', 'calendar.mjs', 'notes.mjs', 'guard.mjs', 'reference.mjs', 'answers.mjs']) {
+  for (const f of ['pi.mjs', 'calendar.mjs', 'notes.mjs', 'guard.mjs', 'reference.mjs', 'answers.mjs', 'daily.mjs']) {
     const src = fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
     for (const line of src.split('\n').filter((l) => /choices:/.test(l) && !/^\s*(\/\/|\*)/.test(l) && /ask\(|yesTo\(/.test(l))) {
       assert.ok(/firstButton\(|whichButton\(|yesTo\(|\.then\(\(a\) => \{[^\n]*firstButton\(a, buttons\)|placeholder: `\$\{opts\.placeholder\}/.test(line), `${f}: a bubble's answer is not taken by button position: ${line.trim().slice(0, 90)}`);
