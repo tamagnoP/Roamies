@@ -8,15 +8,12 @@ Before a session: build the app from `next` and install it as `CLAUDE.md` says (
 
 ## Group 1: features 18, 33, 25 and 31
 
-Not on `next` yet:
-
-- Feature 33.
-- Feature 25, check-ins on progress.
-- Feature 31.
+Not on `next` yet: feature 33 (stand down), feature 25 (check-ins on progress), feature 31 (speaking budget and
+quiet queue).
 
 ### Feature 18: the daily note, task pages, the handover
 
-Branch `daily-note`. The checks marked **next day** need the day to turn (`calendar.dayTurnsAt`, 04:00). To see
+On `next` since `be67580`. The checks marked **next day** need the day to turn (`calendar.dayTurnsAt`, 04:00). To see
 the turn in one sitting, set `calendar.dayStart` and `calendar.dayTurnsAt` a few minutes ahead for the session (the
 turn may not come after the start of the day), then set them back.
 
@@ -88,3 +85,15 @@ over (to be missed), one still ahead, and one with nothing planned.
     comes first, said by the app, then the summary of pi's work.
 17. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
     You should see: `daily_*`, `handover`, `handover_items` and `open_item_*` lines with counts only, and no titles.
+
+## Group 2: features 23, 32, 14, 29 and 30
+
+Not on `next` yet.
+
+## Group 3: features 19 and 21
+
+Not on `next` yet.
+
+## Group 4: features 17, 28, 15, 20 and 27
+
+Not on `next` yet.

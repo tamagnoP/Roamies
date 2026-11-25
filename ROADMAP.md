@@ -12,8 +12,8 @@ something is decided or reversed.
 the plan; it is then built whole and reported once, at the end (earlier only when something doesn't hold or a
 guarantee would change). When `test:all` has passed and the owner has accepted its review, it is merged into `next`.
 The owner tests by hand in sessions, one per group of features, from `TESTS.md`; only when he says a session has
-passed is `next` merged into `local-only`. Group 1: features 18, 33, 25 and 31 (33 and 31 are not in this roadmap
-yet). The rules are in `CLAUDE.md`, under "Git".
+passed is `next` merged into `local-only`. The groups: (1) 18, 33, 25, 31; (2) 23, 32, 14, 29, 30; (3) 19, 21;
+(4) 17, 28, 15, 20, 27. The rules are in `CLAUDE.md`, under "Git".
 
 Last updated: 2026-11-25.
 
@@ -34,22 +34,28 @@ Last updated: 2026-11-25.
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
-| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note with approval | Queued (Prompt B), after 25 | |
-| 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 17 | |
+| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note | Queued (Prompt B), after 23 with 32 | |
+| 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 28 | |
 | 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
-| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 23 | |
-| 18 | Daily note (plan, log, review) and task pages | Built on `daily-note` (plan accepted 2026-11-25): steps 1 to 8, `test:all` passed. Waiting for the owner's review, then into `next`; checks in `TESTS.md`, group 1 | `daily-note` |
-| 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 14 | |
+| 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 21 | |
+| 18 | Daily note (plan, log, review) and task pages | In `next` at `be67580` (review accepted 2026-11-25, with the 70 % rule removed); waiting for test session 1 (`TESTS.md`) | `next` |
+| 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 30 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
-| 23 | Offline mode with a local model | Agreed and measured, not designed; after 21 | |
+| 23 | Offline mode with a local model | Agreed and measured, not designed; after 25 with 31, built with 32 | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
-| 25 | Check-ins on progress | Agreed, not designed; after 18 | |
+| 25 | Check-ins on progress | Agreed, not designed; after 33, built with 31 | |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
+| 28 | Interrupting: only "wait" stops Roamies while it speaks | Agreed 2026-11-24, not designed; needs echo cancelling; after 17 | |
+| 29 | Run watcher: one named log file, watched by code | Agreed 2026-11-24, not designed; needs 14; after 14 | |
+| 30 | Machine status: this Mac's memory, disk and battery, and whether the Mac mini answers | Agreed 2026-11-24, not designed; after 29 | |
+| 31 | Speaking budget and quiet queue | Agreed 2026-11-24, not designed; built with 25 | |
+| 32 | Ledger: every request to the provider recorded locally, never its content | Agreed 2026-11-24, not designed; recorded with 23, shown in 21 | |
+| 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | Planning on `stand-down` (off `next`), next after 18 | `stand-down` |
 
-Build order: 24, 18, 25, 14, 19, 21, 23, 17, 15, 20, 27.
+Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
 ## 1. Done
 
@@ -758,7 +764,8 @@ parent folders of research work and data; list the OrbStack app's project under 
 
 Built 2026-11-25 as planned, one commit per step: the vault's one writer (`bcd16ff`), the note (`acd2aa6`), the
 missed-task questions (`8fd1dfa`), task pages (`58e5ce9`, finished to the 2026-11-21 agreement in `063ef75`), the
-briefings (`3d176dc`), the handover and the fresh conversation (`d84164d`), the open items (`3809867`). How it
+briefings (`3d176dc`), the handover and the fresh conversation (`d84164d`), the open items (`3809867`); after
+the review, no 70 % rule for open items (`be67580`), then merged into `next`. How it
 behaves is in `LOCAL-ONLY.md` ("Notes", "The daily note"); the checks by hand are in `TESTS.md`. What was agreed:
 
 One note per day at Daily/YYYY-MM-DD.md in the vault, built by code and only ever added to. Three parts: Plan
@@ -808,9 +815,25 @@ the records folder. Replaces the "Daily log" note.
 
 ## 3. Queued, in this order
 
-Build order: 24, 18, 25, 14, 19, 21, 23, 17, 15, 20, 27. The owner's order of 2026-11-18, recorded on
-2026-11-21, with 24 moved ahead of 18 by the owner on 2026-11-21. 24 and 18 are in section 2; the subsections
-below follow the rest.
+Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27. The owner's order of
+2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24 and 18 are in section 2; the
+subsections below follow the rest, in order.
+
+### 33. Stand down
+
+Agreed 2026-11-25 (the owner). Planned on branch `stand-down`, off `next`.
+
+- The phrase "stand down" (a setting), heard whenever the microphone is open, and a keyboard shortcut (a setting)
+  that works at any moment, since the microphone is closed while Roamies speaks. Handled by code, never by the
+  model.
+- It stops speech at once, closes the microphone and any answer window, cancels a request to the model that is
+  under way, ends pi and everything pi started, and takes bubbles and cards off the screen.
+- While stood down nothing is said or shown unasked: briefings, nudges, notices and questions are held, not lost,
+  and pending questions stay kept.
+- It ends when the owner next starts a conversation the usual way. What was held is then given under the usual
+  rules.
+- The character shows a resting state that is visibly different from normal rest.
+- One line in the log (no content). The daily note gets nothing.
 
 ### 25. Check-ins on progress
 
@@ -823,6 +846,79 @@ Agreed 2026-11-18. Roamies checks on progress without nagging.
 - A future task reported as finished frees its block.
 - The owner sets a maximum number of check-ins a day, and none happen in the middle of a block.
 - Mostly code, since comparing lists has a fixed shape. It uses the daily note (18) and the answer window (22).
+
+### 31. Speaking budget and quiet queue
+
+Agreed 2026-11-24 (the owner); recorded 2026-11-25. Built with 25.
+
+Roamies speaks unasked only for the kinds the owner switched on, at most a set number of times an hour. The rest
+waits in a queue shown as a count, given when he next speaks or asks "anything waiting?".
+
+### 23. Offline mode with a local model
+
+Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
+
+When there is no internet, Roamies uses a small model on the Mac for to-dos, reminders, the calendar and notes. No
+pi and nothing complex; it says so plainly. It never switches silently. Fewer tools are offered, and dates are
+worked out by code, not by the model. How the model is started and stopped is under 16 above. Still to do before a
+design: test real function calling through a local server.
+
+It goes with the natural voice (16), whose conda setup it shares (Kokoro is already running on the Mac), but is
+built later, after the new look (21).
+
+- **First measurement (2026-11-16, MacBook Air, `gemma-4-e2b-it-4bit`):** a 4,745-token prompt read in 5.4 seconds,
+  replies at 20 to 26 tokens a second, 4.4 GB peak memory, 5 of 6 tool calls right (it put "Friday" on the wrong
+  date).
+- **Second stage: seeing the screen offline (agreed 2026-11-19).** After tasks and notes work offline, the local
+  model may also look at a window. macOS's accessibility information is the main source and vision is the fallback:
+  - macOS supplies the list of what is in the front window (each button, field and menu item with its name, role
+    and exact position), cut down to what is visible and usable.
+  - The model picks from that list by name and never guesses coordinates. Small vision models put a click in the
+    wrong place too often to be trusted with that.
+  - A screenshot is used only for apps that describe themselves poorly, such as drawing canvases.
+  - The never-look list covers the accessibility information exactly as it covers screenshots.
+  - Offline, the model points and explains first. Clicking and typing stay with Claude until it has been measured
+    how often the small model picks the right element.
+  - First step of the design: Claude Code reports how much of this Roamies' helper already does.
+- **Two models compared (2026-11-19, MacBook Air, the same test script, thinking switched off).** The candidate for
+  both stages was `Qwen3.5-4B-MLX-4bit` (text and images; at `~/.cache/huggingface/hub/Qwen3.5-4B-MLX-4bit`).
+
+  | Measure | Gemma 4 E2B | Qwen3.5 4B |
+  | --- | --- | --- |
+  | Tool calls right | 5 of 6 | 4 of 6 |
+  | Reading the 4,740-token prompt | 5.4 s (881 tokens a second) | 31.6 s (150 tokens a second) |
+  | Speaking speed | 20 to 26 tokens a second | 10 to 15 tokens a second |
+  | Peak memory, big prompt | 4.4 GB | 4.9 GB |
+
+  Both got the Friday date wrong (Gemma the 19th, Qwen the 21st; it is the 20th), which confirms that dates must be
+  worked out by code. Qwen also put the whole sentence into a note's title and left the text empty.
+- **Screen test (2026-11-19), a full-screen picture of Activity Monitor.** Qwen produced nothing after several
+  minutes and was stopped. Gemma 4 E2B answered in about 10 seconds (287 prompt tokens, 23 tokens a second, 4.1 GB
+  peak). It got the menu bar and the search field right and recognised most process names, but misread small text
+  ("DockerHelper" for DockHelper, "iclude.ai" for claude.ai, "Appshell" for AppleSpell) and did not list the
+  window's real controls, the five tabs and the toolbar buttons.
+- **Second screen test, a Finder window,** same speed and memory. Menu bar fully right; sidebar mostly right, but
+  it wrote "Projects" where the window says "Applications", an invention and not a misreading; none of the
+  unlabelled toolbar icons were listed.
+- **Decision (2026-11-19): one local model, Gemma 4 E2B, for everything offline.** Its reading of a screen is good
+  enough for the gist and not for names or positions, which is the case for taking those from macOS's accessibility
+  information and using the picture only as a fallback.
+- **The size of the tool descriptions (2026-11-24, the owner, from feature 24's measurement).** The tool
+  descriptions are 10,219 tokens of the first request (16,262 in all), the drawing tool's alone 4,383. Not to be
+  trimmed now.
+- **Tool names (2026-11-24, the owner, from feature 24).** Through Claude Code Roamies' tools are called
+  `mcp__gg__<name>`, but the text the model reads (tool descriptions, the conversation replayed after a fold) names
+  them bare. In all Claude Code sessions from 12 to 24 November, 7 of about 654 calls used a bare name; each was
+  refused ("No such tool available") and retried with the right name within 1 to 2 s. A small local model will
+  retry less well, so offline the names the model reads and the tools' real names must match. Not to be changed
+  now.
+
+### 32. Ledger
+
+Agreed 2026-11-24 (the owner); recorded 2026-11-25. Recorded with 23, shown in 21.
+
+Every request to the provider is recorded locally with its time, its size in tokens and whether it carried a
+screen capture; never its content.
 
 ### 14. Roamies reads files at the owner's request, and edits a named note (Prompt B)
 
@@ -840,6 +936,21 @@ search text. Includes reading a project's `TODO.md`; only pi writes that file.
 - Changes guarantee 2 in `CLAUDE.md`: Roamies still never changes files, but can read in permitted folders.
 - Builder: Claude Code, branch `roamies-read`. Prompt B in the appendix is older than the "in that turn" wording
   and the note editing, and has neither.
+
+### 29. Run watcher
+
+Agreed 2026-11-24 (the owner); recorded 2026-11-25. Needs 14.
+
+The owner starts a long job himself and names its log file. Roamies watches that one file by code and reports in
+one line when asked, when the job ends, or when something is plainly wrong. Patterns for metrics are in settings.
+It never starts or stops the job. Log lines reach the model only when the owner asks about the run.
+
+### 30. Machine status
+
+Agreed 2026-11-24 (the owner); recorded 2026-11-25.
+
+Memory, disk and battery of this Mac, and whether the Mac mini answers; read and worded by code; spoken when asked
+or past a threshold.
 
 ### 19. Roles and helpers (Prompt F, draft)
 
@@ -905,68 +1016,16 @@ countdown, monospaced labels, white and one ice blue, amber only for "can edit".
 Open: a 12-hour face puts 9 in the morning and 9 in the evening on the same spot, and the alternative is a dial of
 the working hours only; whether the day dial is always shown or only on request.
 
-### 23. Offline mode with a local model
-
-Agreed text, copied on 2026-11-21 from the owner's checklist. A record only: nothing here is built without its prompt.
-
-When there is no internet, Roamies uses a small model on the Mac for to-dos, reminders, the calendar and notes. No
-pi and nothing complex; it says so plainly. It never switches silently. Fewer tools are offered, and dates are
-worked out by code, not by the model. How the model is started and stopped is under 16 above. Still to do before a
-design: test real function calling through a local server.
-
-It goes with the natural voice (16), whose conda setup it shares (Kokoro is already running on the Mac), but is
-built later, after the new look (21).
-
-- **First measurement (2026-11-16, MacBook Air, `gemma-4-e2b-it-4bit`):** a 4,745-token prompt read in 5.4 seconds,
-  replies at 20 to 26 tokens a second, 4.4 GB peak memory, 5 of 6 tool calls right (it put "Friday" on the wrong
-  date).
-- **Second stage: seeing the screen offline (agreed 2026-11-19).** After tasks and notes work offline, the local
-  model may also look at a window. macOS's accessibility information is the main source and vision is the fallback:
-  - macOS supplies the list of what is in the front window (each button, field and menu item with its name, role
-    and exact position), cut down to what is visible and usable.
-  - The model picks from that list by name and never guesses coordinates. Small vision models put a click in the
-    wrong place too often to be trusted with that.
-  - A screenshot is used only for apps that describe themselves poorly, such as drawing canvases.
-  - The never-look list covers the accessibility information exactly as it covers screenshots.
-  - Offline, the model points and explains first. Clicking and typing stay with Claude until it has been measured
-    how often the small model picks the right element.
-  - First step of the design: Claude Code reports how much of this Roamies' helper already does.
-- **Two models compared (2026-11-19, MacBook Air, the same test script, thinking switched off).** The candidate for
-  both stages was `Qwen3.5-4B-MLX-4bit` (text and images; at `~/.cache/huggingface/hub/Qwen3.5-4B-MLX-4bit`).
-
-  | Measure | Gemma 4 E2B | Qwen3.5 4B |
-  | --- | --- | --- |
-  | Tool calls right | 5 of 6 | 4 of 6 |
-  | Reading the 4,740-token prompt | 5.4 s (881 tokens a second) | 31.6 s (150 tokens a second) |
-  | Speaking speed | 20 to 26 tokens a second | 10 to 15 tokens a second |
-  | Peak memory, big prompt | 4.4 GB | 4.9 GB |
-
-  Both got the Friday date wrong (Gemma the 19th, Qwen the 21st; it is the 20th), which confirms that dates must be
-  worked out by code. Qwen also put the whole sentence into a note's title and left the text empty.
-- **Screen test (2026-11-19), a full-screen picture of Activity Monitor.** Qwen produced nothing after several
-  minutes and was stopped. Gemma 4 E2B answered in about 10 seconds (287 prompt tokens, 23 tokens a second, 4.1 GB
-  peak). It got the menu bar and the search field right and recognised most process names, but misread small text
-  ("DockerHelper" for DockHelper, "iclude.ai" for claude.ai, "Appshell" for AppleSpell) and did not list the
-  window's real controls, the five tabs and the toolbar buttons.
-- **Second screen test, a Finder window,** same speed and memory. Menu bar fully right; sidebar mostly right, but
-  it wrote "Projects" where the window says "Applications", an invention and not a misreading; none of the
-  unlabelled toolbar icons were listed.
-- **Decision (2026-11-19): one local model, Gemma 4 E2B, for everything offline.** Its reading of a screen is good
-  enough for the gist and not for names or positions, which is the case for taking those from macOS's accessibility
-  information and using the picture only as a fallback.
-- **The size of the tool descriptions (2026-11-24, the owner, from feature 24's measurement).** The tool
-  descriptions are 10,219 tokens of the first request (16,262 in all), the drawing tool's alone 4,383. Not to be
-  trimmed now.
-- **Tool names (2026-11-24, the owner, from feature 24).** Through Claude Code Roamies' tools are called
-  `mcp__gg__<name>`, but the text the model reads (tool descriptions, the conversation replayed after a fold) names
-  them bare. In all Claude Code sessions from 12 to 24 November, 7 of about 654 calls used a bare name; each was
-  refused ("No such tool available") and retried with the right name within 1 to 2 s. A small local model will
-  retry less well, so offline the names the model reads and the tools' real names must match. Not to be changed
-  now.
-
 ### 17. Double clap, then "Jarvis", then speak
 
 The hands-free way to start talking to Roamies: a double clap opens the microphone, and what is said next is the request. Speech alone never starts a conversation; without the clap, nothing is recognised. The microphone stays open, but until a double clap only loudness is measured: no audio is recognised, stored or sent. If nothing is said within a few seconds of the clap, listening closes again. A clap only ever starts listening; it never runs anything that changes files. New Swift code in the Mac voice helper, written fresh. Replaces the earlier wake-word idea. After the double clap, the first word must be the wake name, "Jarvis" by default (a setting), and the request follows it. If the first word is anything else, what was said is discarded and listening closes. The name is matched loosely, since speech recognition may hear it as a similar word.
+
+### 28. Interrupting
+
+Agreed 2026-11-24 (the owner); recorded 2026-11-25. After 17.
+
+While Roamies speaks, only the word "wait" (a setting) stops it; nothing else heard then starts a request. Needs
+echo cancelling, so that Roamies' own voice is not heard as the owner's.
 
 ### 15. Search mode (Prompt C, draft, still being discussed)
 
@@ -1462,6 +1521,15 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   written yet. Built; task pages finished to the 2026-11-21 agreement (reminders have pages too, a line per day
   planned or finished, the link in the note, renames). `test:all` passed; `daily-note` pushed, waiting for the
   review before it goes into `next`.
+- **2026-11-25, evening (the owner: feature 18's review, features 28 to 33, the order).**
+  - Feature 18's review accepted with one change: a new "Left open" line is dropped only when it has the same words
+    as an open item (small words aside) or one's words are all inside the other's. The 70 % rule is removed: a
+    duplicate is harmless, a lost item is not. `daily-note` merged into `next` (`be67580`).
+  - Features 28 to 33, agreed on 2026-11-24, recorded in section 3: 28 interrupting, 29 run watcher, 30 machine
+    status, 31 speaking budget and quiet queue, 32 ledger, 33 stand down.
+  - Build order after 18: 33, then 25 with 31, then 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
+  - Test groups: (1) 18, 33, 25, 31; (2) 23, 32, 14, 29, 30; (3) 19, 21; (4) 17, 28, 15, 20, 27.
+  - Next: 33, planned first on a branch off `next`.
 
 ## 6. Still to test
 
