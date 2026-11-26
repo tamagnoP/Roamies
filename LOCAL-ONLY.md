@@ -1240,7 +1240,10 @@ request fails with a network error before any reply; and in private mode. A slow
 - **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the
   kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
   carried, whether it was private. Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
-  is answered from it by code and sent to no model.
+  is answered from it by code and sent to no model. Requests the claude program reports making by itself (its
+  per-model usage in each result, beyond the request's own turns) are counted too. Not counted, because Roamies can't
+  see them: what the claude program sends to Anthropic by itself without reporting it (it connects when it starts,
+  and makes small checks such as counting tokens), and pi's own requests.
 - **Measuring** (`measureRequests`, off): per request, the hearing, the prompt reading and the voice up to the first
   sound, and the memory of Roamies' processes read by the shell; numbers and tool names only, in the activity log.
 

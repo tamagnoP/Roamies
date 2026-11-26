@@ -1,13 +1,15 @@
 // Local-only build, feature 32: the ledger. One line per request to any model, in ledger.jsonl beside usage.jsonl:
 // when, what kind (a request, a briefing, pi's summary, a fold, the memory update, the handover's part two, a
-// warm-up, a hand-off to pi), where it went (the provider and which one, or this Mac), the model, its tokens (new,
+// warm-up, a hand-off to pi, the requests the claude program reports it made by itself), where it went (the provider and which one, or this Mac), the model, its tokens (new,
 // read from the cache, written to the cache, answered), how many screen captures it carried (a marked area,
 // take_screenshot, see_photo) and how many window texts (read_window), and whether it was private. Never any of its
 // content. "What left the Mac today?" is answered from it by code (leftLine) and never sent to a model.
 import fs from 'node:fs';
 import { only, plainNum, unfilled } from './answers.mjs';
 
-export const KINDS = ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi'];
+export const KINDS = ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own'];
+// What Roamies can't see, said with every answer (LOCAL-ONLY.md says the same).
+export const UNSEEN = 'Not counted, because Roamies can\'t see them: what the claude program sends to Anthropic by itself without reporting it (it connects when it starts, and makes small checks such as counting tokens), and pi\'s own requests.';
 export const CAPTURE_TOOLS = new Set(['take_screenshot', 'see_photo']);
 export const WINDOW_TOOLS = new Set(['read_window']);
 export const LEFT_PHRASES = ['what left the mac today', 'what has left the mac today', 'what left this mac today', 'what has left this mac today', 'what left the mac', 'what has left the mac', 'what left my mac today', 'what did you send today', 'what was sent today', 'what went out today', 'what went to the provider today', 'what left today'];
@@ -37,19 +39,22 @@ export function leftLine(lines, now = Date.now()) {
   const out = today.filter((l) => l.where === 'provider' && l.kind !== 'pi'), mac = today.filter((l) => l.where === 'mac' && l.kind !== 'pi'), pi = today.filter((l) => l.kind === 'pi');
   const parts = [];
   if (out.length) {
-    const kinds = KINDS.filter((k) => out.some((l) => l.kind === k)).map((k) => { const c = out.filter((l) => l.kind === k).length; return `${fmt(c)} ${KIND_WORDS[k][c === 1 ? 0 : 1]}`; });
+    const kinds = KINDS.filter((k) => k !== 'own' && out.some((l) => l.kind === k)).map((k) => { const c = out.filter((l) => l.kind === k).length; return `${fmt(c)} ${KIND_WORDS[k][c === 1 ? 0 : 1]}`; });
     const sum = (f) => out.reduce((a, l) => a + f(l), 0);
     const sent = sum((l) => l.tokens.new + l.tokens.cacheRead + l.tokens.cacheWrite), cached = sum((l) => l.tokens.cacheRead), answered = sum((l) => l.tokens.out);
     const where = [...new Set(out.map((l) => l.provider || 'the provider'))].join(' and ');
     const caps = [['marked', 'marked area'], ['screenshots', 'screenshot'], ['photos', 'photo']].map(([k, w]) => [sum((l) => l.captures[k]), w]).filter(([c]) => c).map(([c, w]) => plural(c, w));
     const wins = sum((l) => l.windowTexts), priv = out.filter((l) => l.private).length;
-    parts.push(`Sent to ${where} today: ${kinds.join(', ')}; ${fmt(sent)} tokens sent (${fmt(cached)} of them read from its cache) and ${fmt(answered)} answered.`);
+    const ownSent = out.filter((l) => l.kind === 'own').reduce((a, l) => a + l.tokens.new + l.tokens.cacheRead + l.tokens.cacheWrite, 0);
+    parts.push(`Sent to ${where} today: ${kinds.length ? `${kinds.join(', ')}; ` : ''}${fmt(sent)} tokens sent (${fmt(cached)} of them read from its cache) and ${fmt(answered)} answered.`);
+    if (ownSent) parts.push(`Of these, ${fmt(ownSent)} tokens were requests the claude program reported making by itself.`);
     parts.push(caps.length ? `Screen captures: ${caps.join(', ')}.` : 'No screen captures.');
     parts.push(wins ? `Window texts: ${fmt(wins)}.` : 'No window texts.');
     if (priv) parts.push(`${plural(priv, 'private request')} went to the provider.`);
   } else parts.push('Nothing went to the provider today.');
   if (mac.length) parts.push(`${plural(mac.length, 'request')} stayed on this Mac, with the local model.`);
-  if (pi.length) parts.push(`${plural(pi.length, 'hand-off')} to pi; pi's own requests are not counted.`);
+  if (pi.length) parts.push(`${plural(pi.length, 'hand-off')} to pi.`);
+  parts.push(UNSEEN);
   return parts.join(' ');
 }
 

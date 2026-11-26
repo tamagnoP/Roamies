@@ -1245,7 +1245,9 @@ const USAGE_FILE = path.join(process.env.ROAMIES_DATA_DIR ? path.join(process.en
 const usageToday = { day: '', requests: 0, tokens: 0 };
 // Local-only build (feature 32): the ledger, beside usage.jsonl: one line per request to any model, never its content.
 const ledger = createLedger({ file: path.join(path.dirname(USAGE_FILE), 'ledger.jsonl'), keepDays: () => limitsFor(HOME).ledgerDays, log: (kind, data) => logLine(kind, data) });
-const sideUse = (kind) => (u) => ledger.record({ kind, where: 'provider', ...u });
+const sideUse = (kind) => (u) => ledger.record({ kind: u.own ? 'own' : kind, where: 'provider', ...u });
+// Feature 32: what the claude program reports it requested by itself, beyond the request's own turns.
+const ownUse = (e) => { if (e.type === 'own_usage') for (const [model, tokens] of Object.entries(e.byModel)) ledger.record({ kind: 'own', where: 'provider', provider: 'claude-code', model, tokens }); else logLine('own_usage_unseen', {}); };
 // Local-only build (feature 23, stage 3): the local model. The app's own tools by their real names, the open to-dos
 // and the calendar's blocks, today's daily note when asked, the yes/no bubble for a change the model chose (its
 // answer window, never kept when unanswered), and a ledger line for each call, "this Mac".
@@ -1585,6 +1587,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
       watch.event(e);
       if (e.type === 'text_delta') timing.firstText();
       if (e.type === 'text_delta') { const t = echo.push(e.text); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; }
+      else if (e.type === 'own_usage' || e.type === 'own_usage_unseen') ownUse(e);
       else if (e.type === 'turn_end') {
         doneWriting();
         fresh = true;

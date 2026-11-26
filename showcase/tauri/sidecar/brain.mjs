@@ -44,6 +44,7 @@ async function once({ system, text, provider, model, cc, credsFor, cwd, signal, 
     for await (const e of agentEvents(agent.prompt(text))) {
       if (e.type === 'text_delta') out += e.text;
       else if (e.type === 'turn_end') { const u = e.usage ?? {}; used.new += u.inputTokens ?? 0; used.cacheRead += u.cacheRead ?? 0; used.cacheWrite += u.cacheWrite ?? 0; used.out += u.outputTokens ?? 0; }
+      else if (e.type === 'own_usage') for (const [m, tokens] of Object.entries(e.byModel)) { try { onUsage?.({ provider: 'claude-code', model: m, tokens, own: true }); } catch { /* the ledger never stops a call */ } }
       else if (e.type === 'error') throw e.error;
     }
   } finally { try { onUsage?.({ provider: cc ? 'claude-code' : provider, model, tokens: used }); } catch { /* the ledger never stops a call */ } }
