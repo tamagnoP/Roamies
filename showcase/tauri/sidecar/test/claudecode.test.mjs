@@ -192,3 +192,42 @@ console.log('claudecode ok');
   assert.match(side, /if \(isToolShadowWarning\(text\)\) \{ if \(!sdkShadowNoted\) \{ sdkShadowNoted = true; logLine\('sdk_notice', \{ code: SDK_TOOL_SHADOWED \}\); \} return; \}\n  logLine\('error', text\.slice\(0, 2000\)\);/, 'noted once by its code, never as an error, and without its text');
   console.log('sdk warning: passed');
 }
+
+// Local-only build (feature 32): the requests the claude program reports making by itself (each result's per-model
+// usage, cumulative over the session), beyond the session's earlier totals and this run's own turns, for the ledger.
+{
+  const { ownUsage } = await import('../claudecode.mjs');
+  const mu = (i, o, cr = 0, cw = 0) => ({ inputTokens: i, outputTokens: o, cacheReadInputTokens: cr, cacheCreationInputTokens: cw });
+  // As measured 2026-11-26 with the real program: a fresh run reports exactly its own turns; nothing of its own.
+  assert.deepEqual(ownUsage({ 'claude-sonnet-5-5': mu(2, 4, 0, 1006) }, {}, { inputTokens: 2, outputTokens: 4, cacheWrite: 1006 }, 'claude-sonnet-5-5').extra, {});
+  // The next run on the same session reports the running total (6, 9, 710, 1312): only this run's part is new.
+  const first = ownUsage({ 'claude-sonnet-5-5': mu(2, 4, 0, 1006) }, {}, { inputTokens: 2, outputTokens: 4, cacheWrite: 1006 }, 'claude-sonnet-5-5');
+  assert.deepEqual(ownUsage({ 'claude-sonnet-5-5': mu(6, 9, 710, 1312) }, first.totals, { inputTokens: 4, outputTokens: 5, cacheRead: 710, cacheWrite: 306 }, 'claude-sonnet-5-5').extra, {});
+  // A call of its own on another model (a compaction, say), and more on the main model than its turns: counted.
+  assert.deepEqual(ownUsage({ 'claude-sonnet-5-5': mu(30, 9), 'claude-haiku-5-5': mu(500, 40) }, {}, { inputTokens: 10, outputTokens: 9 }, 'claude-sonnet-5-5').extra,
+    { 'claude-sonnet-5-5': { new: 20, cacheRead: 0, cacheWrite: 0, out: 0 }, 'claude-haiku-5-5': { new: 500, cacheRead: 0, cacheWrite: 0, out: 40 } });
+  // A resumed session whose earlier totals aren't known: nothing can be told apart.
+  assert.equal(ownUsage({ m: mu(1, 1) }, null, {}, 'm').extra, null);
+  // Through the agent: a result with an extra model yields own_usage; the next run starts from the totals reported.
+  const runs = [];
+  const script = (extra) => async function* (ctx) {
+    await ctx.nextInput();
+    yield { type: 'system', subtype: 'init', session_id: 'own-1' };
+    yield ev({ type: 'message_start', message: { id: `m${runs.length}`, usage: { input_tokens: 3 } } });
+    yield ev({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'OK.' } });
+    yield { type: 'assistant', parent_tool_use_id: null, message: { id: `m${runs.length}`, model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'OK.' }] } };
+    yield ev({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 3, output_tokens: 2 } });
+    yield ev({ type: 'message_stop' });
+    yield { type: 'result', subtype: 'success', is_error: false, result: 'OK.', session_id: 'own-1', modelUsage: { 'claude-sonnet-5-5': mu(3 * (runs.length + 1), 2 * (runs.length + 1)), ...(extra ? { 'claude-haiku-5-5': mu(100, 10) } : {}) } };
+  };
+  let n = 0;
+  const q = (p) => { const s = [script(false), script(true)][n++]; return fakeQuery(s).query(p); };
+  const a = new ClaudeCodeAgent({ model: 'claude-sonnet-5-5', system: 's', tools: [], executable: '/bin/claude', cwd: '/', env: {}, query: q, onRateLimit: () => {} });
+  for (const text of ['one', 'two']) { const evs = []; for await (const e of agentEvents(a.prompt(text))) evs.push(e); runs.push(evs.filter((e) => e.type.startsWith('own_usage'))); }
+  assert.deepEqual(runs[0], [], 'the first run: its own turns only');
+  assert.deepEqual(runs[1], [{ type: 'own_usage', byModel: { 'claude-haiku-5-5': { new: 100, cacheRead: 0, cacheWrite: 0, out: 10 } } }], 'the second: the call of its own, not the earlier run again');
+  assert.deepEqual(a.resume.totals, { 'claude-sonnet-5-5': { new: 6, cacheRead: 0, cacheWrite: 0, out: 4 }, 'claude-haiku-5-5': { new: 100, cacheRead: 0, cacheWrite: 0, out: 10 } });
+  const side = (await import('node:fs')).readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
+  assert.match(side, /else if \(e\.type === 'own_usage' \|\| e\.type === 'own_usage_unseen'\) ownUse\(e\);/, 'the request loop records them');
+  console.log('own usage: passed');
+}

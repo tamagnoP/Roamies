@@ -22,7 +22,10 @@ import { createInterface } from 'node:readline';
 import {
   addCommitment, addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, makeCommitment, nextDue, pickFacts, planFold,
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
+  setCommitmentPrivate, setPrivateContext,
 } from './store.mjs';
+import { LIFT_NONE, liftAsk, liftQuestion, privateCount, redact, redactResult, unmarkNote } from './privacy.mjs';
+import { matchTitle } from './checks.mjs'; // Local-only build (feature 23): the private mark
 import { resolveToolSchema } from '@kenkaiiii/gg-ai';
 import { createLiveBlocks, stripLive } from './live.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
@@ -40,6 +43,13 @@ import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
+import { SHORT, leanTools } from './lean.mjs';
+import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
+import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
+import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, off by default
+import { createModelServer } from './modelserver.mjs'; // feature 23, stage 6: the local model server, started by Roamies
+import { BACK_AGAIN, LOCAL_TAG, PRIVATE_OFF, PRIVATE_ON, PRIVATE_TAG, cantLocally, createAnnouncer, isNetworkError, privateAsk, routeFor } from './route.mjs'; // feature 23, stage 4
+import { readState, writeState } from './pi.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -385,14 +395,14 @@ const pi = createPi({
         const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
         // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
         const asks = /\?\s*$/.test(r.reply ?? '');
-        await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
+        await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks, kind: 'piSummary' });
       },
       show: (text) => sayAsIs(text, r.status === 'error' ? 'concerned' : 'happy'), // pi's own words: no form of address
       speak: (text) => voiceLine(text), // feature 24: the leftovers notice, after the gist
       played: quietAgain,
     });
   },
-  log: (kind, data) => logLine(kind, data),
+  log: (kind, data) => { logLine(kind, data); if (kind === 'pi_start') ledger.record({ kind: 'pi', where: 'provider' }); }, // feature 32: each hand-off; pi's own requests are not counted
   onChange: () => menu(),
 });
 // Local-only build: at start-up settings.default.json is written beside the owner's settings.json (every setting with
@@ -414,7 +424,15 @@ const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('se
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
-const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems() }); // Local-only build (feature 18): the to-dos, for their pages
+// Local-only build (feature 23): what is made while a private request runs carries the private mark (privacy.mjs).
+let privateRequest = false;
+setPrivateContext(() => privateRequest);
+const privateNotes = () => { try { const l = readState(settingsNow().dir).privateNotes; return Array.isArray(l) ? l.filter((t) => typeof t === 'string') : []; } catch { return []; } };
+const setPrivateNotes = (list) => { const dir = settingsNow().dir; writeState(dir, { ...readState(dir), privateNotes: [...new Set(list)] }); };
+/** What Claude must never see: the titles and ids of the private to-dos and reminders, and the private notes' titles. */
+const privateWords = () => [...openCommitments().filter((c) => c.private).flatMap((c) => [c.text, c.id]), ...privateNotes()];
+const forClaude = (text) => redact(text, privateWords());
+const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems(), privateNow: () => privateRequest, onPrivate: (title) => { try { setPrivateNotes([...privateNotes(), title]); } catch (e) { console.error('private notes', e); } } }); // Local-only build (feature 18): the to-dos, for their pages
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
@@ -425,7 +443,7 @@ const cal = createCalendar({
   // for in the usual way, by the model, which is told of this one to-do because they said yes to it.
   book: ({ todo, title }) => enqueue(`(System, not ${userName}: in a bubble of the app's own, ${userName} has just said yes to booking a calendar block for the to-do "${title}" [${todo}], which is urgent and important and has no block. Ask them which day and what time, in one short sentence, and nothing else. When they answer, call schedule_block with todo "${todo}".)`, { byVoice: flow.spoken() }),
   todos: {
-    all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
+    all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment', ...(c.private ? { private: true } : {}) })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
     rename: async (id, text) => { await renameCommitment(id, text); menu(); },
     commit: async (id) => { await makeCommitment(id); menu(); }, // a reminder turned into a to-do
@@ -586,6 +604,10 @@ pageRebuild = createPageRebuild({
 });
 setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
 tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools, ...handover.tools])); // Local-only build: cal, flow, the open items (feature 18)
+leanTools(tools, { describe: SHORT(userName) }); // Local-only build (feature 23, stage 1): short schemas for every model, our own descriptions in shorter words (lean.mjs)
+// Local-only build (feature 23): a tool's result for Claude never holds a private title or id (privacy.mjs). The local
+// route's calls carry { seePrivate: true } and get it whole.
+for (const t of tools) { const run = t.execute; t.execute = async (args, ctx, ...rest) => { const r = await run(args, ctx, ...rest); return ctx?.seePrivate ? r : redactResult(r, privateWords()); }; }
 
 // ---------- local-only build (feature 33): stand down (standdown.mjs) ----------
 // The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
@@ -655,9 +677,11 @@ const PRESENCE_FRESH_MS = 30_000, OWN_MIC_MS = 10_000;
 let presence = { idle: null, mic: false, at: 0 }, ownMicAt = 0, presenceLogged = '';
 function speakingNow() { try { return loadSettings(HOME).speaking; } catch { return settingsDefaults(HOME).speaking; } }
 const awayNow = () => { const s = speakingNow(); return s.awayMinutes > 0 && Date.now() - presence.at < PRESENCE_FRESH_MS && Number.isFinite(presence.idle) && presence.idle >= s.awayMinutes * 60; };
+// Feature 23: the Mac has no network, by the shell's reading (presence.rs); one too old counts as not known.
+const offlineNow = () => Date.now() - presence.at < PRESENCE_FRESH_MS && presence.net === false;
 const callNow = () => speakingNow().quietInCalls && Date.now() - presence.at < PRESENCE_FRESH_MS && presence.mic === true && voiceState === 'idle' && !micWindow && Date.now() - ownMicAt > OWN_MIC_MS;
 function presenceSeen(m) {
-  presence = { idle: Number.isFinite(m.idle) ? Math.max(0, m.idle) : null, mic: m.mic === true, at: Date.now() };
+  presence = { idle: Number.isFinite(m.idle) ? Math.max(0, m.idle) : null, mic: m.mic === true, net: typeof m.net === 'boolean' ? m.net : null, at: Date.now() };
   const now_ = JSON.stringify({ away: awayNow(), call: callNow() });
   if (now_ !== presenceLogged) { presenceLogged = now_; logLine('presence', JSON.parse(now_)); } // true/false only, when it changes
 }
@@ -728,6 +752,12 @@ async function quietGive(by = 'exchange') {
   return true;
 }
 /** "anything waiting?", said or typed alone: answered by the app, never by the model. */
+/** Feature 32: "what left the Mac today?", worded by code from the ledger; never sent to a model. */
+function leftAsked() {
+  logLine('left_asked', {});
+  aloud(ledger.left(), 'happy');
+  flow.settle();
+}
 function waitingAsked(byVoice) {
   if (byVoice) flow.start();
   logLine('queue_asked', { items: queue.count() });
@@ -888,7 +918,10 @@ const livePrompt = (context = '') => {
   const memory = `${cal.outline()}
 ${facts.length ? `What you know about ${userName}${total > facts.length ? ` (${facts.length} most relevant of ${total})` : ''}:\n${facts.map((f) => `- ${f.id}: ${f.text}`).join('\n')}` : `You don't know anything lasting about ${userName} yet.`}`;
   parts.push(['memory', `Memory (the to-do list in outline and what you remember; it may be a relevant selection rather than everything):\n${memory}`]);
-  return parts;
+  // Local-only build (feature 23): no private title or id reaches Claude; a count says what it can't see.
+  const hidden = privateCount(openCommitments().filter((c) => c.private).length, privateNotes().length);
+  if (hidden) parts.push(['private', hidden]);
+  return parts.map(([k, v, ...o]) => [k, typeof v === 'string' ? forClaude(v) : v, ...o]);
 };
 const system = () => stablePrompt();
 // Local-only build (feature 24): each request's live block holds only the parts that changed since the blocks
@@ -983,12 +1016,12 @@ let credsBaseUrl;
 let queued = 0;
 let briefingWaiting = false; // feature 33: a briefing chosen, on its way to its request
 // Local-only build (feature 33): briefing: { kind, given } for a briefing's request, given set once it is made.
-function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false, briefing = null } = {}) {
+function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false, briefing = null, kind = 'request' } = {}) { // kind: the ledger's (feature 32)
   if (interrupt && busy) interruptQuietly();
   if (interrupt && byVoice) flow.start(); // Local-only build (feature 22): a request made by voice opens the exchange
   queued++;
   const own = !intro && !text.startsWith('('); // feature 33: the owner's own request, typed or spoken
-  running = running.then(() => prompt(text, image, note, byVoice, briefing)).catch((e) => console.error('prompt', e))
+  running = running.then(() => prompt(text, image, note, byVoice, briefing, kind)).catch((e) => console.error('prompt', e))
     .finally(() => {
       if (briefing) briefingWaiting = false;
       // Features 31 and 33: a typed request's reply is an exchange of the owner's (a spoken one ends in flow.mjs,
@@ -1099,7 +1132,7 @@ function maybeCompact() {
   compacting = (async () => {
     try {
       const facts = listFacts();
-      const { text, model } = await oneShot({ ...(await sideRoute()), system: foldPrompt(userName), text: foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName }) });
+      const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('fold'), system: foldPrompt(userName), text: forClaude(foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName })) });
       const out = parseBrain(text, { knownIds: facts.map((f) => f.id), wantSummary: true });
       const learned = await learnFacts(out.facts);
       if (s !== session) { logLine('compact_dropped', { session: s.id, why: 'new conversation' }); return; }
@@ -1143,7 +1176,7 @@ async function memoryPass(s, why) {
   const t0 = Date.now();
   try {
     const facts = listFacts();
-    const { text, model } = await oneShot({ ...(await sideRoute()), system: memoryPrompt(userName), text: memoryInput({ facts, turns }) });
+    const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('memory'), system: memoryPrompt(userName), text: forClaude(memoryInput({ facts, turns })) });
     const out = parseBrain(text, { knownIds: facts.map((f) => f.id) });
     const learned = await learnFacts(out.facts);
     logLine('memory', { why, session: s.id, model, ms: Date.now() - t0, facts: learned.length, replaced: out.facts.filter((f) => f.replaces).length });
@@ -1210,6 +1243,157 @@ process.on('uncaughtException', (e, origin) => {
 // One line per request in ~/.gg/sidekick/usage.jsonl: token counts and timings only, never what was said.
 const USAGE_FILE = path.join(process.env.ROAMIES_DATA_DIR ? path.join(process.env.ROAMIES_DATA_DIR, 'sidekick') : path.join(HOME, '.gg', 'sidekick'), 'usage.jsonl');
 const usageToday = { day: '', requests: 0, tokens: 0 };
+// Local-only build (feature 32): the ledger, beside usage.jsonl: one line per request to any model, never its content.
+const ledger = createLedger({ file: path.join(path.dirname(USAGE_FILE), 'ledger.jsonl'), keepDays: () => limitsFor(HOME).ledgerDays, log: (kind, data) => logLine(kind, data) });
+const sideUse = (kind) => (u) => ledger.record({ kind: u.own ? 'own' : kind, where: 'provider', ...u });
+// Feature 32: what the claude program reports it requested by itself, beyond the request's own turns.
+const ownUse = (e) => { if (e.type === 'own_usage') for (const [model, tokens] of Object.entries(e.byModel)) ledger.record({ kind: 'own', where: 'provider', provider: 'claude-code', model, tokens }); else logLine('own_usage_unseen', {}); };
+// Local-only build (feature 23, stage 3): the local model. The app's own tools by their real names, the open to-dos
+// and the calendar's blocks, today's daily note when asked, the yes/no bubble for a change the model chose (its
+// answer window, never kept when unanswered), and a ledger line for each call, "this Mac".
+// Stage 6: the model server, when it is Roamies' to start (local.start.python, at local.start.port): on first need,
+// asleep after local.start.sleepAfterMinutes, stopped at quit.
+const modelServer = createModelServer({ settings: settingsNow, home: HOME, log: (kind, data) => logLine(kind, data), onNotice: (text) => unasked({ kind: 'notice', text, mood: 'concerned' }) });
+function modelServerPid() { return modelServer.pid; }
+process.on('exit', () => { try { modelServer.stop('quit'); } catch { /* not running */ } });
+const localRoute = createLocalRoute({
+  settings: settingsNow, userName, server: modelServer,
+  tool: (name) => tools.find((t) => t.name === name) ?? null,
+  todos: () => openCommitments().map((c) => ({ id: c.id, title: c.text, due: c.due ?? null })),
+  blocks: () => cal.blocks(),
+  readDaily: async () => { const s = settingsNow(), rel = daily.today().rel; try { return (await fs.readFile(path.join(s.vault, rel), 'utf8')).slice(0, s.limits.noteMaxChars); } catch { return ''; } },
+  confirm: async ({ question }) => {
+    try { return (await answers.ask({ placeholder: question, spoken: question, choices: ['Yes', 'No'] })) === 'yes'; } catch (e) { if (e?.name === 'Unanswered') return null; throw e; }
+  },
+  record: (line) => ledger.record(line),
+  log: (kind, data) => logLine(kind, data),
+});
+// Feature 23, stage 4: private mode, kept in state.json; it never ends by itself, only on "back to Claude".
+const privateMode = () => readState(settingsNow().dir).privateMode === true;
+function setPrivateMode(on) {
+  const dir = settingsNow().dir;
+  try { writeState(dir, { ...readState(dir), privateMode: !!on }); } catch (e) { console.error('private mode', e); }
+  ui({ kind: 'private', on: !!on });
+  logLine('private_mode', { on: !!on });
+}
+const announcer = createAnnouncer();
+/** "Lift the private mark from <title>": the private to-do or note of that title, by code, then a yes. */
+async function liftPrivate(title, byVoice) {
+  const todos = openCommitments().filter((c) => c.private).map((c) => ({ id: c.id, title: c.text, kind: 'todo' }));
+  const noteList = privateNotes().map((t) => ({ id: `note:${t}`, title: t, kind: 'note' }));
+  const found = matchTitle(title, [...todos, ...noteList]);
+  if (found.ask) { aloud(found.ask, 'concerned'); return; }
+  if (found.none) { aloud(LIFT_NONE, 'concerned'); return; }
+  let yes = null;
+  try { yes = (await answers.ask({ placeholder: liftQuestion(found.title), spoken: liftQuestion(found.title), choices: ['Yes', 'No'] })) === 'yes'; } catch (e) { if (e?.name !== 'Unanswered') throw e; }
+  if (!yes) { aloud('Nothing was changed.', 'happy'); return; }
+  if (found.kind === 'todo') await setCommitmentPrivate(found.id, false);
+  else {
+    const s = settingsNow(), file = path.join(s.vault, `${found.title}.md`);
+    try { await fs.writeFile(file, unmarkNote(await fs.readFile(file, 'utf8'))); } catch (e) { console.error('private note', e); }
+    setPrivateNotes(privateNotes().filter((t) => t !== found.title));
+  }
+  logLine('private_lifted', { kind: found.kind });
+  aloud(`"${found.title}" isn't private any more.`, 'happy');
+}
+/** A request answered by the local model: the line saying so when it is the first after a switch, the refusal of
+ *  what it can't do, its reply in a bubble tagged "local", said in an exchange started by voice. why: 'offline' or
+ *  'private'. Nothing here sends anything to the provider. */
+let localLast = null;
+async function localPrompt(text, byVoice, why, priv) {
+  localLast = null;
+  busy = true; quiet = false; flow.activity(); menu();
+  controller = new AbortController();
+  const ctl = controller, t0 = Date.now();
+  let reply = '', mood = 'happy';
+  timing.sent();
+  try {
+    const first = announcer.before('local', why);
+    const cant = cantLocally(text);
+    if (cant) { reply = cant; logLine('local_refused', { why: 'cant' }); }
+    else {
+      privateRequest = !!priv;
+      const out = await localRoute.request(text, { signal: ctl.signal, private: !!priv }).finally(() => { privateRequest = false; });
+      localLast = out;
+      if (out.problem) { reply = out.problem; mood = 'concerned'; } else reply = out.reply;
+    }
+    if (ctl.signal.aborted) return;
+    timing.firstText(); timing.replied(); timing.done({ route: priv ? 'local-private' : 'local', tools: localLast?.calls?.map((c) => c.name) ?? [] });
+    const full = [first, reply].filter(Boolean).join(' ');
+    ui({ kind: 'say', text: sir(full), mood, tag: priv ? PRIVATE_TAG : LOCAL_TAG });
+    if (byVoice || flow.spoken()) voiceLine(forVoice(full));
+  } catch (e) {
+    if (!ctl.signal.aborted) { console.error('local request', e); ui({ kind: 'say', text: sir('The local model ran into a problem; nothing was sent.'), mood: 'concerned', tag: priv ? PRIVATE_TAG : LOCAL_TAG }); }
+  } finally {
+    logLine('local_done', { why, private: !!priv, ms: Date.now() - t0 });
+    busy = false; menu();
+    flow.settle(whenPlayed(speech.mark()));
+  }
+  // Answer 9: Claude can't be reached and the day has turned: the local model writes part two, after the answer.
+  if (why === 'offline') running = running.then(() => localDayTurn()).catch((e) => console.error('local handover', e));
+}
+/** The day turned while Claude can't be reached (the owner's answer 9): part one by code as always; part two by the
+ *  local model, from that day's local exchanges (not the private ones) and as much of the end of the old conversation
+ *  as fits, marked in the note as the local model's and not redone later; then the new conversation starts. */
+const LOCAL_PART_TWO_CHARS = 6000;
+async function localDayTurn() {
+  let need;
+  try { need = session ? handover.needed(session) : null; } catch { return; }
+  if (!need) return;
+  summarisePrivate(need.key).catch((e) => console.error('private summary', e));
+  if (need.kind === 'quiet') { const msg = handover.message(); freshSession(null); handover.given(); if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }]; logLine('handover_new', { from: 'quiet', by: 'local' }); return; }
+  const old = session, key = need.key, t0 = Date.now();
+  if (!handover.partOneDone(old.id, key) && dailyDo('handover', () => daily.handoverPartOne(key, { pending: flow.pending(), kept: cal.kept(), link: (id, title) => notes.pages.link(id, title) }))) handover.markPartOne(old.id, key);
+  let two;
+  try {
+    const known = new Set(todoItems().map((t) => t.id));
+    const mine = localRoute.history().filter((h) => !h.private).map((h) => `${userName}: ${h.said}\nYou: ${h.reply}`).join('\n');
+    const theirs = transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote);
+    const turns = [theirs.slice(-Math.max(0, LOCAL_PART_TWO_CHARS - mine.length)), mine].filter(Boolean).join('\n');
+    two = parsePartTwo(await localRoute.oneShot({ kind: 'handover', system: handoverPrompt(userName), text: handoverInput({ turns, items: handover.openItems() }), maxTokens: 600 }), { known: (id) => known.has(id) });
+  } catch (e) { logLine('handover_failed', { by: 'local', ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 200) }); return; }
+  const msg = handover.finish(key, two);
+  dailyDo('handover', () => daily.handoverPartTwo(key, { decided: two.decided, items: handover.openItems(), remember: two.remember, by: 'local' }));
+  logLine('handover', { by: 'local', ms: Date.now() - t0, decided: two.decided.length, open: two.open.length, remember: two.remember.length });
+  freshSession('day');
+  if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }];
+}
+/** The private exchanges since the last summary, summarised by the local model only, into the daily note with the
+ *  private mark (daily.privateLines). Never by Claude: when the local model can't be reached they wait. */
+async function summarisePrivate(key) {
+  const dir = settingsNow().dir, since = Number(readState(dir).privateSummarisedAt) || 0, list = localRoute.privateSince(since);
+  if (!list.length) return;
+  const text = list.map((h) => `${userName}: ${h.said}\nYou: ${h.reply}`).join('\n');
+  const out = await localRoute.oneShot({ kind: 'handover', private: true, system: `Summarise these private exchanges between ${userName} and their companion in at most three short plain lines, one per line, without dashes: what was decided or asked. Nothing else.`, text, maxTokens: 200 });
+  const lines = out.split('\n').map((l) => l.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean).slice(0, 3);
+  dailyDo('private', () => daily.privateLines(key, lines));
+  writeState(dir, { ...readState(dir), privateSummarisedAt: list.at(-1).at });
+}
+/** A briefing while Claude isn't used (no network, or private mode): worded by the local model from the same
+ *  outline, said with the "local" tag. */
+async function localBriefing(briefing, byVoice) {
+  try {
+    const kind = briefing?.kind === 'evening' ? 'evening' : 'morning';
+    const text = await localRoute.oneShot({ kind: 'briefing', private: privateMode(), system: `Word ${userName}'s short spoken ${kind} briefing from the app's outline below: two or three plain sentences, no lists, nothing that isn't in it.`, text: cal.outline(), maxTokens: 160 });
+    ui({ kind: 'say', text: sir(text), mood: 'happy', tag: privateMode() ? PRIVATE_TAG : LOCAL_TAG });
+    if (byVoice || flow.spoken() || VOICE_ON()) voiceLine(forVoice(text));
+    logLine('briefing_local', { kind });
+  } catch (e) { logLine('briefing_failed', { by: 'local', error: String(e?.message ?? e).slice(0, 160) }); }
+}
+// Feature 23, stage 5: measuring (measureRequests, off by default): numbers and tool names only, in the log.
+const timing = createTiming({
+  on: () => { try { return settingsNow().measureRequests === true; } catch { return false; } },
+  log: (kind, data) => logLine(kind, data),
+  askMemory: () => send({ type: 'measure_memory', asked: Date.now() }),
+  roles: () => ({ [process.pid]: 'sidecar', ...(kokoro.pid ? { [kokoro.pid]: 'kokoro' } : {}), ...(typeof modelServerPid === 'function' && modelServerPid() ? { [modelServerPid()]: 'modelServer' } : {}) }),
+});
+let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
+function recordRequest() {
+  const l = ledgerUse; ledgerUse = null;
+  if (!l) return;
+  const u = l.use;
+  ledger.record({ kind: l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names) });
+}
 function logUsage(rec) {
   const day = new Date().toDateString();
   if (usageToday.day !== day) Object.assign(usageToday, { day, requests: 0, tokens: 0 });
@@ -1282,18 +1466,19 @@ async function dayTurn(byVoice) {
   if (need.kind === 'quiet') {
     const msg = handover.message();
     freshSession(null); handover.given();
-    if (msg) session.messages = [{ role: 'user', content: msg }];
+    if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }]; // feature 23: no private title in Claude's new conversation
     logLine('handover_new', { from: 'quiet', words: msg ? msg.split(/\s+/).length : 0 });
     return true;
   }
   const old = session, key = need.key, t0 = Date.now();
+  summarisePrivate(key).catch((e) => console.error('private summary', e)); // feature 23: by the local model only
   if (!handover.partOneDone(old.id, key) && dailyDo('handover', () => daily.handoverPartOne(key, { pending: flow.pending(), kept: cal.kept(), link: (id, title) => notes.pages.link(id, title) }))) handover.markPartOne(old.id, key);
   const line = oneMoment(key, need.today);
   say(line, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(line));
   let two, model;
   try {
     const known = new Set(todoItems().map((t) => t.id));
-    const r = await oneShot({ ...(await sideRoute()), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() }) });
+    const r = await oneShot({ ...(await sideRoute()), onUsage: sideUse('handover'), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: forClaude(handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() })) });
     two = parsePartTwo(r.text, { known: (id) => known.has(id) }); model = r.model;
   } catch (e) {
     logLine('handover_failed', { ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 300) });
@@ -1303,16 +1488,35 @@ async function dayTurn(byVoice) {
   dailyDo('handover', () => daily.handoverPartTwo(key, { decided: two.decided, items: handover.openItems(), remember: two.remember }));
   logLine('handover', { model, ms: Date.now() - t0, decided: two.decided.length, open: two.open.length, remember: two.remember.length, words: msg ? msg.split(/\s+/).length : 0 });
   freshSession('day');
-  if (msg) session.messages = [{ role: 'user', content: msg }];
+  if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }]; // feature 23: no private title in Claude's new conversation
   return true;
 }
-async function prompt(text, image = null, note = '', byVoice = false, briefing = null) {
+async function prompt(text, image = null, note = '', byVoice = false, briefing = null, kind = 'request') {
   // Local-only build (feature 33): a request still waiting when stand down began is not made (the owner's own next
   // request ends stand down before it is queued). A briefing's is held: it is marked given only once it is made, so
   // it comes again after, while its window is open (the owner, 2026-11-25).
   if (stood?.on()) { if (briefing) logLine('stand_down_held', { what: 'briefing', kind: briefing.kind }); else logLine('stand_down_dropped', { what: 'request' }); return; }
   if (briefing) { pi.briefing.done(briefing.kind); briefing.given = true; logLine('briefing', { kind: briefing.kind }); }
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
+  // Local-only build (feature 23, stage 4): which model answers, decided by code (route.mjs).
+  const ownAsk = !intro && !text.startsWith('(');
+  let privateThis = false;
+  if (ownAsk) {
+    const pa = privateAsk(text);
+    if (pa?.mode) { setPrivateMode(true); announcer.before('local', 'private'); aloud(PRIVATE_ON, 'happy'); flow.settle(); return; }
+    if (pa?.back) { const was = privateMode(); setPrivateMode(false); const line = announcer.before('claude'); aloud(was ? `${PRIVATE_OFF} ${BACK_AGAIN}` : line || BACK_AGAIN, 'happy'); flow.settle(); return; }
+    if (pa?.request) { privateThis = true; text = pa.request; }
+    const lift = liftAsk(text);
+    if (lift) { await liftPrivate(lift.title, byVoice); flow.settle(); return; }
+  }
+  const local = settingsNow().local, priv = privateThis || privateMode();
+  const route = ownAsk ? routeFor({ privateMode: privateMode(), privateThis, offline: offlineNow(), local }) : priv || (offlineNow() && local.address && local.whenOffline) ? 'skip' : 'claude';
+  if (route === 'none') { logLine('private_unsent', {}); aloud('Private: the local model is off (local.address), so nothing was sent anywhere.', 'concerned'); flow.settle(); return; }
+  if (route === 'skip' && briefing) return localBriefing(briefing, byVoice); // answer 9: worded by the local model
+  if (route === 'skip') { logLine('local_system_skipped', { kind }); return; } // an instruction for Claude while it isn't used: not sent
+  if (route === 'local') return localPrompt(text, byVoice, priv ? 'private' : 'offline', priv);
+  const backLine = announcer.before('claude');
+  if (backLine) { say(backLine, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(backLine)); }
   ownWords = intro || text.startsWith('(') ? '' : text; // Local-only build (feature 18): for item_dealt_with
   let problem = await readyAgent();
   if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
@@ -1360,7 +1564,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     });
     const turn = nextTurn();
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
-    const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
+    const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0, names: [] };
+    ledgerUse = { use, kind: briefing ? 'briefing' : kind, marked: image ? 1 : 0, provider: agentRoute === 'claude-code' ? 'claude-code' : config.provider };
     const soon = frontSoon; frontSoon = null;
     const where = soon && Date.now() - soon.at < limitsFor(HOME).frontReuseSeconds * 1000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
     frontNow = guard.front(where.line, where.app); // Local-only build: an app on the never-look list isn't named; its name decides
@@ -1377,9 +1582,12 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     // and say so, instead of waiting silently forever with every later request queued behind it.
     const ctl = controller;
     watch = stallWatch(STALL_MS, () => { stalled = true; logLine('stalled', { turn, ms: Date.now() - use.t }); ctl.abort(); });
+    timing.sent();
     for await (const e of agentEvents(agent.prompt(content))) {
       watch.event(e);
+      if (e.type === 'text_delta') timing.firstText();
       if (e.type === 'text_delta') { const t = echo.push(e.text); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; }
+      else if (e.type === 'own_usage' || e.type === 'own_usage_unseen') ownUse(e);
       else if (e.type === 'turn_end') {
         doneWriting();
         fresh = true;
@@ -1408,7 +1616,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
         spoken?.flush(); // a beat before a tool is said now, not after the tool
         releaseBeat(true);
         if (SLOW_TOOLS.has(e.name)) voice?.beat(); // nothing said yet: "One sec." so it's never silent
-        use.tools++;
+        use.tools++; use.names.push(e.name);
         logLine('tool', { turn, id: e.toolCallId, name: e.name, args: redactArgs(e.name, e.args ?? {}) });
         toolNames.set(e.toolCallId, e.name);
         if (process.env.ROAMIES_USAGE) { toolT.set(e.toolCallId, Date.now()); console.error(`[tool] ${e.name} ${JSON.stringify(e.args ?? {}).slice(0, 160)}`); }
@@ -1445,9 +1653,15 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     autoTurn = null;
     ui({ kind: 'agent', e: stalled ? { type: 'error', message: sir(stallMessage()) } : { type: 'done' } });
     if (stalled && flow.spoken()) voiceLine(stallMessage()); // a failure is said too
-    logUsage({ ...use, ms: Date.now() - use.t });
+    const { names, ...counted } = use;
+    logUsage({ ...counted, ms: Date.now() - use.t });
+    recordRequest();
+    timing.replied(); timing.done({ route: 'claude', tools: names, tokens: { new: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out } });
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
+    recordRequest(); // feature 32: a request that failed went out all the same
+    // Feature 23: no reply at all, and the provider can't be reached: this request goes to the local model.
+    if (ownAsk && !lastReply && !controller.signal.aborted && !stalled && isNetworkError(err) && local.address && local.whenOffline) { logLine('switch_local', { why: 'network' }); running = running.then(() => localPrompt(text, byVoice, 'offline', false)).catch((e) => console.error('local request', e)); return; }
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
@@ -1912,10 +2126,11 @@ function onVoice(m) {
   // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken by the talk key, an answer
   // window and a spoken request, so that it is ready by the time the reply is.
   if (m.type === 'voice_state' && m.state === 'listening') kokoro.wake(m.window != null ? 'answer window' : 'talk key');
-  else if (m.type === 'voice' && m.text?.trim()) kokoro.wake('spoken request');
+  else if (m.type === 'voice' && m.text?.trim()) { kokoro.wake('spoken request'); timing.heard(); } // feature 23, stage 5: the words have arrived
   if (m.type === 'voice_state') { voiceState = String(m.state ?? 'idle'); ownMicAt = Date.now(); } // Local-only build: sync lines wait while the owner talks (calQuiet); feature 31: Roamies' own listening is not a call
   // Local-only build (feature 22): m.window is the answer window the helper's session belongs to (none: a key press).
   if (m.type === 'voice_state') flow.voice(voiceState, m.window ?? null);
+  if (m.type === 'voice_state' && m.state === 'processing') timing.speechEnd(); // feature 23, stage 5
   if (m.type === 'voice_state' && m.state === 'listening' && m.window != null) { /* the answer window's own listening: nothing is interrupted, and no bubble is told that someone is talking */ }
   else if (m.type === 'voice_state' && m.state === 'listening') {
     if (pi.listening() || answers.listening()) speech.hush(); // local-only build: a Send bubble or a yes/no bubble is open; talking answers it instead of cancelling the request. hush, not stop: what is playing stops, but the reply's voice stays usable, so what Roamies says after the answer is spoken
@@ -1989,7 +2204,8 @@ async function typeToAsk({ interrupt = false } = {}) {
   const ctl = barAsk = new AbortController();
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
-  if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
+  if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
+  if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
 }
 function onWriteTap() {
   if (onboarding) return;
@@ -2113,6 +2329,8 @@ async function onSpoken(text, area, window = null) {
   if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); flow.start(); logLine('review_asked', {}); dayReview('asked').catch((e) => console.error('daily review', e)); return; }
   // Local-only build (feature 31): "anything waiting?" (quiet.mjs, said alone): the quiet queue, given by the app.
   if (!area?.file && isWaitingAsk(text)) { ui({ kind: 'heard' }); waitingAsked(true); return; }
+  // Local-only build (feature 32): "what left the Mac today?" (ledger.mjs, said alone): answered by code from the ledger.
+  if (!area?.file && isLeftAsk(text)) { ui({ kind: 'heard' }); flow.start(); leftAsked(); return; }
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);
@@ -2315,11 +2533,14 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
     if (stood?.on()) ui({ kind: 'stand', on: true }); // Local-only build (feature 33): a new page (a rebuild, a restart) keeps the stood-down look
+    if (privateMode()) ui({ kind: 'private', on: true }); // feature 23: and private mode's mark (it never ends by itself)
     queueCount(); // feature 31: and the quiet queue's count
     if (keep) ui({ kind: 'settle', hold: SETTLE_HOLD_SECONDS, ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
     else if (config.onboarded && !stood?.on()) ui({ kind: 'greet' });
     uiReady = true; offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type === 'stand_down') standDownNow(m.by === 'key' ? 'key' : 'phrase'); // Local-only build (feature 33): from the shell
+  else if (m.type === 'memory') timing.memory(m); // feature 23, stage 5: the shell's memory reading (memory.rs)
+  else if (m.type === 'speech_first') timing.firstSound(); // feature 23, stage 5: the reply's first sound played (voice-out.js)
   else if (m.type === 'presence') presenceSeen(m); // Local-only build (feature 31): idle seconds and the microphone, from the shell
   else if (m.type === 'keybind_error' && m.which === 'stand') standKeyNotice(m);
   else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));

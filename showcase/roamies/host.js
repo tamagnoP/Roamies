@@ -421,9 +421,10 @@
     // Local-only build: a mark asks when everything said so far has finished playing. The player answers once its last
     // sample has sounded (voice-out.js); the sidecar opens the microphone only on that answer, never on a guess.
     if (m.kind === 'speech' && m.mark && !Roamie.voiceOut) { send({ type: 'speech_mark', mark: m.mark }); return; }
-    if (m.kind === 'speech') { if (Roamie.voiceOut && !Roamie.voiceOut.onMark) Roamie.voiceOut.onMark = (mark) => send({ type: 'speech_mark', mark }); Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
+    if (m.kind === 'speech') { if (Roamie.voiceOut && !Roamie.voiceOut.onFirst) Roamie.voiceOut.onFirst = () => send({ type: 'speech_first' }); /* feature 23: its first sound played */ if (Roamie.voiceOut && !Roamie.voiceOut.onMark) Roamie.voiceOut.onMark = (mark) => send({ type: 'speech_mark', mark }); Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
     if (m.kind === 'stand') { standDown(m); return; } // Local-only build (feature 33): at once, even while it changes screens
     if (m.kind === 'queue') { for (const t of Roamie.tiles ?? []) t.creature.setQueued?.(m.n); Roamie.wake?.(); return; } // feature 31: the quiet queue's count
+    if (m.kind === 'private') { for (const t of Roamie.tiles ?? []) t.creature.setMark?.(m.on ? 'private' : ''); Roamie.wake?.(); return; } // feature 23: private mode's mark
     if (held) { held.q.push(m); return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
     if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }
@@ -459,7 +460,7 @@
       else a.hide({ dismiss: true }); // Local-only build: the key still sends it away, also from its home
       return;
     }
-    if (m.kind === 'say') { if (!ask || ask.bar) getAgent().say(m.text, { mood: m.mood ?? null }); } // the field leaves the bubble free
+    if (m.kind === 'say') { if (!ask || ask.bar) getAgent().say(m.text, { mood: m.mood ?? null, tag: m.tag ?? null }); } // the field leaves the bubble free; feature 23: the local model's bubbles carry the tag "local"
     else if (m.kind === 'ask') openAsk(m);
     // Local-only build: the open question's text with its last line changed (Heard "…"). On screen only.
     else if (m.kind === 'ask_text') { if (ask && !ask.bar && ask.choices) ask.h.placeholder?.(m.text); }

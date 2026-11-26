@@ -38,6 +38,24 @@ function addUsage(total, u) {
   total.inputTokens += u.inputTokens; total.outputTokens += u.outputTokens;
   for (const k of ['reasoningTokens', 'cacheRead', 'cacheWrite']) if (u[k]) total[k] = (total[k] ?? 0) + u[k];
 }
+// Local-only build (feature 32): requests the claude program makes by itself. Each result carries its per-model
+// usage (modelUsage): every model call of the query pipeline, cumulative over the whole session (a resumed session
+// starts from what its transcript saved). What it holds beyond the session's totals before this run and the main
+// loop's turns this run is the program's own. → { totals, extra: { model: { new, cacheRead, cacheWrite, out } } | null }
+// (null: the totals before this run aren't known, so nothing can be told apart).
+const TOK = (v) => ({ new: num(v?.inputTokens), cacheRead: num(v?.cacheReadInputTokens), cacheWrite: num(v?.cacheCreationInputTokens), out: num(v?.outputTokens) });
+export function ownUsage(modelUsage, before, main, mainModel) {
+  const totals = Object.fromEntries(Object.entries(modelUsage ?? {}).map(([m, v]) => [m, TOK(v)]));
+  if (!before) return { totals, extra: null };
+  const mainTok = { new: num(main?.inputTokens), cacheRead: num(main?.cacheRead), cacheWrite: num(main?.cacheWrite), out: num(main?.outputTokens) };
+  const extra = {};
+  for (const [m, t] of Object.entries(totals)) {
+    const b = before[m] ?? {}, d = {};
+    for (const k of ['new', 'cacheRead', 'cacheWrite', 'out']) d[k] = Math.max(0, t[k] - num(b[k]) - (m === mainModel ? mainTok[k] : 0));
+    if (d.new + d.cacheRead + d.cacheWrite + d.out > 0) extra[m] = d;
+  }
+  return { totals, extra };
+}
 const STOP_REASONS = new Set(['end_turn', 'tool_use', 'max_tokens', 'pause_turn', 'stop_sequence', 'refusal']);
 const toStopReason = (raw) => (STOP_REASONS.has(raw) ? raw : 'end_turn');
 
@@ -433,7 +451,7 @@ async function* claudeCodeLoop(messages, o) {
   };
   if (aborted) onAbort(); else o.signal?.addEventListener('abort', onAbort, { once: true });
 
-  let hitMaxTurns = false;
+  let hitMaxTurns = false, modelUsage = null;
   try {
     for await (const item of channel) {
       if (item.kind === 'wake') continue;
@@ -446,6 +464,7 @@ async function* claudeCodeLoop(messages, o) {
       const message = item.message;
       // After Stop, keep the transcript in step until Claude Code reports the interrupted result, but stop emitting.
       if (aborted) { if (message.type === 'result') break; mapper.handle(message); continue; }
+      if (message.type === 'result' && message.modelUsage) modelUsage = message.modelUsage;
       if (message.type !== 'result') { yield* mapper.handle(message); continue; }
       if (message.subtype === 'error_max_turns') { hitMaxTurns = true; break; }
       if (message.subtype !== 'success') {
@@ -462,6 +481,11 @@ async function* claudeCodeLoop(messages, o) {
     q?.close();
   }
   if (aborted) mapper.pairDanglingToolCalls(INTERRUPTED_NOTE);
+  // No result seen: the session's totals are unknown until the next one.
+  const own = modelUsage ? ownUsage(modelUsage, o.usageBefore, mapper.totalUsage, o.model) : { totals: null, extra: null };
+  o.onTotals?.(own.totals);
+  if (own.extra && Object.keys(own.extra).length) yield { type: 'own_usage', byModel: own.extra };
+  else if (modelUsage && !own.extra) yield { type: 'own_usage_unseen' };
   if (hitMaxTurns) yield { type: 'max_turns', totalTurns: mapper.turn, maxTurns: o.maxTurns ?? 0 };
   yield { type: 'agent_done', totalTurns: mapper.turn, totalUsage: { ...mapper.totalUsage } };
   return { message: mapper.lastAssistant ?? { role: 'assistant', content: [] }, totalTurns: mapper.turn, totalUsage: { ...mapper.totalUsage } };
@@ -515,10 +539,13 @@ export class ClaudeCodeAgent {
     // Local-only build (feature 24): `fresh` says Claude Code starts a session of its own, with none of what was sent before.
     const loopMsgs = [...(o.transformContext ? await o.transformContext(this.messages, { fresh: !resume }) : this.messages)];
     const base = loopMsgs.length;
-    let sessionId = resume;
+    let sessionId = resume, totals = null;
     try {
       return yield* claudeCodeLoop(loopMsgs, {
         ...o, resume,
+        // A fresh session starts from nothing; a resumed one from the totals its last run reported, if known.
+        usageBefore: resume ? this.resume?.totals ?? null : {},
+        onTotals: (t) => { totals = t; },
         onSessionId: (id) => { sessionId = id; },
         onRateLimit: o.onRateLimit ?? ((info) => void recordClaudeCodeRateLimit(info).catch(() => {})),
       });
@@ -526,7 +553,7 @@ export class ClaudeCodeAgent {
       this.messages.push(...loopMsgs.slice(base));
       if (sessionId) {
         const history = this.messages.filter((m) => m.role !== 'system');
-        this.resume = { sessionId, count: history.length, anchor: fingerprint(history.at(-1)) };
+        this.resume = { sessionId, count: history.length, anchor: fingerprint(history.at(-1)), ...(totals ? { totals } : {}) };
         o.onResume?.(this.resume);
       }
       if (o.keepWarm) warmSpare(o, resumeId(this.resume, [...this.messages, { role: 'user', content: '' }]));

@@ -57,6 +57,8 @@ const LEAVE = only(LEAVE_WORDS), DROP = only(DROP_WORDS);
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n) => String(n).padStart(2, '0');
+/** Feature 23: the mark on a line of the daily note that comes from a private exchange. */
+export const PRIVATE_LINE = '%%private%%';
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const dayLong = (d) => `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}`;
@@ -77,7 +79,7 @@ const MONTH_NAMES = MONTH.map((m) => m.toLowerCase());
 const HOUR_WORDS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
 const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth', 'twenty first', 'twenty second', 'twenty third', 'twenty fourth', 'twenty fifth', 'twenty sixth', 'twenty seventh', 'twenty eighth', 'twenty ninth', 'thirtieth', 'thirty first'];
 const MINUTE_WORDS = { 'oh five': 5, ten: 10, fifteen: 15, twenty: 20, thirty: 30, 'forty five': 45, 'o clock': 0, oclock: 0 };
-const words = (t) => String(t ?? '').toLowerCase().replace(/['’`]/g, '').replace(/\b([ap])\.?\s?m\b\.?/g, '$1m').replace(/(\d)([a-z])/g, '$1 $2').replace(/[^a-z0-9:]+/g, ' ').trim();
+const words = (t, asWritten = true) => (asWritten ? writtenTimes(t) : String(t ?? '')).toLowerCase().replace(/['’`]/g, '').replace(/\b([ap])\.?\s?m\b\.?/g, '$1m').replace(/(\d)([a-z])/g, '$1 $2').replace(/[^a-z0-9:]+/g, ' ').trim();
 const alt = (list) => list.slice().sort((a, b) => b.length - a.length).join('|');
 const ORD_RE = new RegExp(`^(?:the )?(?:(\\d{1,2})(?: (?:st|nd|rd|th))?|(${alt(ORDINAL_WORDS)}))(?: of)?(?: (${alt(MONTH_NAMES)}))?$`);
 const MONTH_FIRST_RE = new RegExp(`^(${alt(MONTH_NAMES)}) (?:the )?(?:(\\d{1,2})(?: (?:st|nd|rd|th))?|(${alt(ORDINAL_WORDS)}))$`);
@@ -86,6 +88,28 @@ const DIGIT_TIME = new RegExp(`^(\\d{1,2})(?::(\\d{2})| (\\d{2}))?(?: (am|pm|o c
 const WORD_TIME = new RegExp(`^(${alt(HOUR_WORDS)})(?: (${alt(Object.keys(MINUTE_WORDS))}))?(?: (am|pm))?${LATER}$`);
 const PAST_TIME = new RegExp(`^(half past|quarter past|quarter to) (\\d{1,2}|${alt(HOUR_WORDS)})(?: (am|pm))?${LATER}$`);
 
+/** Feature 23: the written and spoken forms of a time, as the parser below reads them: "3pm" and "3 p.m." as "3 pm",
+ *  "9.30" as "9:30", "ten past 3" as "3:10", "five to six" as "5:55" (at the start, or after "at", "by", "until" and
+ *  the like: "from 2 to 4" is two times), "half 3" as "3:30", "1.5 hours" as "90 minutes", "Friday's" as "Friday".
+ *  Used by parseWhen and clockSaid (the missed-task and check-in answers) and by checks.mjs. */
+const HOUR_N = Object.fromEntries(HOUR_WORDS.map((h, k) => [h, k + 1]));
+const MIN_N = { five: 5, ten: 10, twenty: 20, 'twenty five': 25, 'twenty-five': 25 };
+const hourOf = (x) => (/^\d+$/.test(x) ? +x : HOUR_N[x]);
+const HOUR_RE = '(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+export function writtenTimes(said) {
+  return String(said ?? '')
+    .replace(/\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)['’]s\b/gi, '$1')
+    .replace(/\b([ap])\.\s?m\b\.?/gi, '$1m').replace(/\b(\d{1,2}(?::\d{2})?)(am|pm)\b/gi, '$1 $2')
+    .replace(/\b(\d+)[.,](\d+)\s*(hours?|hrs?)\b/gi, (_, a, b, u) => `${Math.round(parseFloat(`${a}.${b}`) * 60)} minutes`)
+    .replace(/\b(\d{1,2})\.(\d{2})\b/g, '$1:$2')
+    .replace(new RegExp(`(\\w+ )?\\b(five|ten|twenty five|twenty-five|twenty|\\d{1,2})(?: minutes)? (past|to) ${HOUR_RE}\\b`, 'gi'), (all, lead = '', m, dir, h) => {
+      if (dir.toLowerCase() === 'to' && lead && !/^(at|by|around|about|until|till|before|after) $/i.test(lead)) return all;
+      const mins = /^\d+$/.test(m) ? +m : MIN_N[m.toLowerCase()], hr = hourOf(h.toLowerCase());
+      if (!mins || mins >= 60 || !hr || hr > 12) return all;
+      return lead + (dir.toLowerCase() === 'past' ? `${hr}:${String(mins).padStart(2, '0')}` : `${hr === 1 ? 12 : hr - 1}:${String(60 - mins).padStart(2, '0')}`);
+    })
+    .replace(new RegExp(`\\bhalf ${HOUR_RE}\\b`, 'gi'), (all, h) => { const hr = hourOf(h.toLowerCase()); return hr && hr <= 12 ? `${hr}:30` : all; });
+}
 /** A day as said: → { day (00:00), weekday, pm } or null. "Next friday" is not taken (which one is not guessed). */
 function dayPart(str, today) {
   const t = str.replace(/^(?:on|this) /, '');
@@ -134,6 +158,13 @@ function minutesOf({ h, m, mer }, pm, dayStart, dayEnd) {
   if (am >= dayStart && am < dayEnd) return am;
   if (later >= dayStart && later < dayEnd) return later;
   return h < 7 ? later : am;
+}
+/** Feature 23: a clock time as said ("2", "16:30", "half past four", "at 9 am"), read as parseWhen reads one.
+ *  asWritten false: the written forms already read (a span of a sentence that went through writtenTimes: "10 to 11"
+ *  there is two times, not 10:50). → minutes after midnight, or null when it is not a time alone. */
+export function clockSaid(text, { dayStart = 540, dayEnd = 1080, asWritten = true } = {}) {
+  const t = timePart(words(text, asWritten));
+  return t ? minutesOf(t, false, dayStart, dayEnd) : null;
 }
 /** What was said, as the answer to "When will you do it?": { kind: 'at', start } (a day and a time; a time alone is
  *  the next one to come), { kind: 'day', day } (a day alone: 00:00), { kind: 'leave' }, { kind: 'drop' }, or null
@@ -498,11 +529,20 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     return true;
   }
   /** Part two, under its fixed headings; Left open is every open item, oldest first, as a checkbox with its id. */
-  function handoverPartTwo(key, { decided = [], items = [], remember = [] } = {}) {
+  function handoverPartTwo(key, { decided = [], items = [], remember = [], by = '' } = {}) {
     const list = (xs) => (xs.length ? xs.map((x) => `- ${oneLine(x)}`) : ['- Nothing.']);
     const since = (k) => { const [y, m, dd] = String(k).split('-').map(Number); return y ? dayLong(new Date(y, m - 1, dd)) : k; };
-    section(key, `${['### Decided', ...list(decided), '### Left open', ...(items.length ? items.map((i) => `- [ ] ${oneLine(i.text)} (since ${since(i.day)}) ^${i.id}`) : ['- Nothing.']), '### Worth remembering', ...list(remember)].join('\n')}\n`);
+    // Feature 23: part two written by the local model, when Claude couldn't be reached, says so.
+    section(key, `${[...(by === 'local' ? ['_Part two written by the local model on this Mac: Claude couldn\'t be reached._'] : []), '### Decided', ...list(decided), '### Left open', ...(items.length ? items.map((i) => `- [ ] ${oneLine(i.text)} (since ${since(i.day)}) ^${i.id}`) : ['- Nothing.']), '### Worth remembering', ...list(remember)].join('\n')}\n`);
     log('daily_handover', { part: 2, decided: decided.length, open: items.length, remember: remember.length });
+    return true;
+  }
+  /** Feature 23: the private exchanges of a day, summarised by the local model only: lines carrying the private mark
+   *  (PRIVATE_LINE, an Obsidian comment), which Claude's note tools leave out (notes.mjs). */
+  function privateLines(key, lines) {
+    if (!lines.length) return false;
+    section(key, `${['### Private, summarised by the local model', ...lines.map((l) => `- ${oneLine(l)} ${PRIVATE_LINE}`)].join('\n')}\n`);
+    log('daily_private', { lines: lines.length });
     return true;
   }
   /** Lines for today's Log (feature 18: open items closed or let go). */
@@ -540,5 +580,5 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     log('plan_ticked', { todos: ticked.length });
     return ticked.length;
   }
-  return { tick, noted, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, logged, today, planFor, state: get };
+  return { tick, noted, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, privateLines, logged, today, planFor, state: get };
 }

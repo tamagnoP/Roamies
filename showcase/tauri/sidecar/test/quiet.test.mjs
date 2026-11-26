@@ -147,11 +147,11 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   assert.match(side, /queue: \{ due: \(\) => !!queue\?\.ready\(\), run: \(\) => quietGive\('exchange'\) \}/);
   assert.match(side, /if \(own && !flow\.spoken\(\)\) queue\?\.exchanged\(\);/);
   assert.match(side, /if \(!area\?\.file && isWaitingAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); waitingAsked\(true\); return; \}/, '"anything waiting?" spoken: the app answers');
-  assert.match(side, /if \(isWaitingAsk\(text\)\) waitingAsked\(false\); else enqueue/, 'and typed');
+  assert.match(side, /if \(isWaitingAsk\(text\)\) waitingAsked\(false\); else (?:if \(isLeftAsk\(text\)\) leftAsked\(\); else )?enqueue/, 'and typed');
   assert.match(side, /quietGive\('asked'\)\.then\(\(gave\) => \{ if \(!gave\) aloud\('Nothing is waiting\.', 'happy'\); \}/);
   // away and on a call: the shell's two numbers only; Roamies' own listening is not a call
   assert.match(side, /else if \(m\.type === 'presence'\) presenceSeen\(m\);/);
-  assert.match(side, /presence = \{ idle: Number\.isFinite\(m\.idle\) \? Math\.max\(0, m\.idle\) : null, mic: m\.mic === true, at: Date\.now\(\) \};/, 'nothing else is read from it');
+  assert.match(side, /presence = \{ idle: Number\.isFinite\(m\.idle\) \? Math\.max\(0, m\.idle\) : null, mic: m\.mic === true, net: typeof m\.net === 'boolean' \? m\.net : null, at: Date\.now\(\) \};/, 'nothing else is read from it (feature 23: and whether there is a network)');
   assert.match(side, /const callNow = \(\) => speakingNow\(\)\.quietInCalls && [^\n]*voiceState === 'idle' && !micWindow && Date\.now\(\) - ownMicAt > OWN_MIC_MS;/);
   assert.match(side, /logLine\('presence', JSON\.parse\(now_\)\)/, 'logged as true/false when it changes');
   // the count on the character: a page setting, hidden while stood down
@@ -160,9 +160,9 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   for (const f of ['quiet.mjs', 'checkin.mjs']) assert.ok(!/enqueue|oneShot|fetch\(|http|agent\./.test(read(f)), `${f} makes no request`);
   const giving = side.slice(side.indexOf('async function giveItem('), side.indexOf('function checkTick()'));
   assert.ok(!/enqueue\(/.test(giving.replace('runBriefing(b)', '')), 'the queue is given by the app (a briefing is its own request, as always)');
-  // the shell sends the two readings (presence.rs) and nothing else
+  // the shell sends the two readings (presence.rs) and nothing else; feature 23: and whether there is a network
   const rs = fs.readFileSync(path.join(SRC, '..', 'src-tauri', 'src', 'presence.rs'), 'utf8');
-  assert.match(rs, /json!\(\{ "type": "presence", "idle": idle\.map\(\|s\| s\.floor\(\) as u64\), "mic": mic\.unwrap_or\(false\) \}\)/);
+  assert.match(rs, /json!\(\{ "type": "presence", "idle": idle\.map\(\|s\| s\.floor\(\) as u64\), "mic": mic\.unwrap_or\(false\), "net": net \}\)/);
   assert.match(fs.readFileSync(path.join(SRC, '..', 'src-tauri', 'src', 'main.rs'), 'utf8'), /presence::start\(app\.handle\(\)\.clone\(\)\);/);
 }
 

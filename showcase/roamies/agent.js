@@ -404,6 +404,8 @@
     // Under a question: how to answer it.
     const HINT = 'enter to send · esc to skip', HINT_F = `400 11px ${G.MONO}`, HINT_H = 18;
     const hintH = (bb) => (bb.input && !bb.input.listen && !bb.input.choices ? HINT_H : 0);
+    // Local-only build (feature 23): a bubble's tag ("local"), a footer line like the hint.
+    const tagH = (bb) => (bb.tag && !bb.input ? HINT_H : 0);
     // A yes/no question: its buttons sit in a row under it instead of the hint.
     const CHOICE_GAP = 8, CHOICE_TOP = 12;
     const choicesW = (bb) => bb.input.choices.labels.reduce((s, l, i) => s + G.chipW(l) + (i ? CHOICE_GAP : 0), 0);
@@ -446,6 +448,7 @@
         k.S('pop');
       }
       b.mood = opts.mood ?? null;
+      b.tag = opts.tag ? String(opts.tag).slice(0, 30) : null; // feature 23: the local model's tag
       // point: hand target in body radii (e.g. [0.3, -1.6] points up) held while the bubble is open.
       b.point = opts.point ?? null;
       if (b.mood === 'happy') face.set('happy', 0.9);
@@ -488,7 +491,7 @@
       for (const l of (bb.expanded ? bb.lines : shownLines)) cols = Math.max(cols, Math.min(l.s.length, maxCols));
       if (bb.lines.length > 1) cols = Math.max(cols, Math.min(maxCols, 18));
       const rows = clamp(bb.expanded ? bb.lines.length : shownLines.length, 1, maxRows);
-      return { cols, rows, maxRows, w: cols * colW(t) + dotsDx(bb), h: rows * CH * t };
+      return { cols, rows, maxRows, w: Math.max(cols * colW(t) + dotsDx(bb), tagH(bb) ? G.textW(bb.tag, HINT_F) : 0), h: rows * CH * t + tagH(bb) };
     };
 
     const step = (bb, dt, env) => {
@@ -661,6 +664,7 @@
         ctx.restore();
       }
       if (hintH(bb) && bb.pop.x > 0.6) G.typed(ctx, HINT, f.x + padX(bb), f.y + f.h - padY(bb) - HINT_H / 2 + 2, HINT_F, G.DIM);
+      if (tagH(bb) && bb.pop.x > 0.6) G.typed(ctx, bb.tag, f.x + padX(bb), f.y + f.h - padY(bb) - HINT_H / 2 + 2, HINT_F, G.DIM);
       const ch = bb.input?.choices;
       if (ch) {
         ch.rects = [];

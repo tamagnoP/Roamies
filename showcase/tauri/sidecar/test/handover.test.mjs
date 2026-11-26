@@ -132,6 +132,12 @@ for (const [k, d] of logs) assert.ok(!/venue|reagents|parking|Bo/i.test(JSON.str
 ### Worth remembering
 - Nothing.
 `), fs.readFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'utf8').slice(-400));
+  // feature 23: part two by the local model says so; private exchanges' lines carry the private mark
+  d.handoverPartTwo('2026-11-26', { decided: ['Keep the venue.'], items: [], remember: [], by: 'local' });
+  assert.ok(fs.readFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'utf8').endsWith(`\n_Part two written by the local model on this Mac: Claude couldn't be reached._\n### Decided\n- Keep the venue.\n### Left open\n- Nothing.\n### Worth remembering\n- Nothing.\n`));
+  assert.equal(d.privateLines('2026-11-26', []), false);
+  d.privateLines('2026-11-26', ['Asked about the clinic results.', 'Will call on Monday.']);
+  assert.ok(fs.readFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'utf8').endsWith('### Private, summarised by the local model\n- Asked about the clinic results. %%private%%\n- Will call on Monday. %%private%%\n'));
   // a quiet day: one line
   d.handoverPartOne('2026-11-25', {});
   assert.equal(fs.readFileSync(path.join(vault, 'Daily', '2026-11-25.md'), 'utf8'), '---\ndate: 2026-11-25\n---\n\n# Wednesday 25 November 2026\n\n← [[2026-11-24]] · [[2026-11-26]] →\n\n## Handover (written Friday 27 November, 09:12)\n- Nothing changed on the list, no question is waiting, and no block is kept.\n', 'a day with no note yet gets one, without a Plan');
@@ -208,10 +214,10 @@ for (const [said, want] of [
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /if \(!intro && !text\.startsWith\('\('\)\) dailyDo\('plan', \(\) => daily\.ensure\(\)\);/, 'the first request of the day, typed or spoken, writes the Plan');
 assert.match(side, /let problem = await readyAgent\(\);\n\s*if \(!problem && !intro && await dayTurn\(byVoice\)\) problem = await readyAgent\(\);/, 'every request first checks whether the day has turned');
-assert.match(side, /text: handoverInput\(\{ turns: transcript\(old\.messages\.filter\(\(m\) => !isHandover\(m\)\), userName, stripNote\), items: handover\.openItems\(\) \}\)/, 'part two is given the ending conversation and the open items\' text, nothing else');
+assert.match(side, /text: forClaude\(handoverInput\(\{ turns: transcript\(old\.messages\.filter\(\(m\) => !isHandover\(m\)\), userName, stripNote\), items: handover\.openItems\(\) \}\)\)/, 'part two is given the ending conversation and the open items\' text, nothing else (feature 23: with no private title)');
 assert.match(side, /signal: AbortSignal\.timeout\(PART_TWO_SECONDS \* 1000\)/);
 assert.match(side, /logLine\('handover_failed'[^\n]*\n\s*return false;/, 'part two failed: the old conversation carries on');
-assert.match(side, /freshSession\('day'\);\n\s*if \(msg\) session\.messages = \[\{ role: 'user', content: msg \}\];/, 'the new conversation starts with the handover; the old one gets the memory pass');
+assert.match(side, /freshSession\('day'\);\n\s*if \(msg\) session\.messages = \[\{ role: 'user', content: forClaude\(msg\) \}\];/, 'the new conversation starts with the handover (feature 23: with no private title); the old one gets the memory pass');
 assert.match(side, /!isSummary\(m\) && !isHandover\(m\)/, 'the memory pass skips the handover message');
 assert.ok(!/handoverPartOne[^\n]*session\.messages|content: [^\n]*handoverPartOne/.test(side), 'part one never goes into the conversation');
 assert.match(side, /\.\.\.flow\.tools, \.\.\.handover\.tools\]/, 'item_dealt_with is one of the tools');
