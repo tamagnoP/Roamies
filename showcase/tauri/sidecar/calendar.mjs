@@ -1204,9 +1204,13 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     name: 'list_commitments',
     description: `The to-do list. Without a filter: the outline (how many are open, due today, due this week, overdue, without a date, and today's planned blocks), which is what to say first when they ask what is open; then offer the details. With a filter, when they ask about those to-dos or name one: the open to-dos it picks, with their ids, ${SP.titlesShown} at most, then "and N more" (say how many more there are; skip: ${SP.titlesShown} gives the next ones when they ask for them). due: "today", "tomorrow", a weekday, YYYY-MM-DD, "this week", "overdue", or "none" for the ones without a date. words: words from the title (to find the id of a to-do they named). quadrant: a quadrant of the Eisenhower matrix, or "unsorted". Filters given together all have to fit. Never go through the list filter by filter to read it all.`,
     parameters: z.object({ due: z.string().optional(), words: z.string().max(200).optional(), quadrant: z.enum([...Object.keys(QUADRANT_ARGS), 'unsorted']).optional(), skip: z.number().int().min(0).max(10_000).optional() }),
-    execute: async ({ due, words, quadrant: q, skip = 0 } = {}) => {
+    execute: async ({ due, words, quadrant: q, skip = 0 } = {}, ctx) => {
       const said = [];
       let picked = listNow().filter((t) => t.status === 'open');
+      // Local-only build (feature 23): Claude never sees a private to-do (privacy.mjs); the local route does.
+      const hidden = ctx?.seePrivate ? 0 : picked.filter((t) => t.private).length;
+      if (!ctx?.seePrivate) picked = picked.filter((t) => !t.private);
+      const unseen = hidden ? `\n(${hidden} private to-do${hidden === 1 ? '' : 's'} not shown: made in private mode.)` : '';
       if (due !== undefined && String(due).trim()) {
         const w = String(due).trim().toLowerCase().replace(/^due\s+/, '');
         const key = w === 'today' ? 'today' : ['this week', 'week'].includes(w) ? 'week' : w === 'overdue' ? 'overdue' : ['none', 'no date', 'without a date', 'undated'].includes(w) ? 'none' : null;
@@ -1229,9 +1233,9 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
       picked.sort((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity));
       const cal = get(), n = now(), shown = picked.slice(skip, skip + SP.titlesShown), more = picked.length - skip - shown.length;
       log('calendar_listed', { filters: said.length, found: picked.length, shown: shown.length });
-      if (!picked.length) return `No open to-do is ${said.join(', and ')}.`;
+      if (!picked.length) return `No open to-do is ${said.join(', and ')}.${unseen}`;
       const line = (t) => { const l = cal.links[t.id]?.local, a = cal.actions.find((x) => x.todo === t.id); return `- ${t.id}: ${t.text}${t.kind === 'reminder' ? ' [reminder]' : ''}${t.due !== null ? ` (due ${dayName(new Date(t.due))}, ${hm(t.due)}${t.due < n ? ', OVERDUE' : ''})` : ''}${l && l.start !== null ? ` (on the calendar ${slot(l)})` : a ? ` (slot kept for ${slot(a)})` : ''}`; };
-      return [`${picked.length} open to-do${picked.length === 1 ? '' : 's'} ${said.join(', and ')}${skip ? `, from the ${nth(skip + 1)} on` : ''}:`, ...shown.map(line), ...(more > 0 ? [`and ${more} more`] : [])].join('\n');
+      return [`${picked.length} open to-do${picked.length === 1 ? '' : 's'} ${said.join(', and ')}${skip ? `, from the ${nth(skip + 1)} on` : ''}:`, ...shown.map(line), ...(more > 0 ? [`and ${more} more`] : [])].join('\n') + unseen;
     },
   };
 

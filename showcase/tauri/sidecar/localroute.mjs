@@ -61,8 +61,9 @@ export function createLocalRoute({ settings, userName = 'the user', tool, todos 
     const items = open.map((t) => ({ id: t.id, title: t.title }));
     const planOf = async (day) => { const d = dayFrom(day, now()); if (!d) return []; const t0 = d.getTime(); return Object.entries(b).filter(([, x]) => x.start >= t0 && x.start < t0 + 864e5).map(([id, x]) => ({ todo: id, title: open.find((t) => t.id === id)?.title ?? '', start: x.start, minutes: x.minutes })); };
     const dueOf = async (id) => { const t = open.find((x) => x.id === id); return typeof t?.due === 'number' ? { ms: t.due, dayOnly: false } : null; };
-    const call = (name) => { const t = tool(name); return t ? { execute: (a, ctx) => t.execute(a, { ...ctx, signal }) } : null; };
-    const blockLine = (name) => async (a) => { const text = String(await tool(name).execute(a, { signal }) ?? ''); return { text, say: plain(text) }; };
+    // seePrivate: the local route sees private items (privacy.mjs); Claude's calls never carry it.
+    const call = (name) => { const t = tool(name); return t ? { execute: (a, ctx) => t.execute(a, { ...ctx, signal, seePrivate: true }) } : null; };
+    const blockLine = (name) => async (a) => { const text = String(await tool(name).execute(a, { signal, seePrivate: true }) ?? ''); return { text, say: plain(text) }; };
     const run = createLiteRunner({ tool: call, blocks: { schedule_block: blockLine('schedule_block'), move_block: blockLine('move_block') }, todos: async () => items, readDaily, now, said: () => said, planOf, dueOf });
     const hours = { dayStart: s.calendar.dayStart, dayEnd: s.calendar.dayEnd };
     const t0 = now();

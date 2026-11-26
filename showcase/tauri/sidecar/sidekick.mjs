@@ -22,7 +22,10 @@ import { createInterface } from 'node:readline';
 import {
   addCommitment, addFact, applyFold, approxTokens, archiveFolded, clearFacts, clearFinished, compactTrigger, fitContext, flushWrites, forgetFact, isSummary, listItems, listFacts, makeCommitment, nextDue, pickFacts, planFold,
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
+  setCommitmentPrivate, setPrivateContext,
 } from './store.mjs';
+import { LIFT_NONE, liftAsk, liftQuestion, privateCount, redact, redactResult, unmarkNote } from './privacy.mjs';
+import { matchTitle } from './checks.mjs'; // Local-only build (feature 23): the private mark
 import { resolveToolSchema } from '@kenkaiiii/gg-ai';
 import { createLiveBlocks, stripLive } from './live.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
@@ -419,7 +422,15 @@ const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('se
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
 if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
-const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems() }); // Local-only build (feature 18): the to-dos, for their pages
+// Local-only build (feature 23): what is made while a private request runs carries the private mark (privacy.mjs).
+let privateRequest = false;
+setPrivateContext(() => privateRequest);
+const privateNotes = () => { try { const l = readState(settingsNow().dir).privateNotes; return Array.isArray(l) ? l.filter((t) => typeof t === 'string') : []; } catch { return []; } };
+const setPrivateNotes = (list) => { const dir = settingsNow().dir; writeState(dir, { ...readState(dir), privateNotes: [...new Set(list)] }); };
+/** What Claude must never see: the titles and ids of the private to-dos and reminders, and the private notes' titles. */
+const privateWords = () => [...openCommitments().filter((c) => c.private).flatMap((c) => [c.text, c.id]), ...privateNotes()];
+const forClaude = (text) => redact(text, privateWords());
+const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems(), privateNow: () => privateRequest, onPrivate: (title) => { try { setPrivateNotes([...privateNotes(), title]); } catch (e) { console.error('private notes', e); } } }); // Local-only build (feature 18): the to-dos, for their pages
 // Local-only build: the to-do list is mirrored in Super Productivity and kept in step both ways (calendar.mjs). The
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
@@ -430,7 +441,7 @@ const cal = createCalendar({
   // for in the usual way, by the model, which is told of this one to-do because they said yes to it.
   book: ({ todo, title }) => enqueue(`(System, not ${userName}: in a bubble of the app's own, ${userName} has just said yes to booking a calendar block for the to-do "${title}" [${todo}], which is urgent and important and has no block. Ask them which day and what time, in one short sentence, and nothing else. When they answer, call schedule_block with todo "${todo}".)`, { byVoice: flow.spoken() }),
   todos: {
-    all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment' })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
+    all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment', ...(c.private ? { private: true } : {}) })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
     update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
     rename: async (id, text) => { await renameCommitment(id, text); menu(); },
     commit: async (id) => { await makeCommitment(id); menu(); }, // a reminder turned into a to-do
@@ -592,6 +603,9 @@ pageRebuild = createPageRebuild({
 setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
 tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools, ...handover.tools])); // Local-only build: cal, flow, the open items (feature 18)
 leanTools(tools, { describe: SHORT(userName) }); // Local-only build (feature 23, stage 1): short schemas for every model, our own descriptions in shorter words (lean.mjs)
+// Local-only build (feature 23): a tool's result for Claude never holds a private title or id (privacy.mjs). The local
+// route's calls carry { seePrivate: true } and get it whole.
+for (const t of tools) { const run = t.execute; t.execute = async (args, ctx, ...rest) => { const r = await run(args, ctx, ...rest); return ctx?.seePrivate ? r : redactResult(r, privateWords()); }; }
 
 // ---------- local-only build (feature 33): stand down (standdown.mjs) ----------
 // The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
@@ -902,7 +916,10 @@ const livePrompt = (context = '') => {
   const memory = `${cal.outline()}
 ${facts.length ? `What you know about ${userName}${total > facts.length ? ` (${facts.length} most relevant of ${total})` : ''}:\n${facts.map((f) => `- ${f.id}: ${f.text}`).join('\n')}` : `You don't know anything lasting about ${userName} yet.`}`;
   parts.push(['memory', `Memory (the to-do list in outline and what you remember; it may be a relevant selection rather than everything):\n${memory}`]);
-  return parts;
+  // Local-only build (feature 23): no private title or id reaches Claude; a count says what it can't see.
+  const hidden = privateCount(openCommitments().filter((c) => c.private).length, privateNotes().length);
+  if (hidden) parts.push(['private', hidden]);
+  return parts.map(([k, v, ...o]) => [k, typeof v === 'string' ? forClaude(v) : v, ...o]);
 };
 const system = () => stablePrompt();
 // Local-only build (feature 24): each request's live block holds only the parts that changed since the blocks
@@ -1113,7 +1130,7 @@ function maybeCompact() {
   compacting = (async () => {
     try {
       const facts = listFacts();
-      const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('fold'), system: foldPrompt(userName), text: foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName }) });
+      const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('fold'), system: foldPrompt(userName), text: forClaude(foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName })) });
       const out = parseBrain(text, { knownIds: facts.map((f) => f.id), wantSummary: true });
       const learned = await learnFacts(out.facts);
       if (s !== session) { logLine('compact_dropped', { session: s.id, why: 'new conversation' }); return; }
@@ -1157,7 +1174,7 @@ async function memoryPass(s, why) {
   const t0 = Date.now();
   try {
     const facts = listFacts();
-    const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('memory'), system: memoryPrompt(userName), text: memoryInput({ facts, turns }) });
+    const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('memory'), system: memoryPrompt(userName), text: forClaude(memoryInput({ facts, turns })) });
     const out = parseBrain(text, { knownIds: facts.map((f) => f.id) });
     const learned = await learnFacts(out.facts);
     logLine('memory', { why, session: s.id, model, ms: Date.now() - t0, facts: learned.length, replaced: out.facts.filter((f) => f.replaces).length });
@@ -1251,6 +1268,25 @@ function setPrivateMode(on) {
   logLine('private_mode', { on: !!on });
 }
 const announcer = createAnnouncer();
+/** "Lift the private mark from <title>": the private to-do or note of that title, by code, then a yes. */
+async function liftPrivate(title, byVoice) {
+  const todos = openCommitments().filter((c) => c.private).map((c) => ({ id: c.id, title: c.text, kind: 'todo' }));
+  const noteList = privateNotes().map((t) => ({ id: `note:${t}`, title: t, kind: 'note' }));
+  const found = matchTitle(title, [...todos, ...noteList]);
+  if (found.ask) { aloud(found.ask, 'concerned'); return; }
+  if (found.none) { aloud(LIFT_NONE, 'concerned'); return; }
+  let yes = null;
+  try { yes = (await answers.ask({ placeholder: liftQuestion(found.title), spoken: liftQuestion(found.title), choices: ['Yes', 'No'] })) === 'yes'; } catch (e) { if (e?.name !== 'Unanswered') throw e; }
+  if (!yes) { aloud('Nothing was changed.', 'happy'); return; }
+  if (found.kind === 'todo') await setCommitmentPrivate(found.id, false);
+  else {
+    const s = settingsNow(), file = path.join(s.vault, `${found.title}.md`);
+    try { await fs.writeFile(file, unmarkNote(await fs.readFile(file, 'utf8'))); } catch (e) { console.error('private note', e); }
+    setPrivateNotes(privateNotes().filter((t) => t !== found.title));
+  }
+  logLine('private_lifted', { kind: found.kind });
+  aloud(`"${found.title}" isn't private any more.`, 'happy');
+}
 /** A request answered by the local model: the line saying so when it is the first after a switch, the refusal of
  *  what it can't do, its reply in a bubble tagged "local", said in an exchange started by voice. why: 'offline' or
  *  'private'. Nothing here sends anything to the provider. */
@@ -1264,7 +1300,8 @@ async function localPrompt(text, byVoice, why, priv) {
     const cant = cantLocally(text);
     if (cant) { reply = cant; logLine('local_refused', { why: 'cant' }); }
     else {
-      const out = await localRoute.request(text, { signal: ctl.signal, private: !!priv });
+      privateRequest = !!priv;
+      const out = await localRoute.request(text, { signal: ctl.signal, private: !!priv }).finally(() => { privateRequest = false; });
       if (out.problem) { reply = out.problem; mood = 'concerned'; } else reply = out.reply;
     }
     if (ctl.signal.aborted) return;
@@ -1358,7 +1395,7 @@ async function dayTurn(byVoice) {
   if (need.kind === 'quiet') {
     const msg = handover.message();
     freshSession(null); handover.given();
-    if (msg) session.messages = [{ role: 'user', content: msg }];
+    if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }]; // feature 23: no private title in Claude's new conversation
     logLine('handover_new', { from: 'quiet', words: msg ? msg.split(/\s+/).length : 0 });
     return true;
   }
@@ -1369,7 +1406,7 @@ async function dayTurn(byVoice) {
   let two, model;
   try {
     const known = new Set(todoItems().map((t) => t.id));
-    const r = await oneShot({ ...(await sideRoute()), onUsage: sideUse('handover'), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() }) });
+    const r = await oneShot({ ...(await sideRoute()), onUsage: sideUse('handover'), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: forClaude(handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() })) });
     two = parsePartTwo(r.text, { known: (id) => known.has(id) }); model = r.model;
   } catch (e) {
     logLine('handover_failed', { ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 300) });
@@ -1379,7 +1416,7 @@ async function dayTurn(byVoice) {
   dailyDo('handover', () => daily.handoverPartTwo(key, { decided: two.decided, items: handover.openItems(), remember: two.remember }));
   logLine('handover', { model, ms: Date.now() - t0, decided: two.decided.length, open: two.open.length, remember: two.remember.length, words: msg ? msg.split(/\s+/).length : 0 });
   freshSession('day');
-  if (msg) session.messages = [{ role: 'user', content: msg }];
+  if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }]; // feature 23: no private title in Claude's new conversation
   return true;
 }
 async function prompt(text, image = null, note = '', byVoice = false, briefing = null, kind = 'request') {
@@ -1397,6 +1434,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     if (pa?.mode) { setPrivateMode(true); announcer.before('local', 'private'); aloud(PRIVATE_ON, 'happy'); flow.settle(); return; }
     if (pa?.back) { const was = privateMode(); setPrivateMode(false); const line = announcer.before('claude'); aloud(was ? `${PRIVATE_OFF} ${BACK_AGAIN}` : line || BACK_AGAIN, 'happy'); flow.settle(); return; }
     if (pa?.request) { privateThis = true; text = pa.request; }
+    const lift = liftAsk(text);
+    if (lift) { await liftPrivate(lift.title, byVoice); flow.settle(); return; }
   }
   const local = settingsNow().local, priv = privateThis || privateMode();
   const route = ownAsk ? routeFor({ privateMode: privateMode(), privateThis, offline: offlineNow(), local }) : priv || (offlineNow() && local.address && local.whenOffline) ? 'skip' : 'claude';

@@ -308,6 +308,11 @@ third.text = 'Book room A'; taskOf(third).title = 'Book room B';
 const told = await tool('list_commitments').execute({ words: 'room' });
 assert.match(told, /^1 open to-do with "room" in the title:\n- c\d+: Book room B$/); assert.ok(!/changed both|I kept/.test(told));
 assert.deepEqual(cal.takeHeld(), { lines: ['"Book room B": the title changed both here and in Super Productivity. I kept what the app has.'], notices: ['"Book room B" changed both here and in Super Productivity, and I kept what the app has.'], items: [{ text: '"Book room B": the title changed both here and in Super Productivity. I kept what the app has.', say: '"Book room B" changed both here and in Super Productivity, and I kept what the app has.' }], asks: [], offers: [], blocks: [] }, 'shown, and said by the speakNotices rule');
+// feature 23: a private to-do is never in Claude's list (privacy.mjs): left out, with a count; the local route sees it
+third.private = true;
+assert.equal(await tool('list_commitments').execute({ words: 'room' }), 'No open to-do is with "room" in the title.\n(1 private to-do not shown: made in private mode.)');
+assert.match(await tool('list_commitments').execute({ words: 'room' }, { seePrivate: true }), /^1 open to-do with "room" in the title:\n- c\d+: Book room B$/);
+delete third.private; cal.takeHeld();
 // a slow answer to a real request ends the run without half-made changes being lost or repeated
 app.hang = (m) => m === 'POST';
 fs.writeFileSync(settingsFile, JSON.stringify({ ...file0, limits: { ...file0.limits, calendarTimeoutSeconds: 2 } }));

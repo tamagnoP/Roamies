@@ -208,10 +208,10 @@ for (const [said, want] of [
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /if \(!intro && !text\.startsWith\('\('\)\) dailyDo\('plan', \(\) => daily\.ensure\(\)\);/, 'the first request of the day, typed or spoken, writes the Plan');
 assert.match(side, /let problem = await readyAgent\(\);\n\s*if \(!problem && !intro && await dayTurn\(byVoice\)\) problem = await readyAgent\(\);/, 'every request first checks whether the day has turned');
-assert.match(side, /text: handoverInput\(\{ turns: transcript\(old\.messages\.filter\(\(m\) => !isHandover\(m\)\), userName, stripNote\), items: handover\.openItems\(\) \}\)/, 'part two is given the ending conversation and the open items\' text, nothing else');
+assert.match(side, /text: forClaude\(handoverInput\(\{ turns: transcript\(old\.messages\.filter\(\(m\) => !isHandover\(m\)\), userName, stripNote\), items: handover\.openItems\(\) \}\)\)/, 'part two is given the ending conversation and the open items\' text, nothing else (feature 23: with no private title)');
 assert.match(side, /signal: AbortSignal\.timeout\(PART_TWO_SECONDS \* 1000\)/);
 assert.match(side, /logLine\('handover_failed'[^\n]*\n\s*return false;/, 'part two failed: the old conversation carries on');
-assert.match(side, /freshSession\('day'\);\n\s*if \(msg\) session\.messages = \[\{ role: 'user', content: msg \}\];/, 'the new conversation starts with the handover; the old one gets the memory pass');
+assert.match(side, /freshSession\('day'\);\n\s*if \(msg\) session\.messages = \[\{ role: 'user', content: forClaude\(msg\) \}\];/, 'the new conversation starts with the handover (feature 23: with no private title); the old one gets the memory pass');
 assert.match(side, /!isSummary\(m\) && !isHandover\(m\)/, 'the memory pass skips the handover message');
 assert.ok(!/handoverPartOne[^\n]*session\.messages|content: [^\n]*handoverPartOne/.test(side), 'part one never goes into the conversation');
 assert.match(side, /\.\.\.flow\.tools, \.\.\.handover\.tools\]/, 'item_dealt_with is one of the tools');

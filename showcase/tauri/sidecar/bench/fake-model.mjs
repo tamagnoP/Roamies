@@ -40,7 +40,7 @@ export function startModel({ onRequest = () => {} } = {}) {
       if (process.env.DUMP) fs.writeFileSync(`${process.env.DUMP}/${String(++dumped).padStart(4, '0')}.json`, JSON.stringify(j.messages, null, 1)); // the scripted conversation only
       const liveChars = (JSON.stringify(j.messages ?? []).match(/<live-state>[\s\S]*?<\/live-state>/g) ?? []).reduce((n, b) => n + b.length, 0);
       const liveCopies = (JSON.stringify(j.messages ?? []).match(/<live-state>/g) ?? []).length;
-      onRequest({ path: req.url, stream: !!j.stream, messages: j.messages?.length ?? 0, sys, tools, msgs, tokens, fold, model: j.model, lastChars: lastText.length, toolSizes: (j.tools ?? []).map((t) => [t.name, JSON.stringify(t).length]), ...(process.env.DUMP_TOOLS ? { toolsRaw: j.tools ?? [] } : {}), reused: Math.round(same / 3.6), fresh: Math.round((whole.length - same) / 3.6), liveCopies, liveTokens: Math.round(liveChars / 3.6) });
+      onRequest({ path: req.url, stream: !!j.stream, messages: j.messages?.length ?? 0, sys, tools, msgs, tokens, fold, model: j.model, lastChars: lastText.length, toolSizes: (j.tools ?? []).map((t) => [t.name, JSON.stringify(t).length]), ...(process.env.DUMP_TOOLS ? { toolsRaw: j.tools ?? [] } : {}), ...(process.env.DUMP_BODY ? { body: { system: j.system, messages: j.messages } } : {}), reused: Math.round(same / 3.6), fresh: Math.round((whole.length - same) / 3.6), liveCopies, liveTokens: Math.round(liveChars / 3.6) });
       const usage = { input_tokens: tokens, output_tokens: Math.round(text.length / 3.6), cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
       if (!j.stream) {
         res.writeHead(200, { 'content-type': 'application/json' });

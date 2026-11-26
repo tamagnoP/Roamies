@@ -22,6 +22,7 @@ const SIDECAR = new URL('..', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'local-run-')));
 const env = { HOME: home, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, LANG: 'en_US.UTF-8', ROAMIES_VERSION: '0.0.0' };
+process.env.DUMP_BODY = '1'; // the stand-in keeps what each request held, to check no private word is in it
 const provider = []; const model = await startModel({ onRequest: (r) => provider.push(r) });
 const local = await startFakeLocal();
 fs.mkdirSync(path.join(home, '.gg', 'sidekick'), { recursive: true });
@@ -114,6 +115,12 @@ try {
   assert.equal(said(from, /private answer/).tag, 'local · private');
   assert.ok(ledger().some((l) => l.kind === 'request' && l.where === 'mac' && l.private === true));
   assert.equal(provider.length, before, 'online, and still nothing to the provider');
+  // a reminder made in private mode carries the mark (made by code, no model call)
+  from = out.length;
+  await typed('Remind me in 2 hours to call the clinic.');
+  await waitFor(() => said(from, /remind you to call the clinic/), 10_000, 'the private reminder');
+  const mem = JSON.parse(fs.readFileSync(path.join(home, '.gg', 'sidekick', 'memory.json'), 'utf8'));
+  assert.equal(mem.commitments.find((c) => /clinic/.test(c.text)).private, true, 'the private mark, in memory.json');
 
   // a restart keeps the mode
   clearInterval(timer); side.kill('SIGKILL'); await sleep(500);
@@ -141,8 +148,15 @@ try {
   await waitFor(() => said(from, /Private mode is off\. Claude is answering again\./), 10_000, 'the mode ends');
   assert.ok(page(from).some((m) => m.kind === 'private' && m.on === false));
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'Documents', 'roamies-pi', 'state.json'), 'utf8')).privateMode, false);
+  // Claude's next request: the private reminder only as a count, never its words
+  from = out.length; const n0 = provider.length;
+  await typed('What is open today?');
+  await waitFor(() => replied(from), 20_000, 'the provider\'s reply');
+  const body = JSON.stringify(provider.slice(n0).map((r) => r.body));
+  assert.doesNotMatch(body, /clinic|doctor/i, 'no private word reaches Claude');
+  assert.match(body, /Private: 1 to-do or reminder made in private mode/);
   // nothing private in the log or the ledger
-  assert.doesNotMatch(logText() + JSON.stringify(ledger()), /doctor/);
+  assert.doesNotMatch(logText() + JSON.stringify(ledger()), /doctor|clinic/);
   console.log('which model answers, the sidecar run: passed');
 } finally {
   clearInterval(timer);
