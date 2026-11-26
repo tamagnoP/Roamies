@@ -90,7 +90,8 @@ export function createModelServer({ settings, home = os.homedir(), spawnImpl = s
       for (const n of notes) log('model_server_note', { note: n.slice(0, 160) });
       if (problems.length) { const line = `The local model can't be started: ${problems.join(' ')}`; if (told !== line) { told = line; onNotice(line); } log('model_server_problem', { problems: problems.length }); return line; }
       // Something already answers there (started before, or by hand): used as it is.
-      if (await probeImpl(localAddress(s.address), { ms: 800 })) { log('model_server_found', {}); return ''; }
+      // (The server lists no model until it has loaded one: an empty list is not ready.)
+      if ((await probeImpl(localAddress(s.address), { ms: 800 }))?.length) { log('model_server_found', {}); return ''; }
       try {
         tmp = fs.realpathSync(fs.mkdtempSync(path.join(tmpRoot, 'roamies-model-')));
         const cmd = serverCommand({ python: s.start.python, home, model: s.start.model, draft, port: s.start.port });
@@ -106,7 +107,7 @@ export function createModelServer({ settings, home = os.homedir(), spawnImpl = s
       const t0 = now();
       while (now() - t0 < startSeconds * 1000) {
         if (child !== c) return 'The local model server stopped while it was starting.';
-        if (await probeImpl(localAddress(s.address), { ms: 1000 })) { log('model_server_ready', { ms: now() - t0 }); return ''; }
+        if ((await probeImpl(localAddress(s.address), { ms: 1000 }))?.length) { log('model_server_ready', { ms: now() - t0 }); return ''; }
         await new Promise((r) => setTimeout(r, 1000));
       }
       stop('slow');
