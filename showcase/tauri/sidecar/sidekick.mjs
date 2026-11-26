@@ -98,6 +98,7 @@ const STAND_PASS = new Set(['list', 'esc', 'cancel_ask', 'ask_text', 'heard', 'h
 function standCatch(msg) {
   if (!stood?.on() || PAGE_SETTINGS.has(msg.kind) || STAND_PASS.has(msg.kind) || (msg.kind === 'speech' && msg.stop)) return false;
   if (msg.kind === 'speech') { if (msg.mark) { const done = played.get(msg.mark); played.delete(msg.mark); done?.(); } return true; }
+  if (msg.kind === 'ask' && msg.bar) return false; // the ask field he opened himself (the owner, 2026-11-26: not a leak)
   if (msg.kind === 'ask') { logLine('stand_down_leak', { kind: 'ask' }); return false; } // a question is never dropped (its answer would never come); every one is held at its source
   if (msg.kind === 'say' && typeof msg.text === 'string' && msg.text.trim()) { queue.hold({ kind: 'caught', text: String(msg.text).slice(0, 2000), mood: typeof msg.mood === 'string' ? msg.mood : null }, 'stood'); logLine('stand_down_caught', { kind: 'say', chars: msg.text.length }); }
   return true;
@@ -2216,7 +2217,9 @@ async function typeToAsk({ interrupt = false } = {}) {
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
   if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
-  if (text?.trim()) { standUp('typed'); if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
+  // The stand-down phrase and a closing phrase ("thanks") typed alone are taken as said (the owner, 2026-11-26).
+  if (text?.trim() && isStandDown(text, ...standPhrase())) { standDownNow('typed'); return; }
+  if (text?.trim()) { standUp('typed'); if (!pi.bubble() && !answers.open() && flow.closing(text)) return; if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
 }
 function onWriteTap() {
   if (onboarding) return;

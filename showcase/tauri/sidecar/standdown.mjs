@@ -73,7 +73,7 @@ export function createStandDown({ home = os.homedir(), settings = () => loadSett
   const on = () => !!cur?.on;
   return {
     on,
-    /** It starts (by: 'phrase' | 'key'). what: what it stopped, true or false each, for the log line. → false when it
+    /** It starts (by: 'phrase' | 'key' | 'typed', the phrase typed in the ask field). what: what it stopped, true or false each, for the log line. → false when it
      *  was on already (then nothing is logged). */
     start(by, what = {}) {
       if (on()) return false;
