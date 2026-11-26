@@ -1996,6 +1996,21 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   parser's written forms go where the missed-task and check-in answers read them. Then C to F once each, no stop on
   the result, and stages 1 to 6 with one report at the end. Plan:
   `~/Documents/roamies-reports/2026-11-26_1206_feature-23-confirm-before-saving-plan.md`.
+- **2026-11-26, evening (the owner, after the hand-check run, `2026-11-26_1747_TESTS-RUN.md`).** The run accepted;
+  fixed on `fixes-after-run`, merged into `next`:
+  - the Done line for a to-do ticked in Super Productivity is written right after the sync that finds it;
+  - no doubled full stop in a code-worded line;
+  - TESTS.md's `ps` line replaced by a sandbox check the owner can run (`sandbox_check` on the server and on Roamies);
+  - after a Claude reply given a list or count of the to-dos, the app adds one line with how many are private (the
+    outline's numbers leave them out);
+  - a local model that can't start is stopped after `local.start.waitSeconds` (45), and the request gets only "The
+    local model could not start, so nothing was sent.";
+  - typed "review my day" is answered by code;
+  - the persona's name, "please", "can you" or "could you" may come before "remind me";
+  - the ledger names the local model's warm-ups apart.
+
+  Typed but not spoken: the stand-down phrase and "thanks" alone still go to the model. The smaller items not fixed
+  are with the owner, each with a proposed fix.
 
 ## 6. Still to test
 
