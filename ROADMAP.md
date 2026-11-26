@@ -1272,6 +1272,20 @@ server, the tunnel).
     (952 and 966 tokens reused), requests answered; under the same profile Python could neither connect out
     (1.1.1.1:53, 127.0.0.1:22), bind another port, nor read or write in the home folder.
 
+- **Review accepted (2026-11-26, the owner), with four points, then merged into `next`.**
+  1. The ledger's completeness, measured with the real claude program: the warm-up alone made no model request (no
+     result, no transcript entry, no usage reported) but opened one connection to Anthropic's port 443. Each result's
+     per-model usage (`modelUsage`, cumulative over a session) matched the request's own turns in three requests (a
+     warm one, the next on the same session, a cold one). The ledger now counts what that usage holds beyond the
+     session's earlier totals and the request's turns (kind `own`); the program's own calls outside the query pipeline
+     (its documentation names token-count probes) aren't reported. One sentence names what can't be seen, in the
+     answer and in LOCAL-ONLY.md (`c26f80e`).
+  2. The code-decided rows fire only when his whole sentence fits the frame, polite words aside; a change to an open
+     to-do needs its whole title; free text may not carry "then", "also", "after that"; open takes the app in his
+     words. The "remind me" row now needs the sentence to start with it (`70f8e4c`).
+  3. A read row: looking up a day; code runs `show_day` first, the model words the answer (`70f8e4c`).
+  4. Report files carry the real clock time; ten earlier ones were renamed to their creation time.
+
 ### 32. Ledger
 
 Agreed 2026-11-24 (the owner); recorded 2026-11-25. Recorded with 23, shown in 21.
