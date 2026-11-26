@@ -106,7 +106,7 @@ export function startProblems({ python, home, model = 'e4b', draft = true }) {
 const ROUND = (name) => [
   { role: 'system', content: liteSystem(name) },
   { role: 'user', content: `(From the app, not said by ${name}. A check of the server.)\n\n${name}: What is on my calendar today?` },
-  { role: 'assistant', content: null, tool_calls: [{ id: 'check1', type: 'function', function: { name: 'show_day', arguments: '{"day":"today"}' } }] },
+  { role: 'assistant', content: null, tool_calls: [{ id: 'check1', type: 'function', function: { name: 'show_day', arguments: '{}' } }] },
   { role: 'tool', tool_call_id: 'check1', content: 'today:\n09:00 to 10:00 (60 min): Check' },
 ];
 /** The opening is reused when at least this share of the warm-up's prompt is found in the cache. */
