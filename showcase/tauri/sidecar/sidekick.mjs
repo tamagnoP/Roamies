@@ -47,6 +47,7 @@ import { SHORT, leanTools } from './lean.mjs';
 import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
 import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, off by default
+import { createModelServer } from './modelserver.mjs'; // feature 23, stage 6: the local model server, started by Roamies
 import { BACK_AGAIN, LOCAL_TAG, PRIVATE_OFF, PRIVATE_ON, PRIVATE_TAG, cantLocally, createAnnouncer, isNetworkError, privateAsk, routeFor } from './route.mjs'; // feature 23, stage 4
 import { readState, writeState } from './pi.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
@@ -1248,8 +1249,13 @@ const sideUse = (kind) => (u) => ledger.record({ kind, where: 'provider', ...u }
 // Local-only build (feature 23, stage 3): the local model. The app's own tools by their real names, the open to-dos
 // and the calendar's blocks, today's daily note when asked, the yes/no bubble for a change the model chose (its
 // answer window, never kept when unanswered), and a ledger line for each call, "this Mac".
+// Stage 6: the model server, when it is Roamies' to start (local.start.python, at local.start.port): on first need,
+// asleep after local.start.sleepAfterMinutes, stopped at quit.
+const modelServer = createModelServer({ settings: settingsNow, home: HOME, log: (kind, data) => logLine(kind, data), onNotice: (text) => unasked({ kind: 'notice', text, mood: 'concerned' }) });
+function modelServerPid() { return modelServer.pid; }
+process.on('exit', () => { try { modelServer.stop('quit'); } catch { /* not running */ } });
 const localRoute = createLocalRoute({
-  settings: settingsNow, userName,
+  settings: settingsNow, userName, server: modelServer,
   tool: (name) => tools.find((t) => t.name === name) ?? null,
   todos: () => openCommitments().map((c) => ({ id: c.id, title: c.text, due: c.due ?? null })),
   blocks: () => cal.blocks(),

@@ -28,19 +28,22 @@ export function liteFacts(todos, blocks, now = Date.now()) {
 /**
  * settings() → loadSettings's (local, calendar, persona); userName; tool(name) → the app's tool ({ execute }) by its
  * real name; todos() → the open to-dos [{ id, title, due (ms or null) }]; blocks() → { id: { start, minutes } };
- * readDaily() → today's daily note as text; confirm({ question }) → true, false or null (the yes/no bubble);
+ * server: the model server Roamies starts itself (modelserver.mjs), or null; readDaily() → today's daily note as text; confirm({ question }) → true, false or null (the yes/no bubble);
  * record(line) → the ledger; log(kind, data); fetchImpl (tests).
  * → { request(said, { signal, private }) → { reply, by, calls, ... } or { problem } (a code-worded line; private: the
  *   ledger lines say so), ready() → '' or the
  *   problem, reset() (the server was started again: check it again), history() }
  */
-export function createLocalRoute({ settings, userName = 'the user', tool, todos = () => [], blocks = () => ({}), readDaily = async () => '', confirm = async () => null, record = () => {}, log = () => {}, now = () => Date.now(), fetchImpl } = {}) {
+export function createLocalRoute({ settings, userName = 'the user', server = null, tool, todos = () => [], blocks = () => ({}), readDaily = async () => '', confirm = async () => null, record = () => {}, log = () => {}, now = () => Date.now(), fetchImpl } = {}) {
   let checked = null; // { address, problem, model }: the live check of the server at that address
   const history = [];
   async function ready() {
     const s = settings().local, address = localAddress(s.address);
     if (!address) return { problem: 'The local model is off: local.address is empty.' };
-    if (checked?.address === address) return checked;
+    // Stage 6: the server Roamies starts itself, started now if it isn't running; a new start is checked again.
+    const started = server ? await server.ensure() : '';
+    if (started) return { problem: started, retry: true };
+    if (checked?.address === address && checked.starts === (server?.starts ?? 0)) return checked;
     const models = await probe(address, { fetchImpl });
     if (!models?.length) return { problem: NOT_ANSWERING, retry: true };
     const model = s.model && models.includes(s.model) ? s.model : s.model ? null : models[0];
@@ -50,7 +53,7 @@ export function createLocalRoute({ settings, userName = 'the user', tool, todos 
     try { r = await liveCheck({ ...liveCalls(address, fetchImpl), model, name: userName }); } catch (e) { return { problem: NOT_ANSWERING, retry: true, why: String(e?.message ?? e).slice(0, 120) }; }
     record({ kind: 'warmup', where: 'mac', provider: 'local', model });
     log('local_checked', { ms: now() - t0, problem: !!r.problem, cached: r.cached ?? null });
-    checked = { address, model, problem: r.problem };
+    checked = { address, model, problem: r.problem, starts: server?.starts ?? 0 };
     return checked;
   }
   async function request(said, { signal, private: priv = false } = {}) {
