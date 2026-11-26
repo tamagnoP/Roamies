@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { NO_START, createModelServer, serverProfile } from '../modelserver.mjs';
+import { NO_START, createModelServer, otherAtPort, portBusy, serverProfile } from '../modelserver.mjs';
 import { DRAFTS, MODELS, TESTED, snapshotDir } from '../localserver.mjs';
 import { settingsDefaults } from '../pi.mjs';
 
@@ -44,10 +44,9 @@ const d = settingsDefaults(home);
 let local = { ...d.local, address: 'http://127.0.0.1:8080/v1', start: { ...d.local.start, python } };
 const settings = () => ({ ...d, local });
 const spawned = [], notices = [], logs = [];
-let answering = false, loading = false, clock = 0, tick = null;
-const spawnImpl = (cmd, args, opts) => { const c = new EventEmitter(); c.pid = 4242; c.killed = []; c.kill = (sig) => { c.killed.push(sig); }; spawned.push({ cmd, args, opts, c }); setTimeout(() => { answering = true; }, 10); return c; };
-const server = createModelServer({ settings, home, spawnImpl, sandboxExec: '/usr/bin/sandbox-exec', onNotice: (t) => notices.push(t), log: (k, x) => logs.push([k, x]), now: () => clock, probeImpl: async () => (loading ? [] : answering ? ['m'] : null), startSeconds: 5, every: (fn) => { tick = fn; } });
-loading = true; setTimeout(() => { loading = false; }, 1500);
+let answering = false, loading = false, loadOnSpawn = true, busy = false, clock = 0, tick = null;
+const spawnImpl = (cmd, args, opts) => { const c = new EventEmitter(); c.pid = 4242; c.killed = []; c.kill = (sig) => { c.killed.push(sig); }; spawned.push({ cmd, args, opts, c }); if (loadOnSpawn) { loadOnSpawn = false; loading = true; setTimeout(() => { loading = false; }, 1500); } setTimeout(() => { answering = true; }, 10); return c; };
+const server = createModelServer({ settings, home, spawnImpl, sandboxExec: '/usr/bin/sandbox-exec', onNotice: (t) => notices.push(t), log: (k, x) => logs.push([k, x]), now: () => clock, probeImpl: async () => (loading ? [] : answering ? ['m'] : null), busyImpl: async () => busy, startSeconds: 5, every: (fn) => { tick = fn; } });
 const t0 = Date.now(); assert.equal(await server.ensure(), '');
 assert.ok(Date.now() - t0 >= 1000, 'an empty list of models (still loading) is not ready');
 assert.equal(spawned.length, 1); const s0 = spawned[0];
@@ -64,11 +63,15 @@ assert.ok(logs.some(([k, x]) => k === 'model_server_stop' && x.why === 'idle'));
 // woken by the next request
 answering = false; assert.equal(await server.ensure(), ''); assert.equal(spawned.length, 2); assert.equal(server.starts, 2);
 server.stop('quit'); answering = false;
-// something already answering at the address: used as it is, not started
-answering = true; local = { ...local }; assert.equal(await server.ensure(), ''); assert.equal(spawned.length, 2);
-answering = false;
-// not Roamies' to start: another port (the owner's own server or tunnel), or no Python
-local = { ...local, address: 'http://127.0.0.1:9000/v1' }; assert.equal(await server.ensure(), ''); assert.equal(spawned.length, 2);
+// something else answering at its port (the owner, 2026-11-26): a notice, nothing sent, not started
+answering = true; local = { ...local }; assert.equal(await server.ensure(), NO_START); assert.equal(spawned.length, 2);
+assert.equal(notices.at(-1), otherAtPort(8080)); assert.ok(logs.some(([k]) => k === 'model_server_other'));
+await server.ensure(); assert.equal(notices.length, 1, 'the notice is said once');
+answering = false; loading = true; assert.equal(await server.ensure(), NO_START, 'a server still loading there is something else too'); loading = false;
+busy = true; assert.equal(await server.ensure(), NO_START, 'a program listening there that is no model server'); busy = false; assert.equal(spawned.length, 2);
+notices.length = 0;
+// not Roamies' to start: another port (the owner's own server or tunnel), or no Python; whatever answers is used
+answering = true; local = { ...local, address: 'http://127.0.0.1:9000/v1' }; assert.equal(await server.ensure(), ''); assert.equal(spawned.length, 2); answering = false;
 local = { ...local, address: 'http://127.0.0.1:8080/v1', start: { ...local.start, python: '' } }; assert.equal(await server.ensure(), ''); assert.equal(spawned.length, 2);
 // a start-up problem: said once in a notice, and not started
 local = { ...local, start: { ...local.start, python: '/nowhere/bin/python' } };
@@ -85,15 +88,24 @@ server.stop('quit');
 assert.equal(NO_START, 'The local model could not start, so nothing was sent.');
 assert.equal(d.local.start.waitSeconds, 45);
 let clock2 = 0, probes = 0;
-const slow = createModelServer({ settings, home, spawnImpl: (cmd, args, opts) => { const c = new EventEmitter(); c.pid = 1; c.kill = () => {}; return c; }, probeImpl: async () => { probes++; return null; }, now: () => (clock2 += 10_000), every: () => {} });
+const slow = createModelServer({ settings, home, spawnImpl: (cmd, args, opts) => { const c = new EventEmitter(); c.pid = 1; c.kill = () => {}; return c; }, probeImpl: async () => { probes++; return null; }, busyImpl: async () => false, now: () => (clock2 += 10_000), every: () => {} });
 assert.equal(await slow.ensure(), NO_START); assert.equal(slow.running, false);
 assert.ok(probes >= 3 && probes <= 5, `waited the setting's 45 s, not longer (${probes} checks, about 10 s apart)`);
 probes = 0; clock2 = 0; local = { ...local, start: { ...local.start, waitSeconds: 10 } };
 assert.equal(await slow.ensure(), NO_START); assert.ok(probes <= 1, `local.start.waitSeconds is read (${probes} checks)`);
 // it stops while starting, or can't be started at all: the same line
-const dies = createModelServer({ settings, home, spawnImpl: () => { const c = new EventEmitter(); c.pid = 2; c.kill = () => {}; setTimeout(() => c.emit('exit', 1, null), 5); return c; }, probeImpl: async () => null, startSeconds: 5, every: () => {} });
+const dies = createModelServer({ settings, home, spawnImpl: () => { const c = new EventEmitter(); c.pid = 2; c.kill = () => {}; setTimeout(() => c.emit('exit', 1, null), 5); return c; }, probeImpl: async () => null, busyImpl: async () => false, startSeconds: 5, every: () => {} });
 assert.equal(await dies.ensure(), NO_START);
-const fails = createModelServer({ settings, home, spawnImpl: () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); }, probeImpl: async () => null, startSeconds: 5, every: () => {} });
+const fails = createModelServer({ settings, home, spawnImpl: () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); }, probeImpl: async () => null, busyImpl: async () => false, startSeconds: 5, every: () => {} });
 assert.equal(await fails.ensure(), NO_START);
+// portBusy: a real listener on a free port, and the same port once closed
+{
+  const net = await import('node:net');
+  const srv = net.createServer(() => {}); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  assert.equal(await portBusy(port), true);
+  await new Promise((r) => srv.close(r));
+  assert.equal(await portBusy(port), false);
+}
 fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(tmp, { recursive: true, force: true });
 console.log('model server tests passed');

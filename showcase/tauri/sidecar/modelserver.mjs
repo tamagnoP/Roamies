@@ -8,10 +8,14 @@
 //     serverCommand and the offline variables. The sandbox denies every kind of network except listening on
 //     127.0.0.1 at its port; it may write only in its own temporary folder; in the home folder it may read only the
 //     pinned models' files (and its Python, if that lives there); it starts no other program.
+//   - Only its own child is used (the owner, 2026-11-26): if anything else answers or listens at local.start.port
+//     before it starts, a notice says so, the request gets NO_START, and nothing is sent. Whatever answers at an
+//     address Roamies doesn't start (the owner's own server or tunnel) is used as it is.
 //   - Started on first need (a request to the local model), stopped after local.start.sleepAfterMinutes without one
 //     (0: never), and at quit. Its output is thrown away.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { OFFLINE, SANDBOX_EXEC } from './kokorovoice.mjs';
@@ -21,6 +25,16 @@ import { DRAFTS, MODELS, serverCommand, snapshotDir, startProblems } from './loc
 // What a request is told when the server Roamies starts could not start, for whatever reason (the reason is logged,
 // and a problem found before starting is a notice of its own, said once): only what is true.
 export const NO_START = 'The local model could not start, so nothing was sent.';
+/** The notice when something else is at the port Roamies starts its own server on. */
+export const otherAtPort = (port) => `Something else is answering at 127.0.0.1:${port}, where Roamies starts its own local model (local.start.port), so the local model was not used and nothing was sent to it. Stop that program, or set local.start.port to a free port.`;
+/** Whether anything accepts a connection at 127.0.0.1:port. */
+export function portBusy(port, ms = 800) {
+  return new Promise((resolve) => {
+    const c = net.createConnection({ host: '127.0.0.1', port });
+    const done = (v) => { c.destroy(); resolve(v); };
+    c.setTimeout(ms, () => done(false)); c.once('connect', () => done(true)); c.once('error', () => done(false));
+  });
+}
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 const inside = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
 /** Every file a pinned repository's snapshot holds: each link on the way (the cache links a snapshot's file to a
@@ -72,7 +86,7 @@ export function serverProfile({ home, tmp, python, port, models }) {
 }
 
 /** settings() → loadSettings's; onNotice(line): a start-up problem, said once; log(kind, data). */
-export function createModelServer({ settings, home = os.homedir(), spawnImpl = spawn, sandboxExec = SANDBOX_EXEC, onNotice = () => {}, log = () => {}, now = () => Date.now(), tmpRoot = os.tmpdir(), probeImpl = probe, startSeconds = null, every = (fn, ms) => { const t = setInterval(fn, ms); t.unref?.(); return t; } } = {}) {
+export function createModelServer({ settings, home = os.homedir(), spawnImpl = spawn, sandboxExec = SANDBOX_EXEC, onNotice = () => {}, log = () => {}, now = () => Date.now(), tmpRoot = os.tmpdir(), probeImpl = probe, busyImpl = portBusy, startSeconds = null, every = (fn, ms) => { const t = setInterval(fn, ms); t.unref?.(); return t; } } = {}) {
   let child = null, tmp = null, starting = null, lastUse = 0, told = '', starts = 0;
   const mine = () => { const s = settings().local; const a = localAddress(s.address); return s.start.python && a === `http://127.0.0.1:${s.start.port}/v1` ? s : null; };
   function stop(why = 'stopped') {
@@ -91,9 +105,13 @@ export function createModelServer({ settings, home = os.homedir(), spawnImpl = s
       const { problems, notes, draft } = startProblems({ python: s.start.python, home, model: s.start.model, draft: s.start.draft });
       for (const n of notes) log('model_server_note', { note: n.slice(0, 160) });
       if (problems.length) { const line = `The local model can't be started: ${problems.join(' ')}`; if (told !== line) { told = line; onNotice(line); } log('model_server_problem', { problems: problems.length }); return NO_START; }
-      // Something already answers there (started before, or by hand): used as it is.
-      // (The server lists no model until it has loaded one: an empty list is not ready.)
-      if ((await probeImpl(localAddress(s.address), { ms: 800 }))?.length) { log('model_server_found', {}); return ''; }
+      // Something else at the port (not Roamies' child): never used.
+      if ((await probeImpl(localAddress(s.address), { ms: 800 })) !== null || (await busyImpl(s.start.port))) {
+        const line = otherAtPort(s.start.port);
+        if (told !== line) { told = line; onNotice(line); }
+        log('model_server_other', { port: s.start.port });
+        return NO_START;
+      }
       try {
         tmp = fs.realpathSync(fs.mkdtempSync(path.join(tmpRoot, 'roamies-model-')));
         const cmd = serverCommand({ python: s.start.python, home, model: s.start.model, draft, port: s.start.port });
@@ -107,6 +125,7 @@ export function createModelServer({ settings, home = os.homedir(), spawnImpl = s
       starts++;
       log('model_server_start', { model: s.start.model, draft, port: s.start.port });
       const t0 = now(), limit = startSeconds ?? s.start.waitSeconds;
+      // (The server lists no model until it has loaded one: an empty list is not ready.)
       while (now() - t0 < limit * 1000) {
         if (child !== c) { log('model_server_failed', { why: 'stopped while starting' }); return NO_START; }
         if ((await probeImpl(localAddress(s.address), { ms: 1000 }))?.length) { log('model_server_ready', { ms: now() - t0 }); return ''; }
