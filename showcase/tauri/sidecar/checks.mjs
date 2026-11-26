@@ -354,6 +354,14 @@ const SHOW_FRAMES = [
   String.raw`what (?:have i|'ve i|i've|do i have|have i got|i have)(?: got)?(?: on| going on)?(?: (?:on|for))? (?<slot>.+?)`,
   String.raw`show me(?: (?:my|the) calendar| my day| what's on)?(?: (?:on|for))? (?<slot>.+?)`,
 ].map(frame);
+/** His sentence (as normal() gives it) with the persona's name taken out of the polite words before the request
+ *  ("Jarvis, please remind me …", "please Jarvis remind me …"); anywhere else it stays. */
+export function nameAside(t, name = '') {
+  const n = normal(name);
+  if (!n) return t;
+  const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return t.replace(new RegExp(`^(?:(?:please|can you|could you|would you|will you|hey|ok|okay|oh|right|so|and|${esc})\\s+)*`, 'u'), (lead) => lead.replace(new RegExp(`(?:^|(?<=\\s))${esc}\\s+`, 'gu'), ''));
+}
 const fit = (frames, t) => { for (const f of [].concat(frames)) { const m = f.exec(t); if (m) return m.groups.slot.trim(); } return null; };
 const ONE_REQUEST = (slot) => !!slot && !/^(?:and|then|also)\b/.test(slot) && !/\b(?:and then|then|also|after that|as well as)\b/.test(slot);
 const bareTitle = (x) => normal(x).replace(/^(?:the|my)\s+/, '');
@@ -394,8 +402,8 @@ export function titleIn(said, items = []) {
 }
 /** The action code decides from his words. items: the open to-dos [{ id, title }]. → { action, tool, status, title }
  *  (title: the one open to-do named in his sentence, or null), or null when no row matches or more than one does. */
-export function decideAction(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
-  const t = normal(said), title = titleIn(said, items), times = readTimes(said, { now, dayStart, dayEnd }).times;
+export function decideAction(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080, name = '' } = {}) {
+  const t = nameAside(normal(said), name), title = titleIn(said, items), times = readTimes(said, { now, dayStart, dayEnd }).times;
   const rows = DECIDED.filter((r) => r.test(t, { times, title, now, dayStart, dayEnd }));
   if (rows.length !== 1) return null;
   const r = rows[0];
@@ -406,8 +414,8 @@ const BEFORE_TIME = new Set(['at', 'on', 'by', 'this', 'for', 'around', 'about']
 /** A reminder code can make alone: "remind me" (only polite words before it), a time code places, and a text: what
  *  is left once the time words, the word before each ("at", "on"), "remind me to" and a closing "please" or "thanks" are taken out, in his
  *  own words and capitals. → { text, due: { ms, dayOnly } } or null (the request then goes to the model). */
-export function reminderByCode(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
-  const d = decideAction(said, { items, now, dayStart, dayEnd });
+export function reminderByCode(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080, name = '' } = {}) {
+  const d = decideAction(said, { items, now, dayStart, dayEnd, name });
   if (d?.action !== 'remind') return null;
   const p = placeTimes('remind', said, { now, dayStart, dayEnd });
   if (!p.places?.due || p.places.due.dayOnly) return null;
@@ -422,7 +430,7 @@ export function reminderByCode(said, { items = [], now = Date.now(), dayStart = 
   const keep = tokens.filter((_, i) => of[i].length > 0 && of[i].every((j) => !drop.has(j)));
   const words = keep.join(' ').replace(/[\s,;:.!?]+$/, '').replace(/^[\s,]+/, '');
   const m = /^(.*?)\bremind me\s+to\s+(.+)$/i.exec(words.replace(/(?:[\s,]+(?:please|thanks|thank you|cheers))+$/i, ''));
-  if (!m || !POLITE.test(normal(m[1]) ? `${normal(m[1])} ` : '')) return null;
+  if (!m || !POLITE.test(nameAside(normal(m[1]) ? `${normal(m[1])} ` : '', name))) return null;
   const text = m[2].replace(/[\s,]+$/, '').trim();
   if (!text || readTimes(text, { now, dayStart, dayEnd }).times.length) return null;
   return { text, due: p.places.due };
@@ -473,10 +481,10 @@ export const oneChange = (names, changes = WRITE_TOOLS) => (names.filter((n) => 
  *  finish(reply) → { reply, by: 'model' | 'replaced', replaced }: the lines after changes first; a reply with a claim
  *    nothing confirmed is replaced, and with no tool called (result() or called() never), one that promises an action.
  *  decided: the action code decided from his words (items: the open to-dos, for a title in his sentence). */
-export function createRequestCheck({ said, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, actionOf = ACTION_OF, changes = WRITE_TOOLS, items = [] }) {
+export function createRequestCheck({ said, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, actionOf = ACTION_OF, changes = WRITE_TOOLS, items = [], name = '' }) {
   const confirmed = new Set(), lines = [];
   let changed = 0, called = 0;
-  const decided = decideAction(said, { items, now, ...hours });
+  const decided = decideAction(said, { items, now, ...hours, name });
   return {
     /** The action code decided from his words (decideAction), or null: the model's choice is shown for a yes. */
     decided,

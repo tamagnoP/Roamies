@@ -1,6 +1,7 @@
 // Local-only build, feature 23: the lite request for the local model (lite.mjs): the opening, the runner, the request
 // loop with the checks of checks.mjs (tested on their own in checks.test.mjs).
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { NOTHING_CHANGED, ONE_AT_A_TIME, createRequestCheck } from '../checks.mjs';
 import { LITE_NAMES, LITE_TOOLS, createLiteRunner, liteBody, liteRequest, liteState, liteSystem, warmBody } from '../lite.mjs';
 
@@ -164,6 +165,10 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   let { out, f } = await req('Remind me at half past four to pick up the parcel.', []);
   assert.deepEqual([out.by, out.reply, f.bodies.length], ['code', 'I\'ll remind you to pick up the parcel at 16:30.', 0]);
   assert.deepEqual(seen.pop(), ['remember_commitment', { text: 'pick up the parcel', due: '2026-11-25T16:30:00', kind: 'reminder' }]);
+  // the persona's name before it (localroute.mjs passes settings' persona.name)
+  ({ out, f } = await req('Jarvis, please remind me at half past four to pick up the parcel.', [], { persona: 'Jarvis' }));
+  assert.deepEqual([out.by, f.bodies.length], ['code', 0]); assert.equal(seen.pop()[1].text, 'pick up the parcel');
+  assert.match(fs.readFileSync(new URL('../localroute.mjs', import.meta.url), 'utf8'), /persona: s\.persona\?\.name \?\? ''/);
   // one it can't read whole goes to the model, and "remind me" still decides: saved at once
   ({ out, f } = await req('Remind me tomorrow to buy milk.', [{ calls: [['remember_commitment', { text: 'buy milk' }]] }], { confirm: answer(null) }));
   assert.deepEqual([out.by, f.bodies.length, asked.length], ['tools', 1, 0]); assert.deepEqual(seen.pop(), ['remember_commitment', { text: 'buy milk', due: '2026-11-26', kind: 'reminder' }]);

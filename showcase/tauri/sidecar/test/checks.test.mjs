@@ -310,5 +310,14 @@ assert.equal(oneChange(['show_day', 'search_notes']), '');
   r.result('show_day', { ok: true, text: 'Today: lab meeting' });
   assert.deepEqual(r.finish('You have the lab meeting; I\'ll keep an eye on it.').by, 'model', 'after a read, a promise is not checked: only claims are');
   assert.equal(createRequestCheck({ said: 'Open Zotero.', now: NOW, items: OPEN }).decided.action, 'open');
+  // the persona's name may come before the request, with "please", "can you" or "could you" (2026-11-26); elsewhere
+  // it is a word like any other
+  const RN = (t) => { const r = reminderByCode(t, { items: OPEN, now: NOW, name: 'Jarvis' }); return r && r.text; };
+  for (const t of ['Jarvis, remind me at 5 to call home.', 'Please, Jarvis, remind me at 5 to call home', 'Jarvis could you remind me at 5 to call home please', 'Can you, Jarvis, remind me at 5 to call home?', 'Hey Jarvis, remind me at 5 to call home']) {
+    assert.equal(decideAction(t, { items: OPEN, now: NOW, name: 'Jarvis' })?.action, 'remind', t); assert.equal(RN(t), 'call home', t);
+  }
+  assert.equal(decideAction('Jarvis, remind me at 5 to call home.', { items: OPEN, now: NOW })?.action, undefined, 'another name: not polite words');
+  assert.equal(decideAction('Tell Jarvis to remind me at 5 to call home', { items: OPEN, now: NOW, name: 'Jarvis' }), null);
+  assert.equal(createRequestCheck({ said: 'Jarvis, open Zotero.', now: NOW, items: OPEN, name: 'Jarvis' }).decided.app, 'Zotero');
 }
 console.log('checks tests passed');
