@@ -1309,6 +1309,11 @@ search text. Includes reading a project's `TODO.md`; only pi writes that file.
 - Changes guarantee 2 in `CLAUDE.md`: Roamies still never changes files, but can read in permitted folders.
 - Builder: Claude Code, branch `roamies-read`. Prompt B in the appendix is older than the "in that turn" wording
   and the note editing, and has neither.
+- **Plan written 2026-11-26** (`~/Documents/roamies-reports/2026-11-26_1948_feature-14-plan.md`), with the owner's
+  rules of that day: every use at his request in that turn; a file's text sent to Claude counted in the ledger, and
+  in private mode sent only to the local model; the sandbox's blocked folders and files apply; a note changed only on
+  his request, shown before it is saved, the previous version kept; notes never deleted. Eleven questions are with
+  the owner; nothing is built.
 
 ### 29. Run watcher
 
