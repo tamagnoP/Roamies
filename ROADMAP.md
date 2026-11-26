@@ -1149,7 +1149,7 @@ server, the tunnel).
   memory free 54 % before and 44 % at the lowest; swap 794 MB before and after, no growth. The voice helper was not
   running (the harness has none).
 - **Plan of 2026-11-26, after C 5 and D 4 of 6 (the owner's answers, then the plan; also in
-  `~/Documents/roamies-reports/2026-11-26_1048_feature-23-plan-completeness-check.md`).**
+  `~/Documents/roamies-reports/2026-11-26_1049_feature-23-plan-completeness-check.md`).**
   - His answers: (1) a completeness check: code finds every time, day and length he said, with the parser the tools
     use; a call that leaves one out is refused, retried once with a code-worded hint naming the missing words, and
     refused again nothing is saved and a code-worded line asks him; with two times (a move from one to another) both
@@ -1202,7 +1202,7 @@ server, the tunnel).
   now.
 
 - **Plan of 2026-11-26, after the wrong save on E: times taken away from the model** (the owner's answer verbatim
-  and the plan in `~/Documents/roamies-reports/2026-11-26_1140_feature-23-times-taken-from-the-model-plan.md`).
+  and the plan in `~/Documents/roamies-reports/2026-11-26_1134_feature-23-times-taken-from-the-model-plan.md`).
   The local model's tools have no time, day or length fields: it chooses the action and the to-do by its title.
   Code reads the times from his sentence with the tools' parser and places them by a table of rules per action
   (`PLACES` in `checks.mjs`, with tests); what can't be placed, or a time the action needs and he didn't say: nothing
@@ -1964,7 +1964,7 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   their tests, outside the local model's files: they take a request, the tool calls and the tool results, and know
   nothing of the model. The Claude route will use it in a later feature; not wired into it now. Plan: `checks.mjs`
   with `createRequestCheck`, `lite.mjs` keeping the prompt, tools, runner and request loop
-  (`~/Documents/roamies-reports/2026-11-26_1130_feature-23-checks-module-plan.md`). Done the same day: A and B
+  (`~/Documents/roamies-reports/2026-11-26_1120_feature-23-checks-module-plan.md`). Done the same day: A and B
   through the real model give the same outcomes, tool arguments and replies as before the move.
 
 - **2026-11-26, afternoon (feature 23, the owner).** The plan of 2026-11-25 with his answers and the decisions since
