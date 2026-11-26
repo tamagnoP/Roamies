@@ -43,7 +43,7 @@ Last updated: 2026-11-25.
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
-| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); model and code check measured 2026-11-26; completeness check, pins and start-up check built the same day; stopped at the owner's condition (a wrong save on set E), waiting for his choice | |
+| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); model and code check measured 2026-11-26; completeness check, pins and start-up check built the same day; times taken away from the model the same day; stopped at the owner's condition (a wrong save on set F: a wrong action), next: a yes before each change | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
 | 25 | Check-ins on progress | Built with 31 on `check-ins` (2026-11-25, plan answered by the owner); waiting for review | `check-ins` |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
@@ -1208,6 +1208,22 @@ server, the tunnel).
   (`PLACES` in `checks.mjs`, with tests); what can't be placed, or a time the action needs and he didn't say: nothing
   saved, a code-worded question naming what is missing ("Which day?", "For how long?"). One change per request.
   Then set F, committed before it is run; C, D, E, F once; any wrong save on F stops the work.
+
+- **Built and measured (2026-11-26, the plan above).** `PLACES` in `checks.mjs` (one row per action, each with tests),
+  `readTimes` (written forms such as "3pm", "ten past 3", "half 3", "1.5 hours" read; a word about time no parser
+  read, such as "morning", "week", "midnight", stops the save; a weekday after "the" is a name), `matchTitle`, one
+  change per request. Writing the table's tests found four ways the parser misread a time, each fixed before any run:
+  "3pm" not read, "ten past 3" read as 10:00, "1.5 hours" as 5 hours, "or 4" not read. Lite tools without time fields;
+  no ids in the state line. Graders of A to E rewritten to judge what reached the tools (sentences unchanged), then
+  A 6 right, B 5 right and 1 asked rightly (which Monday); frozen; set F written and committed (`ef86fa2`) before any
+  run. Once each: **C 5 right, 1 miss; D 6 right; E 5 right, 1 miss; F 3 right, 2 asked rightly, 1 wrong save.**
+  Nothing asked although complete. First token 0.47 to 1.2 s (median 0.68), requests 1.0 to 2.5 s (median 1.6).
+  - The wrong save (F): "The grant report draft is now due on Tuesday": the model chose `move_block`, not
+    `update_commitment`; the block was moved to Tuesday. The time was placed right; the action was wrong.
+  - The misses, nothing saved: C "Remind me at half past four…": no call, and the reply "I will remember to pick up
+    the parcel at half past four." passed the reply check ("will remember" is not in its list). E "Remind me in half
+    an hour…": no call, its claim replaced by "Nothing was changed."
+  - Stopped at the owner's rule; he is to switch the local route to showing each change for a yes before it is saved.
 
 ### 32. Ledger
 
