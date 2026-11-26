@@ -6,6 +6,8 @@
 //     due time today passes ("<title> was due at <time>. Is it done?"). It takes the due-time nudge's place for to-dos
 //     (the owner, 2026-11-25); reminders keep theirs.
 //   - once for each time the to-do had; at most "limits.checkInsPerDay" a day; none after the day's review.
+//   - none for a block or due time that ended more than SKIP_BEFORE_START_MINUTES before the app started (the owner,
+//     2026-11-26): the review lists it as missed, as it does any planned to-do not done by its end.
 //   - none in the middle of a block (the owner, 2026-11-25): a block's own check-in comes at its end even when the next
 //     block starts then; one for a due time, and one asked again, waits until a block has ended or none is running.
 //   - answered by a button (Done, Still on it, Not yet) or by voice, judged here (parseCheckIn):
@@ -29,6 +31,7 @@ import { parseWhen, timeOn } from './daily.mjs';
 import { loadSettings, readState, writeState } from './pi.mjs';
 
 export const CHECK_AGAIN_TIMES = 2; // after "still on it", asked again at most this many times
+export const SKIP_BEFORE_START_MINUTES = 60; // a block or due time that ended this long before start-up gets no check-in
 // The answers, said alone (small words around them are fine). The buttons are the same three.
 export const DONE_WORDS = ['done', 'its done', 'it is done', 'yes', 'yes done', 'yes its done', 'all done', 'finished', 'its finished', 'i finished it', 'i did it', 'did it', 'completed', 'complete', 'yep', 'yeah', 'yes i did'];
 export const STILL_WORDS = ['still on it', 'still working on it', 'working on it', 'im on it', 'im still on it', 'still going', 'in progress', 'still doing it', 'almost done', 'nearly done', 'almost', 'nearly'];
@@ -52,7 +55,7 @@ export function parseCheckIn(text, opts = {}) {
   const when = (t) => (t ? parseWhen(after(t, LEADS) ?? t, opts) : null);
   if (rest !== null) { if (!rest) return { kind: 'notyet' }; const w = when(rest); return w ? { kind: 'notyet', when: w } : null; }
   const w = when(p);
-  return w && (w.kind === 'at' || w.kind === 'day') ? { kind: 'notyet', when: w } : null;
+  return w && (w.kind === 'at' || w.kind === 'day' || w.kind === 'next') ? { kind: 'notyet', when: w } : null;
 }
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -71,7 +74,8 @@ export const checkQuestion = (how, title, at) => (how === 'block' ? `Your block 
  * daily: the daily note (daily.mjs): today(), state(), editDay(), logLines(), whenOpts(), answerWhen().
  * todos(): the to-dos and reminders ([{ id, text, kind, status, due }]); blocks(): { id: { start, minutes, kept } }.
  */
-export function createCheckIns({ home = os.homedir(), settings = () => loadSettings(home), daily, todos = () => [], blocks = () => ({}), log = () => {}, now = () => Date.now() } = {}) {
+export function createCheckIns({ home = os.homedir(), settings = () => loadSettings(home), daily, todos = () => [], blocks = () => ({}), log = () => {}, now = () => Date.now(), startedAt = now() } = {}) {
+  const skipBefore = startedAt - SKIP_BEFORE_START_MINUTES * 60_000;
   const open = () => (Array.isArray(todos()) ? todos() : []).filter((t) => t && t.kind === 'commitment' && t.status === 'open');
   /** When a to-do's check-in comes today: { at, how: 'block' | 'due' } or null. */
   function moment(t, b, w) {
@@ -99,7 +103,7 @@ export function createCheckIns({ home = os.homedir(), settings = () => loadSetti
     const out = [];
     for (const td of open()) {
       const x = moment(td, b[td.id], t0.w);
-      if (!x || x.at > t || x.at < t0.w.from) continue;
+      if (!x || x.at > t || x.at < t0.w.from || x.at < skipBefore) continue;
       const c = checks[td.id], title = oneLine(td.text);
       if (c && c.at === x.at) {
         if (c.answer !== 'still' || (c.again ?? 0) >= CHECK_AGAIN_TIMES || !(Number.isFinite(c.next) && t >= c.next) || !between(c.next)) continue;
@@ -124,7 +128,7 @@ export function createCheckIns({ home = os.homedir(), settings = () => loadSetti
     const td = open().find((x) => x.id === d.id);
     if (!td) return true;
     const x = moment(td, blocks()[td.id], t0.w);
-    return !x || x.at !== d.at;
+    return !x || x.at !== d.at || x.at < skipBefore;
   }
   // The last answer is kept (the review reads "still"); no answer to a check-in asked again leaves "still" as it was.
   const record = (id, answer, extra = {}) => { const t0 = daily.today(); daily.editDay(t0.key, (d) => { const c = d.checks?.[id]; if (c) d.checks = { ...d.checks, [id]: { ...c, answer: answer === 'none' && c.answer === 'still' ? 'still' : answer, ...extra } }; }); };
@@ -161,7 +165,7 @@ export function createCheckIns({ home = os.homedir(), settings = () => loadSetti
       try { when = await io.ask(daily.whenOpts(`When will you do ${d.title}?`)); } catch (e) { if (e?.name !== 'Unanswered') throw e; }
     }
     const how = when ? await daily.answerWhen(q, when, io) : 'none';
-    if (!when) daily.logLines([`- ${hm(now())} Check-in: ${d.title}: not yet`]);
+    if (!when || how === 'none') daily.logLines([`- ${hm(now())} Check-in: ${d.title}: not yet`]);
     log('checkin', { how: d.how, answer: 'notyet', then: how });
     return 'notyet';
   }
