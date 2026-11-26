@@ -605,7 +605,9 @@ is `src-tauri/src/stand.rs` and `voice.rs`.)
 **The phrase counts only when it is all you said.** Small words around it are fine, in any order: "please", "now",
 "okay", the persona's name and its form of address. "Jarvis, stand down, please" and "okay Jarvis, stand down now
 please" stand it down; "take a note: the committee will stand down in March" and "that's enough for today, you can
-stand down" do nothing. It works whenever the microphone is open: holding the talk keys, and in an answer window.
+stand down" do nothing. It works whenever the microphone is open: holding the talk keys, and in an answer window. Typed alone in the ask
+field it does the same (the owner, 2026-11-26); so does a closing phrase such as "thanks", which ends the exchange
+with the closing line and sends nothing to the model, typed as spoken.
 The shell matches it on the words heard so far: once they have been the phrase alone for `standDown.waitSeconds`
 (1.5 seconds) with nothing more said, or at once in the final words. A sentence that goes on past it ("stand down the committee") does nothing. The
 words are never logged and never reach the model.
@@ -658,7 +660,9 @@ with JARVIS's globe turning slowly and its heart a dot.
 overlay page keep both, look and all.
 
 **Recorded** as two log lines, with true/false and counts only: `stand_down {by, speech, request, pi, window,
-bubbles}` when it starts and `stand_down_end {by, minutes, held}` when it ends. Nothing goes in the daily note.
+bubbles}` when it starts (`by`: `key`, `phrase` or `typed`) and `stand_down_end {by, minutes, held}` when it ends.
+Opening the ask field yourself while it lasts is not logged as a leak (`stand_down_leak` is for a question that
+reached the screen). Nothing goes in the daily note.
 
 ```json
 "standDown": { "phrase": "stand down", "shortcut": "Control+Alt+Period", "endsAtDayTurn": true, "waitSeconds": 1.5 }
@@ -681,6 +685,10 @@ with no block today, when its due time today passes ("Send slides was due at 11:
 takes the place of the due-time nudge; reminders keep theirs. Once for each time a to-do had. At most
 `limits.checkInsPerDay` (6) a day, and none after the day's review.
 
+**Not for what ended long before start-up.** A block or due time that ended more than 60 minutes before Roamies
+started gets no check-in (the owner, 2026-11-26); the day's review lists it as missed and asks about it like any
+other.
+
 **Not in the middle of a block.** A block's own check-in comes at its end, even when the next block starts right
 then. One for a due time, and one asked again, waits until a block has ended or none is running.
 
@@ -689,7 +697,9 @@ then. One for a due time, and one asked again, waits until a block has ended or 
 - **done** ("done", "yes", "it's done", "finished"…): the to-do is marked done and its "Done" line follows in the
   Log. A block it still had to come is taken off the calendar, so the time is free.
 - **not yet** with a time ("not yet, Friday at 10"): read the way the answers to "When will you do it?" are; the
-  block moves there, or the due time is set, with a "Rescheduled" line. "Not yet" alone, or the button, asks "When
+  block moves there, or the due time is set, with a "Rescheduled" line. "Next Friday" is asked about first, in the
+  calendar's own bubble between the two Fridays it can be ("Friday the 27th or Friday the 4th?", by click or voice);
+  no answer changes nothing. "Not yet" alone, or the button, asks "When
   will you do it?" with Leave it and Drop it, as after the review.
 - **still on it**: asked again `limits.checkInAgainMinutes` (30) later, twice at most, with a "Check-in: … still on
   it" line. At the review it counts as still open, not missed; not done by the day turn, it needs a new time the
@@ -884,7 +894,7 @@ after.
   - **Coming up:** deadlines in the next 14 days.
 - **Log.** A line when a to-do is finished: in Roamies, at the next check (every 30 seconds); in Super Productivity,
   right after the sync that finds it (every `calendar.syncSeconds`); and when a note is taken (`[[its title]]`). A Log line after another section starts a new
-  `## Log`.
+  `## Log`; after the review, `## Log (after the review)`.
 - **Review.** At `calendar.reviewAt` (18:00), by the evening briefing when that comes first (not when `reviewAt` is
   `""`), or when you say or type "review my day" (or another phrase in
   `reference.dailyNote.reviewPhrases`) on its own. It lists each planned to-do as **done**, **missed** (its time is
@@ -907,8 +917,11 @@ after.
     - **"Drop it"** (or the button): no more questions about it while it keeps that time, and a `Let go` line goes
       in the Log. The to-do itself is left exactly as it is, in Roamies and in Super Productivity: never deleted,
       never marked done.
-    - The full lists are in `reference.dailyNote.questions`. "Next Friday", or a time that has passed, is not
-      taken: the bubble shows what it heard and stays open.
+    - **"Next Friday"** (with a time or not): which Friday is asked first, in the calendar's own bubble between the
+      two it can be ("Friday the 27th or Friday the 4th?", a button each, or said: "the first one", "the 4th"),
+      then the answer is taken as if that date had been said. No pick changes nothing (the owner, 2026-11-26).
+    - The full lists are in `reference.dailyNote.questions`. A time that has passed is not taken: the bubble shows
+      what it heard and stays open.
   - No answer changes nothing and ends the round. These questions are not kept as pending questions; they come back
     the next morning.
 - **The first request of the day**, typed or spoken, writes the day's Plan if it isn't written yet.
@@ -1226,7 +1239,10 @@ request fails with a network error before any reply; and in private mode. A slow
   model could not start, so nothing was sent." To see that it runs sandboxed: `p=$(pgrep -f mlx_vlm.server); for x in
   $p $(ps -o ppid= -p $p); do /usr/bin/python3 -c "import ctypes,sys; l=ctypes.CDLL('/usr/lib/libsandbox.1.dylib');
   print(sys.argv[1], 'sandboxed' if l.sandbox_check(int(sys.argv[1]), None, 0) else 'not sandboxed')" $x; done`
-  prints "sandboxed" for the server and "not sandboxed" for Roamies, which started it.
+  prints "sandboxed" for the server and "not sandboxed" for Roamies, which started it. Only its own server is used
+  (the owner, 2026-11-26): if anything else answers or listens at `local.start.port` before it starts, a notice says
+  so once, the request gets the same "could not start" line, and nothing is sent. Without `local.start` (your own
+  server or tunnel), whatever answers at `local.address` is used.
 - **Never silent.** The first local reply after a switch starts with a line saying so, every local bubble carries a
   "local" tag, and "Claude is answering again." starts the first reply after. The line comes only with an answer
   from the local model: a refusal by code, or a model that can't start or isn't answering, is said as only that.
@@ -1252,10 +1268,14 @@ request fails with a network error before any reply; and in private mode. A slow
   kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
   carried, whether it was private. Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
   is answered from it by code and sent to no model, typed or spoken, like "review my day" and "anything waiting?";
-  the local model's warm-ups are named apart from the requests that stayed on this Mac. Requests the claude program reports making by itself (its
+  the local model's warm-ups are named apart from the requests that stayed on this Mac. A request that failed at
+  sign-in is kept as its own kind (`signInFailed`) and has a sentence of its own in the answer, not counted among
+  those sent. The model is kept by its name (`e4b`, or the last part of a path), never a folder. Requests the claude program reports making by itself (its
   per-model usage in each result, beyond the request's own turns) are counted too. Not counted, because Roamies can't
   see them: what the claude program sends to Anthropic by itself without reporting it (it connects when it starts,
   and makes small checks such as counting tokens), and pi's own requests.
+- **The activity log's tool lines** (the owner, 2026-11-26): `tool` has the tool's name and each argument's length
+  only; `tool_done` and `tool_error` the name, the time and the result's length. No title, note name, path or text.
 - **Measuring** (`measureRequests`, off): per request, the hearing, the prompt reading and the voice up to the first
   sound, and the memory of Roamies' processes read by the shell; numbers and tool names only, in the activity log.
 
