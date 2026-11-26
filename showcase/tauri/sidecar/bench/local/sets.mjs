@@ -1,61 +1,69 @@
-// Feature 23: the tool-call sets for the local model. Each task: [what is said, check(call, out)], where call is the
-// first call the code check let through ({ name, a: its arguments }) and out is liteRequest's result.
+// Feature 23: the tool-call sets for the local model. Each task: [what is said, check(r, out)], where r is the first
+// call that reached the real tools ({ n: the tool, a: its arguments, as code made them }) and out is liteRequest's
+// result. The tools are stand-ins: nothing is saved.
 //
 // A and B: tuned against (stage 0, 2026-11-25). C: held out, never tuned against; copied unchanged from stage 0
 // (written after A and B were tuned). D: written on 2026-11-26 after the code check was in, before any run, and never
 // tuned against. E: written on 2026-11-26 after the completeness check was in and the prompt and tools were frozen
-// again (A and B rerun), before any run, never tuned against. Do not change C, D or E, and do not change the prompt or
-// the tools because of what they show.
+// again (A and B rerun), before any run, never tuned against. F: written on 2026-11-26 after the model's time
+// arguments were taken away and the prompt and tools frozen again (A and B rerun), committed before any run, never
+// tuned against. Do not change C, D, E or F, and do not change the prompt or the tools because of what they show.
+//
+// The checks were rewritten on 2026-11-26, before any run, when the tools lost their time fields: they now judge
+// what reached the real tools (the date, start, end, length, due time, kind and id code worked out) instead of the
+// model's arguments. The sentences are unchanged. Now: Wednesday 25 November 2026, 14:05. To-dos: Budget review
+// (k3f9, due today, on the calendar today 10:00 to 11:00), Grant report draft (p2x7, due Friday, on the calendar
+// today 15:00 to 16:00), Thesis chapter 2 (t5, no date).
+
+const is = (r, n) => r?.n === n;
+const none = (r, out) => !r && out.calls.length === 0 && out.reply.length > 0;
 
 export const A = [
-  ['Add a to-do: finish the slides by Friday.', (c) => c.name === 'remember_commitment' && /slides/i.test(c.a.text) && /fri/i.test(c.a.when ?? '')],
-  ['Remind me in 20 minutes to call Anna.', (c) => c.name === 'remember_commitment' && /anna/i.test(c.a.text) && /20/.test(c.a.when ?? '')],
-  ['Put the ethics form on my calendar tomorrow from 10 to 11.', (c) => c.name === 'schedule_block' && /ethics/i.test(c.a.title ?? c.a.todo ?? '') && /tomorrow/i.test(c.a.day) && /^10(:00)?$/.test(c.a.start) && (/^11(:00)?$/.test(c.a.end ?? '') || c.a.minutes === 60)],
-  ['What\'s on my calendar on Thursday?', (c) => c.name === 'show_day' && /thu/i.test(c.a.day)],
-  ['Note down that the reviewer wants more controls in figure 3.', (c) => c.name === 'write_note' && /control/i.test(c.a.content) && c.a.title.length < 60],
-  ['I\'m done with the budget review.', (c) => c.name === 'update_commitment' && c.a.id === 'k3f9' && c.a.status === 'done'],
+  ['Add a to-do: finish the slides by Friday.', (r) => is(r, 'remember_commitment') && /slides/i.test(r.a.text) && r.a.due === '2026-11-27' && r.a.kind === 'commitment'],
+  ['Remind me in 20 minutes to call Anna.', (r) => is(r, 'remember_commitment') && /anna/i.test(r.a.text) && r.a.due === '2026-11-25T14:25:00' && r.a.kind === 'reminder'],
+  ['Put the ethics form on my calendar tomorrow from 10 to 11.', (r) => is(r, 'schedule_block') && /ethics/i.test(r.a.title ?? '') && r.a.date === 'tomorrow' && r.a.start === '10:00' && (r.a.end === '11:00' || r.a.minutes === 60)],
+  ['What\'s on my calendar on Thursday?', (r) => is(r, 'show_day') && r.a.date === 'thursday'],
+  ['Note down that the reviewer wants more controls in figure 3.', (r) => is(r, 'write_note') && /control/i.test(r.a.content) && r.a.title.length < 60],
+  ['I\'m done with the budget review.', (r) => is(r, 'update_commitment') && r.a.id === 'k3f9' && r.a.status === 'done' && !r.a.due],
 ];
 
 export const B = [
-  ['Remind me tomorrow at 9 to send the invoice.', (c) => c.name === 'remember_commitment' && /invoice/i.test(c.a.text) && /tomorrow/i.test(c.a.when ?? '') && /9/.test(c.a.when ?? '')],
-  ['New task: order antibodies, due next Monday.', (c) => c.name === 'remember_commitment' && /antibod/i.test(c.a.text) && /mon/i.test(c.a.when ?? '')],
-  ['Move the grant report draft to 16:30.', (c) => c.name === 'move_block' && c.a.todo === 'p2x7' && /^16:30$/.test(c.a.start ?? '')],
-  ['What do my notes say about the confocal?', (c) => c.name === 'search_notes' && /confocal/i.test(c.a.query)],
-  ['Open Zotero.', (c) => c.name === 'open' && /zotero/i.test(c.a.app)],
-  ['What did I plan for today in my daily note?', (c) => c.name === 'read_daily'],
+  ['Remind me tomorrow at 9 to send the invoice.', (r) => is(r, 'remember_commitment') && /invoice/i.test(r.a.text) && r.a.due === '2026-11-26T09:00:00' && r.a.kind === 'reminder'],
+  ['New task: order antibodies, due next Monday.', (r) => is(r, 'remember_commitment') && /antibod/i.test(r.a.text) && r.a.due === '2026-11-30' && r.a.kind === 'commitment'],
+  ['Move the grant report draft to 16:30.', (r) => is(r, 'move_block') && r.a.todo === 'p2x7' && r.a.start === '16:30' && !r.a.date],
+  ['What do my notes say about the confocal?', (r) => is(r, 'search_notes') && /confocal/i.test(r.a.query)],
+  ['Open Zotero.', (r) => is(r, 'open') && /zotero/i.test(r.a.target)],
+  ['What did I plan for today in my daily note?', (r) => is(r, 'read_daily')],
 ];
 
 // Held out (stage 0's FRESH set, unchanged).
 export const C = [
-  ['Remind me at half past four to pick up the parcel.', (c) => c.name === 'remember_commitment' && /parcel/i.test(c.a.text) && /(half past four|4:30|16:30)/i.test(c.a.when ?? '')],
-  ['Book an hour for the literature search on Monday at 2.', (c) => c.name === 'schedule_block' && /literature/i.test(c.a.title ?? '') && /mon/i.test(c.a.day) && /^(14|2)(:00)?$/.test(c.a.start) && (c.a.minutes === 60 || /^(15|3)(:00)?$/.test(c.a.end ?? ''))],
-  ['Drop the budget review, I won\'t do it.', (c) => c.name === 'update_commitment' && c.a.id === 'k3f9' && c.a.status === 'dropped'],
-  ['Read me my note called Lab meeting.', (c) => c.name === 'read_note' && /lab meeting/i.test(c.a.title)],
-  ['Which to-dos do I have about the thesis?', (c) => c.name === 'list_commitments' && /thesis/i.test(c.a.words ?? '')],
-  ['Take the grant report draft off the calendar.', (c) => c.name === 'unschedule_block' && c.a.todo === 'p2x7'],
+  ['Remind me at half past four to pick up the parcel.', (r) => is(r, 'remember_commitment') && /parcel/i.test(r.a.text) && r.a.due === '2026-11-25T16:30:00' && r.a.kind === 'reminder'],
+  ['Book an hour for the literature search on Monday at 2.', (r) => is(r, 'schedule_block') && /literature/i.test(r.a.title ?? '') && r.a.date === 'monday' && r.a.start === '14:00' && (r.a.minutes === 60 || r.a.end === '15:00')],
+  ['Drop the budget review, I won\'t do it.', (r) => is(r, 'update_commitment') && r.a.id === 'k3f9' && r.a.status === 'dropped' && !r.a.due],
+  ['Read me my note called Lab meeting.', (r) => is(r, 'read_note') && /lab meeting/i.test(r.a.title)],
+  ['Which to-dos do I have about the thesis?', (r) => is(r, 'list_commitments') && /thesis/i.test(r.a.words ?? '')],
+  ['Take the grant report draft off the calendar.', (r) => is(r, 'unschedule_block') && r.a.todo === 'p2x7'],
 ];
 
 // New, untuned (2026-11-26). The last task is one the local model can't do: right is no call and a reply.
 export const D = [
-  ['Remind me on Friday at 11 to renew the parking permit.', (c) => c?.name === 'remember_commitment' && /parking/i.test(c.a.text) && /fri/i.test(c.a.when ?? '') && /11/.test(c.a.when ?? '')],
-  ['Block tomorrow from 2 to half past three for the poster draft.', (c) => c?.name === 'schedule_block' && /poster/i.test(c.a.title ?? '') && /tomorrow/i.test(c.a.day ?? '') && /^(2|14)(:00)?$/.test(c.a.start ?? '') && (/^(half past three|3:30|15:30)$/i.test(c.a.end ?? '') || c.a.minutes === 90)],
-  ['Push the budget review to Thursday at 9.', (c) => c?.name === 'move_block' && c.a.todo === 'k3f9' && /thu/i.test(c.a.day ?? '') && /^(at )?0?9(:00)?$/.test(c.a.start ?? '')],
-  ['Make a note about the seminar: bring the HDMI adapter.', (c) => c?.name === 'write_note' && /hdmi/i.test(c.a.content ?? '') && /seminar/i.test(`${c.a.title ?? ''} ${c.a.content ?? ''}`)],
-  ['Do I have any to-dos due tomorrow?', (c) => c?.name === 'list_commitments' && /tomorrow/i.test(c.a.day ?? '')],
-  ['Send an email to Marco saying I\'m running late.', (c, out) => !c && out.calls.length === 0 && out.reply.length > 0],
+  ['Remind me on Friday at 11 to renew the parking permit.', (r) => is(r, 'remember_commitment') && /parking/i.test(r.a.text) && r.a.due === '2026-11-27T11:00:00' && r.a.kind === 'reminder'],
+  ['Block tomorrow from 2 to half past three for the poster draft.', (r) => is(r, 'schedule_block') && /poster/i.test(r.a.title ?? '') && r.a.date === 'tomorrow' && r.a.start === '14:00' && (r.a.end === '15:30' || r.a.minutes === 90)],
+  ['Push the budget review to Thursday at 9.', (r) => is(r, 'move_block') && r.a.todo === 'k3f9' && r.a.date === 'thursday' && r.a.start === '09:00'],
+  ['Make a note about the seminar: bring the HDMI adapter.', (r) => is(r, 'write_note') && /hdmi/i.test(r.a.content ?? '') && /seminar/i.test(`${r.a.title ?? ''} ${r.a.content ?? ''}`)],
+  ['Do I have any to-dos due tomorrow?', (r) => is(r, 'list_commitments') && r.a.due === 'tomorrow'],
+  ['Send an email to Marco saying I\'m running late.', none],
 ];
 
-// New, untuned (2026-11-26, after the completeness check). Today's blocks: Budget review 10:00 (k3f9), Grant report
-// draft 15:00 (p2x7); now Wednesday 25 November 2026, 14:05.
+// New, untuned (2026-11-26, after the completeness check).
 export const E = [
-  ['Remind me in half an hour to check the incubator.', (c) => c?.name === 'remember_commitment' && /incubator/i.test(c.a.text ?? '') && /in half an hour/i.test(c.a.when ?? '')],
-  ['Schedule 45 minutes for the grant report draft tomorrow at 11.', (c) => c?.name === 'schedule_block' && (c.a.todo === 'p2x7' || /grant report/i.test(c.a.title ?? '')) && /tomorrow/i.test(c.a.day ?? '') && /^(at )?11(:00)?$/i.test(c.a.start ?? '') && c.a.minutes === 45],
-  ['Move the grant report draft from 3 to half past four.', (c) => c?.name === 'move_block' && (c.a.todo === 'p2x7' || !c.a.todo) && /^(at )?3$/i.test(c.a.from ?? '') && /^(at )?half past four$/i.test(c.a.start ?? '')],
-  ['Add a to-do: submit the ethics amendment by the 4th of December.', (c) => c?.name === 'remember_commitment' && /ethics/i.test(c.a.text ?? '') && /4th of december/i.test(c.a.when ?? '')],
-  ['What have I got on Friday?', (c) => c?.name === 'show_day' && /fri/i.test(c.a.day ?? '')],
-  ['Change the budget review to tomorrow at 10.', (c) => c?.name === 'move_block' && c.a.todo === 'k3f9' && /tomorrow/i.test(c.a.day ?? '') && /^(at )?10(:00)?$/i.test(c.a.start ?? '')],
+  ['Remind me in half an hour to check the incubator.', (r) => is(r, 'remember_commitment') && /incubator/i.test(r.a.text ?? '') && r.a.due === '2026-11-25T14:35:00' && r.a.kind === 'reminder'],
+  ['Schedule 45 minutes for the grant report draft tomorrow at 11.', (r) => is(r, 'schedule_block') && (r.a.todo === 'p2x7' || /grant report/i.test(r.a.title ?? '')) && r.a.date === 'tomorrow' && r.a.start === '11:00' && r.a.minutes === 45],
+  ['Move the grant report draft from 3 to half past four.', (r) => is(r, 'move_block') && r.a.todo === 'p2x7' && r.a.start === '16:30' && (!r.a.date || r.a.date === 'today')],
+  ['Add a to-do: submit the ethics amendment by the 4th of December.', (r) => is(r, 'remember_commitment') && /ethics/i.test(r.a.text ?? '') && r.a.due === '2026-12-04' && r.a.kind === 'commitment'],
+  ['What have I got on Friday?', (r) => is(r, 'show_day') && r.a.date === 'friday'],
+  ['Change the budget review to tomorrow at 10.', (r) => is(r, 'move_block') && r.a.todo === 'k3f9' && r.a.date === 'tomorrow' && r.a.start === '10:00'],
 ];
 
 export const SETS = { A, B, C, D, E };
-// Sets whose checks expect a call: a task right only when the code check let one through.
-export const NEEDS_CALL = { A: true, B: true, C: true, D: false, E: true };
