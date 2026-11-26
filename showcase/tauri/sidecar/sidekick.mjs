@@ -24,7 +24,7 @@ import {
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
   setCommitmentPrivate, setPrivateContext,
 } from './store.mjs';
-import { LIFT_NONE, liftAsk, liftQuestion, privateCount, redact, redactResult, unmarkNote } from './privacy.mjs';
+import { LIFT_NONE, liftAsk, liftQuestion, listedTodos, privateAfter, privateCount, redact, redactResult, unmarkNote } from './privacy.mjs';
 import { matchTitle } from './checks.mjs'; // Local-only build (feature 23): the private mark
 import { resolveToolSchema } from '@kenkaiiii/gg-ai';
 import { createLiveBlocks, stripLive } from './live.mjs';
@@ -437,6 +437,7 @@ const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), 
 // list itself stays upstream's (store.mjs); this hands it over: the open to-dos and the ones finished today.
 // Local-only build: the calendar's bubbles take a spoken yes or no as well as a click (answers.mjs).
 const answers = createAnswers({ ask, log: (kind, data) => logLine(kind, data), question: (q) => flow.question({ ...q, brief: String(q.brief ?? '').slice(0, limitsFor(HOME).spokenQuestionChars) }), retext: (text) => ui({ kind: 'ask_text', text: sir(text, { again: true }) }), heardChars: () => limitsFor(HOME).heardLineChars });
+let doneInApp = false; // feature 18: the sync running now found a to-do done in Super Productivity (doneLines)
 const cal = createCalendar({
   ask: answers.ask, log: (kind, data) => logLine(kind, data),
   // They said yes, in the app's own bubble, to a block for an urgent and important to-do: the day and time are asked
@@ -444,7 +445,7 @@ const cal = createCalendar({
   book: ({ todo, title }) => enqueue(`(System, not ${userName}: in a bubble of the app's own, ${userName} has just said yes to booking a calendar block for the to-do "${title}" [${todo}], which is urgent and important and has no block. Ask them which day and what time, in one short sentence, and nothing else. When they answer, call schedule_block with todo "${todo}".)`, { byVoice: flow.spoken() }),
   todos: {
     all: () => { const L = listItems(); return [...openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, status: 'open', kind: c.kind ?? 'commitment', ...(c.private ? { private: true } : {}) })), ...[...L.today, ...L.later].filter((i) => i.done).map((i) => ({ id: i.id, text: i.text, due: i.due ?? null, status: 'done', kind: i.kind }))]; },
-    update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); },
+    update: async (id, change) => { await updateCommitment(id, change); menu(); scheduleReminders(); if (change?.status === 'done') doneInApp = true; },
     rename: async (id, text) => { await renameCommitment(id, text); menu(); },
     commit: async (id) => { await makeCommitment(id); menu(); }, // a reminder turned into a to-do
     add: async (text) => { const c = await addCommitment(text, null, 'commitment'); menu(); showList({ flash: c.id, seconds: 6 }); return c; },
@@ -757,6 +758,11 @@ function leftAsked() {
   logLine('left_asked', {});
   aloud(ledger.left(), 'happy');
   flow.settle();
+}
+function reviewAsked(byVoice) {
+  if (byVoice) flow.start();
+  logLine('review_asked', { typed: !byVoice });
+  dayReview('asked').catch((e) => console.error('daily review', e));
 }
 function waitingAsked(byVoice) {
   if (byVoice) flow.start();
@@ -1308,14 +1314,16 @@ async function localPrompt(text, byVoice, why, priv) {
   let reply = '', mood = 'happy';
   timing.sent();
   try {
-    const first = announcer.before('local', why);
+    // The line saying the local model is answering comes only when it did answer (2026-11-26): a refusal by code, or a
+    // model that could not start or isn't answering, is said as only what is true.
+    let first = '';
     const cant = cantLocally(text);
     if (cant) { reply = cant; logLine('local_refused', { why: 'cant' }); }
     else {
       privateRequest = !!priv;
       const out = await localRoute.request(text, { signal: ctl.signal, private: !!priv }).finally(() => { privateRequest = false; });
       localLast = out;
-      if (out.problem) { reply = out.problem; mood = 'concerned'; } else reply = out.reply;
+      if (out.problem) { reply = out.problem; mood = 'concerned'; } else { reply = out.reply; first = announcer.before('local', why); }
     }
     if (ctl.signal.aborted) return;
     timing.firstText(); timing.replied(); timing.done({ route: priv ? 'local-private' : 'local', tools: localLast?.calls?.map((c) => c.name) ?? [] });
@@ -1374,7 +1382,7 @@ async function summarisePrivate(key) {
 async function localBriefing(briefing, byVoice) {
   try {
     const kind = briefing?.kind === 'evening' ? 'evening' : 'morning';
-    const text = await localRoute.oneShot({ kind: 'briefing', private: privateMode(), system: `Word ${userName}'s short spoken ${kind} briefing from the app's outline below: two or three plain sentences, no lists, nothing that isn't in it.`, text: cal.outline(), maxTokens: 160 });
+    const text = await localRoute.oneShot({ kind: 'briefing', private: privateMode(), system: `Word ${userName}'s short spoken ${kind} briefing from the app's outline below: two or three plain sentences, no lists, nothing that isn't in it.`, text: cal.outline({ seePrivate: true }), maxTokens: 160 });
     ui({ kind: 'say', text: sir(text), mood: 'happy', tag: privateMode() ? PRIVATE_TAG : LOCAL_TAG });
     if (byVoice || flow.spoken() || VOICE_ON()) voiceLine(forVoice(text));
     logLine('briefing_local', { kind });
@@ -1635,6 +1643,9 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     }
     doneWriting();
     { const t = echo.flush(); reply.push(t); lastReply += t; }
+    // Feature 23: given a list or count of the to-dos with private ones left out, the app adds its own line after
+    // the reply (Claude is never asked to say it, and it never goes into Claude's conversation).
+    if (!controller.signal.aborted && !stalled && lastReply.trim() && listedTodos(use.names, lastReply)) { const after = privateAfter(openCommitments().filter((c) => c.private).length); if (after) { reply.finish(); reply.emit({ type: 'text', text: `\n\n${after}` }); logLine('private_after', {}); } }
     reply.finish();
     const held = cues?.flush(); if (held) showText(held);
     releaseBeat(false);
@@ -2205,7 +2216,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
   if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
-  if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
+  if (text?.trim()) { standUp('typed'); if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
 }
 function onWriteTap() {
   if (onboarding) return;
@@ -2326,7 +2337,7 @@ async function onSpoken(text, area, window = null) {
   // with ("heard"): the listening pill by the cursor goes, instead of waiting for an answer that isn't coming.
   if (pi.heard(text) || answers.heard(text)) { ui({ kind: 'heard' }); return; }
   // Local-only build (feature 18): "review my day" (daily.mjs, said alone) is the app's to answer, not the model's.
-  if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); flow.start(); logLine('review_asked', {}); dayReview('asked').catch((e) => console.error('daily review', e)); return; }
+  if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); reviewAsked(true); return; }
   // Local-only build (feature 31): "anything waiting?" (quiet.mjs, said alone): the quiet queue, given by the app.
   if (!area?.file && isWaitingAsk(text)) { ui({ kind: 'heard' }); waitingAsked(true); return; }
   // Local-only build (feature 32): "what left the Mac today?" (ledger.mjs, said alone): answered by code from the ledger.
@@ -2687,11 +2698,13 @@ function runBriefing(b) {
 }
 // Local-only build: the to-do list and Super Productivity are synced on a timer ("calendar.syncSeconds" in the
 // settings), and what a sync had to say is shown once nothing else is going on.
-cal.startup().catch((e) => console.error('calendar', e));
+// Feature 18: a to-do the sync found done in Super Productivity gets its Done line right after that sync.
+const doneLines = () => { if (!doneInApp) return; doneInApp = false; dailyDo('tick', () => daily.tick()); };
+cal.startup().catch((e) => console.error('calendar', e)).finally(doneLines);
 (function calTick() {
   let wait = 60;
   try { wait = loadSettings(HOME).calendar.syncSeconds; } catch { /* the default */ }
-  setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(calTick); }, wait * 1000);
+  setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(() => { doneLines(); calTick(); }); }, wait * 1000);
 })();
 // Features 31 and 33: the quiet queue, after a typed request's reply (a spoken exchange gives it at its end, flow.mjs),
 // comes before the calendar's lines.

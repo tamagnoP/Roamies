@@ -206,6 +206,10 @@ for (const [said, want] of [
   assert.deepEqual(said.slice(before), ['I\'ve let go of "Read the review".', 'I\'ve let go of "Write to Ana".']);
   assert.deepEqual(lines.slice(-2), ['- [x] 18:30 Let go: Read the review', '- [x] 18:30 Let go: Write to Ana']);
   assert.deepEqual(h2.openItems().map((i) => i.id), ['oi-x8']);
+  // an item whose text ends with its own full stop: one full stop in the line said
+  h2.finish('2026-12-03', { decided: [], remember: [], open: [{ text: 'Return the keys to Anna.', todo: null }] });
+  words2 = 'I did that, it\'s sorted';
+  await tool.execute({ item: h2.openItems().find((i) => /keys/.test(i.text)).id }); assert.equal(said.at(-1), 'Closed: Return the keys to Anna.');
   for (const [kk, d] of logs2) assert.ok(!/venue|reagents|parking|train|bank|review|ana|freezer/i.test(JSON.stringify(d)), `${kk}: counts only`);
   fs.rmSync(home2, { recursive: true, force: true });
 }

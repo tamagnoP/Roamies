@@ -30,7 +30,8 @@ over (to be missed), one still ahead, and one with nothing planned.
    times have all passed), then `### Coming up` (deadlines in the next 14 days). With features 25 and 31: every line in those three lists is a box, `- [ ] …`,
    ending in `^td-<id>`.
 3. **Tick a to-do done** in the list, or in Super Productivity.
-   You should see: within 30 seconds, `- HH:MM Done: <title>` under `## Log`.
+   You should see: `- HH:MM Done: <title>` under `## Log`: ticked in the list, within 30 seconds; ticked in Super
+   Productivity, within `calendar.syncSeconds` (60) plus a few seconds.
 4. **Say "note this down: <something>".**
    You should see: the note in the vault; `- HH:MM Note: [[<title>]]` in the Log.
 5. **Say "note this down for the <to-do> to-do: <something>".**
@@ -60,8 +61,9 @@ over (to be missed), one still ahead, and one with nothing planned.
 10. **Hold the talk keys and say "review my day".**
     You should see and hear: the counts again; the note gets `## Review update (HH:MM)` with only what changed
     since; the questions not answered yet come again.
-11. **Say "review my day" on its own, then "review my day and tell me a joke".**
-    You should see: the first is answered by the app (no reply from the AI); the second goes to the AI as usual.
+11. **Say "review my day" on its own, then "review my day and tell me a joke"; then type both.**
+    You should see, spoken and typed: the first is answered by the app (no reply from the AI); the second goes to the
+    AI as usual.
 12. **Next day: the first request** (typed or spoken).
     You should see and hear: "One moment: I'm wrapping up yesterday.", then the reply. Yesterday's note gets
     `## Handover`:
@@ -199,26 +201,37 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
 
 **Before.** In `~/Documents/roamies-pi/settings.json`: `"local": { "address": "http://127.0.0.1:8080/v1", "model": "",
 "whenOffline": true, "historyExchanges": 4, "maxSteps": 4, "confirmChanges": true, "start": { "python":
-"/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "e4b", "port": 8080, "sleepAfterMinutes": 10, "draft": true } }`,
+"/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "e4b", "port": 8080, "sleepAfterMinutes": 10, "draft": true,
+"waitSeconds": 45 } }`,
 `"measureRequests": true`, and in `limits`: `"ledgerDays": 90`. Gemma 4 E4B and its drafter in the Hugging Face cache.
 
 1. **Wi-Fi off, then ask "What's on my calendar on Friday?"**
    You should see: after the server starts (about 10 s the first time), "Claude can't be reached, so the local model
-   on this Mac is answering." and the answer, in a bubble tagged "local". `ps` shows `mlx_vlm.server` under
-   `sandbox-exec`.
+   on this Mac is answering." and the answer, in a bubble tagged "local". **Then, in Terminal:**
+   `p=$(pgrep -f mlx_vlm.server); for x in $p $(ps -o ppid= -p $p); do /usr/bin/python3 -c "import ctypes,sys;
+   l=ctypes.CDLL('/usr/lib/libsandbox.1.dylib'); print(sys.argv[1], 'sandboxed' if l.sandbox_check(int(sys.argv[1]),
+   None, 0) else 'not sandboxed')" $x; done` (one line). You should see: `<pid> sandboxed` for the model server, then
+   `<pid> not sandboxed` for Roamies, which started it (the check tells the two apart). `sandbox-exec` itself never
+   shows in `ps`: it becomes the program it starts.
 2. **Say "Remind me at half past four to pick up the parcel."**
-   You should see: "I'll remind you to pick up the parcel at 16:30." at once (made by code, no model).
+   You should see: "I'll remind you to pick up the parcel at 16:30." at once (made by code, no model); "tomorrow at
+   16:30" when it is already past 16:30.
 3. **Say "Move the budget review to Friday at 3pm."**
-   You should see: a yes/no bubble "Move the block for "Budget review" to Friday … at 15:00?", said aloud with the
-   answer window; no answer saves nothing and nothing is kept.
+   You should see: a yes/no bubble "Move the block for "Budget review" to Friday … at 15:00?" ("to tomorrow at 15:00"
+   on a Thursday), said aloud with the answer window; no answer gives "Nothing was changed.", saves nothing and keeps
+   nothing.
 4. **Wi-Fi on, ask anything.** You should see: "Claude is answering again." first.
 5. **Say "Keep this private." then "Add a to-do: call the clinic."** You should see: the "private" mark under the
    character, the bubble tagged "local · private", and the to-do on the list. **Then "Back to Claude." and "What's
-   open today?"**: Claude's reply mentions one private to-do, never its title.
+   open today?"**: Claude's reply, then one line added by the app: "There is 1 private to-do or reminder; only the
+   local model can show it." Neither names it.
 6. **Private mode with the local server stopped** (`pkill -f mlx_vlm.server`, `local.start.python` ""): "The local
-   model isn't answering; nothing was sent."
-7. **Say "What left the Mac today?"** You should see: the provider's requests, tokens, screen captures and window
-   texts, how many stayed on this Mac, and the hand-offs to pi; no model is asked.
+   model isn't answering; nothing was sent." **And a model that can't load** (`local.start.python` set back, the
+   model's folder renamed for the test): within `local.start.waitSeconds` (45 s), only "The local model could not
+   start, so nothing was sent.", never that it is answering.
+7. **Say "What left the Mac today?", then type it.** You should see, both times: the provider's requests, tokens,
+   screen captures and window texts, how many stayed on this Mac (the warm-ups named apart), and the hand-offs to pi;
+   no model is asked.
 8. **The tunnel** (your own, to the Mac mini, on another port in `local.address`): the same answers; Roamies starts
    and stops no server.
 9. **The activity log**: `timing {route, hearing, ready, reading, voice, …}`, `memory {mb: {shell, sidecar, voice,

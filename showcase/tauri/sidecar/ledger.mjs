@@ -52,7 +52,8 @@ export function leftLine(lines, now = Date.now()) {
     parts.push(wins ? `Window texts: ${fmt(wins)}.` : 'No window texts.');
     if (priv) parts.push(`${plural(priv, 'private request')} went to the provider.`);
   } else parts.push('Nothing went to the provider today.');
-  if (mac.length) parts.push(`${plural(mac.length, 'request')} stayed on this Mac, with the local model.`);
+  const warm = mac.filter((l) => l.kind === 'warmup').length, asked = mac.length - warm;
+  if (mac.length) parts.push(`${asked ? `${plural(asked, 'request')} stayed on this Mac, with the local model` : 'Nothing was asked of the local model on this Mac'}${warm ? `${asked ? ', besides' : ', apart from'} ${plural(warm, 'warm-up')} checking it` : ''}.`);
   if (pi.length) parts.push(`${plural(pi.length, 'hand-off')} to pi.`);
   parts.push(UNSEEN);
   return parts.join(' ');

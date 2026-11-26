@@ -72,4 +72,18 @@ assert.doesNotMatch(found, /oncology/); assert.match(found, /Met Bo about result
 assert.doesNotMatch(await tool('read_note').execute({ title: '2026-11-26' }), /oncology/);
 assert.match(await tool('read_note').execute({ title: '2026-11-26' }, { seePrivate: true }), /oncology/);
 fs.rmSync(home, { recursive: true, force: true });
+// after a Claude reply given a list or count of the to-dos (a list tool, or a reply that counts them), the app's line
+{
+  const { listedTodos, privateAfter } = await import('../privacy.mjs');
+  assert.equal(listedTodos(['list_commitments'], 'Here you are.'), true);
+  assert.equal(listedTodos(['show_day'], ''), true);
+  assert.equal(listedTodos([], 'Four to-dos are open, sir, none overdue.'), true);
+  assert.equal(listedTodos([], 'You have 3 open to-dos and two reminders.'), true);
+  assert.equal(listedTodos(['remember_commitment'], 'Added it to your to-dos.'), false, 'no list, no count');
+  assert.equal(listedTodos([], 'It is mild and dry.'), false);
+  assert.equal(privateAfter(0), '');
+  assert.equal(privateAfter(1), 'There is 1 private to-do or reminder; only the local model can show it.');
+  assert.equal(privateAfter(3), 'There are 3 private to-dos or reminders; only the local model can show them.');
+}
+
 console.log('privacy tests passed');

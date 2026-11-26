@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'local-run-')));
 const env = { HOME: home, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, LANG: 'en_US.UTF-8', ROAMIES_VERSION: '0.0.0' };
 process.env.DUMP_BODY = '1'; // the stand-in keeps what each request held, to check no private word is in it
-const provider = []; const model = await startModel({ onRequest: (r) => provider.push(r) });
+const provider = []; const model = await startModel({ onRequest: (r) => provider.push(r), answer: (t) => (/What is open today\?/.test(t) ? 'Two to-dos are open, sir, none of them due today.' : /How is the weather\?/.test(t) ? 'Mild and dry.' : null) });
 const local = await startFakeLocal();
 fs.mkdirSync(path.join(home, '.gg', 'sidekick'), { recursive: true });
 fs.mkdirSync(path.join(home, 'Documents', 'roamies-pi'), { recursive: true });
@@ -74,6 +74,13 @@ try {
   await typed('Hello there.');
   await waitFor(() => replied(from), 20_000, 'the provider\'s reply');
   assert.equal(provider.filter((r) => !r.fold).length, 1); assert.equal(local.requests.length, 0);
+  // the phrases answered by code, typed as spoken: no model asked (2026-11-26)
+  for (const [ask, re] of [['Review my day.', /^Day review/], ['Anything waiting?', /^Nothing is waiting\./], ['What left the Mac today?', /^Sent to anthropic today/]]) {
+    from = out.length; const n = provider.length;
+    await typed(ask);
+    await waitFor(() => said(from, re), 10_000, `typed "${ask}": the app's answer`);
+    await sleep(300); assert.equal(provider.length, n, `typed "${ask}": nothing to the provider`); assert.equal(local.requests.length, 0);
+  }
 
   // no network: the local model answers, said so first, tagged "local"; the provider gets nothing
   net = false; beat(); await sleep(300);
@@ -138,6 +145,7 @@ try {
   from = out.length;
   await typed('Remind me about the doctor.');
   await waitFor(() => said(from, /isn't answering; nothing was sent/), 20_000, 'the line');
+  assert.match(said(from, /isn't answering; nothing was sent/).text, /^The local model isn't answering; nothing was sent(, sir)?\.$/, 'only what is true: never that it is answering');
   assert.equal(provider.length, before, 'no fallback to the provider');
 
   // "what left the Mac today?": by code, no model
@@ -160,6 +168,14 @@ try {
   const body = JSON.stringify(provider.slice(n0).map((r) => r.body));
   assert.doesNotMatch(body, /clinic|doctor/i, 'no private word reaches Claude');
   assert.match(body, /Private: 1 to-do or reminder made in private mode/);
+  assert.match(body, /To-do list, in outline: 0 open:/, 'the outline\'s numbers leave the private one out');
+  // a reply that counts the to-dos: the app's own line after it, with how many are private; Claude never says it
+  await waitFor(() => page(from).some((m) => m.kind === 'agent' && m.e?.type === 'text' && /There is 1 private to-do or reminder; only the local model can show it\./.test(m.e.text)), 5000, 'the app\'s line after the reply');
+  assert.doesNotMatch(body, /only the local model can show/, 'Claude is not asked to say it');
+  from = out.length;
+  await typed('How is the weather?');
+  await waitFor(() => replied(from), 20_000, 'a reply about something else');
+  assert.ok(!page(from).some((m) => m.kind === 'agent' && /private to-do/.test(m.e?.text ?? '')), 'no line after a reply that gives no list or count');
   // nothing private in the log or the ledger
   assert.doesNotMatch(logText() + JSON.stringify(ledger()), /doctor|clinic/);
   console.log('which model answers, the sidecar run: passed');

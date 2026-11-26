@@ -182,14 +182,14 @@ function decidedCall(d, name, a) {
  *  → { reply, by ('code' | 'model' | 'tools' | 'ask' | 'one' | 'declined' | 'unanswered' | 'replaced' | 'steps' |
  *  'empty'), calls: [{ name, args, ok, asked, by: 'code' | 'model', shown }], shown: { tool, args, question } (the
  *  change shown for a yes), noStreamRetries, usage: [per model call], firstMs } */
-export async function liteRequest({ chat, run, name, model, said, state, history = [], maxSteps = 4, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, items = [], confirm = async () => null, confirmChanges = true }) {
+export async function liteRequest({ chat, run, name, model, said, state, history = [], maxSteps = 4, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, items = [], confirm = async () => null, confirmChanges = true, persona = '' }) { // persona: its name, which may come before "remind me" and the other frames
   const system = { role: 'system', content: liteSystem(name) }, newest = liteMessage({ name, said, state, history });
   const messages = [system, { role: 'user', content: newest }];
   const out = { reply: '', by: 'model', calls: [], noStreamRetries: 0, usage: [], firstMs: null };
-  const check = createRequestCheck({ said, now, hours, items });
+  const check = createRequestCheck({ said, now, hours, items, name: persona });
   const place = (n, a, o) => check.place(n, a, o);
   // A reminder code can read whole: made by code, with no model call.
-  const mine = reminderByCode(said, { items, now, ...hours });
+  const mine = reminderByCode(said, { items, now, ...hours, name: persona });
   if (mine) {
     const res = await run('remember_commitment', { text: mine.text }, () => ({ action: 'remind', places: { due: mine.due } }));
     out.calls.push({ name: 'remember_commitment', args: { text: mine.text }, ok: !!res.ok, by: 'code' });

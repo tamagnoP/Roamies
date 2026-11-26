@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createModelServer, serverProfile } from '../modelserver.mjs';
+import { NO_START, createModelServer, serverProfile } from '../modelserver.mjs';
 import { DRAFTS, MODELS, TESTED, snapshotDir } from '../localserver.mjs';
 import { settingsDefaults } from '../pi.mjs';
 
@@ -72,7 +72,8 @@ local = { ...local, address: 'http://127.0.0.1:9000/v1' }; assert.equal(await se
 local = { ...local, address: 'http://127.0.0.1:8080/v1', start: { ...local.start, python: '' } }; assert.equal(await server.ensure(), ''); assert.equal(spawned.length, 2);
 // a start-up problem: said once in a notice, and not started
 local = { ...local, start: { ...local.start, python: '/nowhere/bin/python' } };
-assert.match(await server.ensure(), /^The local model can't be started: The local model server is not the version tested: mlx-vlm not found, tested with 0\.8\.0\./);
+assert.equal(await server.ensure(), NO_START, 'the request is told only that it could not start');
+assert.match(notices[0], /^The local model can't be started: The local model server is not the version tested: mlx-vlm not found, tested with 0\.8\.0\./, 'the reason is the notice\'s');
 await server.ensure(); assert.equal(notices.length, 1, 'said once'); assert.equal(spawned.length, 2);
 // a drafter missing: a note, and it runs without one
 fs.rmSync(snapshotDir(home, DRAFTS.e4b), { recursive: true, force: true });
@@ -80,8 +81,19 @@ local = { ...local, start: { ...local.start, python } };
 assert.equal(await server.ensure(), ''); assert.ok(!spawned[2].args.includes('--draft-model'));
 assert.ok(logs.some(([k]) => k === 'model_server_note'));
 server.stop('quit');
-// it never starts: a code-worded line, and it is stopped
-const slow = createModelServer({ settings, home, spawnImpl: (cmd, args, opts) => { const c = new EventEmitter(); c.pid = 1; c.kill = () => {}; return c; }, probeImpl: async () => null, startSeconds: 1, every: () => {} });
-assert.equal(await slow.ensure(), 'The local model server took too long to start.'); assert.equal(slow.running, false);
+// it never starts: after local.start.waitSeconds (45 by default) only what is true, and it is stopped
+assert.equal(NO_START, 'The local model could not start, so nothing was sent.');
+assert.equal(d.local.start.waitSeconds, 45);
+let clock2 = 0, probes = 0;
+const slow = createModelServer({ settings, home, spawnImpl: (cmd, args, opts) => { const c = new EventEmitter(); c.pid = 1; c.kill = () => {}; return c; }, probeImpl: async () => { probes++; return null; }, now: () => (clock2 += 10_000), every: () => {} });
+assert.equal(await slow.ensure(), NO_START); assert.equal(slow.running, false);
+assert.ok(probes >= 3 && probes <= 5, `waited the setting's 45 s, not longer (${probes} checks, about 10 s apart)`);
+probes = 0; clock2 = 0; local = { ...local, start: { ...local.start, waitSeconds: 10 } };
+assert.equal(await slow.ensure(), NO_START); assert.ok(probes <= 1, `local.start.waitSeconds is read (${probes} checks)`);
+// it stops while starting, or can't be started at all: the same line
+const dies = createModelServer({ settings, home, spawnImpl: () => { const c = new EventEmitter(); c.pid = 2; c.kill = () => {}; setTimeout(() => c.emit('exit', 1, null), 5); return c; }, probeImpl: async () => null, startSeconds: 5, every: () => {} });
+assert.equal(await dies.ensure(), NO_START);
+const fails = createModelServer({ settings, home, spawnImpl: () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); }, probeImpl: async () => null, startSeconds: 5, every: () => {} });
+assert.equal(await fails.ensure(), NO_START);
 fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(tmp, { recursive: true, force: true });
 console.log('model server tests passed');

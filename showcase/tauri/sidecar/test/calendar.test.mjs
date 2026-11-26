@@ -1409,6 +1409,10 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   // Feature 22: speech.hush() where this was speech.stop(): what is playing still stops, but the reply's voice is no
   // longer ended, so what Roamies says after the answer is spoken (flow.test.mjs checks hush against stop).
   assert.match(side, /if \(pi\.listening\(\) \|\| answers\.listening\(\)\) speech\.hush\(\);[^\n]*\n\s*else \{ interruptQuietly\(\);/, 'starting to talk cancels the turn only when no such bubble is open');
+  assert.match(side, /update: async \(id, change\) => \{ await updateCommitment\(id, change\);[^\n]*if \(change\?\.status === 'done'\) doneInApp = true; \}/, 'feature 18: the sync notes a to-do found done in Super Productivity');
+  assert.match(side, /cal\.sync\('timer'\)\.catch\(\(e\) => console\.error\('calendar', e\)\)\.finally\(\(\) => \{ doneLines\(\); calTick\(\); \}\)/, 'feature 18: its Done line is written right after that sync, not at the next 30 s check');
+  assert.match(side, /const doneLines = \(\) => \{ if \(!doneInApp\) return; doneInApp = false; dailyDo\('tick', \(\) => daily\.tick\(\)\); \};/);
+  assert.match(side, /if \(text\?\.trim\(\)\) \{ standUp\('typed'\); if \(isReviewAsk\(text\)\) reviewAsked\(false\); else if \(isWaitingAsk\(text\)\) waitingAsked\(false\); else if \(isLeftAsk\(text\)\) leftAsked\(\); else enqueue\(/, 'typed, the phrases code answers are the app\'s, as when they are spoken');
   assert.match(side, /if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n(?:  \/\/[^\n]*\n  if \(!area\?\.file && isReviewAsk\(text\)\)[^\n]*\n)?(?:  \/\/[^\n]*\n  if \(!area\?\.file && isWaitingAsk\(text\)\)[^\n]*\n)?(?:  \/\/[^\n]*\n  if \(!area\?\.file && isLeftAsk\(text\)\)[^\n]*\n)?  if \(!area\?\.file\) return enqueue\(/, 'what is said goes to the bubble before it can become a request, and the shell is told the words were dealt with');
   assert.match(side, /m\.state === 'idle' && \(pi\.unheard\(\) \|\| answers\.unheard\(\)\)/);
   const shell = fs.readFileSync(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');

@@ -8,7 +8,7 @@ let lengthTurn = 0;
 // REPLY_CHARS=<n>: answers of about that many characters. VARY=1: one to four times the scripted answer, in turn.
 const lengthen = (t) => { const n = process.env.VARY ? t.length * (1 + (lengthTurn++ * 7) % 4) : Number(process.env.REPLY_CHARS || 0); let out = t; while (out.length < n) out += ` ${t}`; return out; };
 
-export function startModel({ onRequest = () => {} } = {}) {
+export function startModel({ onRequest = () => {}, answer = () => null } = {}) { // answer(the last message's text) → a reply of the test's own, or null for the script
   let turn = 0, asks = 0, prev = '', dumped = 0;
   const draw = Number(process.env.DRAW || 0);
   const toolList = JSON.parse(process.env.TOOLS || '[]'); let toolTurn = 0;
@@ -29,7 +29,7 @@ export function startModel({ onRequest = () => {} } = {}) {
       // TOOLS='[["remember_commitment",{"text":"Call the bank","due":"$in60s"}],["list_commitments",{}]]' with DRAW=<n>:
       // the n-th requests call these tools in turn instead of only drawing. "$in60s" becomes a time 60 s from now.
       const pick = drawNow && toolList.length ? toolList[toolTurn++ % toolList.length] : null;
-      const text = fold ? JSON.stringify({ summary: 'The owner asked about the calendar, a report, a review, a grant deadline, a build and a draft, and was answered each time. Nothing is left open.', facts: [] }) : lengthen(REPLIES[turn++ % REPLIES.length]);
+      const text = fold ? JSON.stringify({ summary: 'The owner asked about the calendar, a report, a review, a grant deadline, a build and a draft, and was answered each time. Nothing is left open.', facts: [] }) : answer(lastText) ?? lengthen(REPLIES[turn++ % REPLIES.length]);
       // How much of this request the provider could reuse from the one before: the characters, from the start, that
       // are the same (instructions, tool definitions, then the messages in order). Counted, never kept beyond the next.
       // (a message's text is compared whether it came as a string or as one text part, and without the provider's

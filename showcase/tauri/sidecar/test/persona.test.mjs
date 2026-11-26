@@ -228,5 +228,14 @@ assert.match(side, /function sir\(text, how\) \{ return addressClock\.line\(text
   assert.ok(!/[^.\w]addressed\(/.test(side), 'nothing in sidekick.mjs adds it past the clock');
 }
 
+// A doubled sentence end in a line worded by the app (a title with its own full stop, then the line's) is taken out;
+// an ellipsis, a file name and a version stay as they are. Every line said or shown by the app passes the clock.
+{
+  const { oneStop } = await import('../persona.mjs');
+  for (const [given, want] of [['Closed: Return the keys to Anna..', 'Closed: Return the keys to Anna.'], ['When will you do Call Dr. Lee.?', 'When will you do Call Dr. Lee?'], ['Done: Ship it!.', 'Done: Ship it!'], ['Is it in?.', 'Is it in?'], ['Wait...', 'Wait...'], ['Ask me anything…', 'Ask me anything…'], ['It is in settings.json.', 'It is in settings.json.'], ['Version 1.2.', 'Version 1.2.'], ['One. Two.', 'One. Two.']]) assert.equal(oneStop(given), want, given);
+  const c = createAddressClock({ seconds: () => 0 });
+  assert.equal(c.line('Closed: Return the keys..', 'sir'), 'Closed, sir: Return the keys.');
+}
+
 fs.rmSync(home, { recursive: true, force: true });
 console.log('persona tests: passed');

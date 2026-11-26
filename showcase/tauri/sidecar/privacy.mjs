@@ -15,7 +15,9 @@
 //      private titles replaced (redact, below, wrapped round each tool for Claude in sidekick.mjs);
 //   5. the side calls: the fold, the memory update, the handover's part two (their inputs), and the handover message
 //      that opens Claude's new conversation;
-//   6. the private exchanges themselves: answered by the local model only, kept in its own history, never placed in
+//   6. after a Claude reply given a list or count of the to-dos, the app's own line says how many are private
+//      (listedTodos, privateAfter; sidekick.mjs);
+//   7. the private exchanges themselves: answered by the local model only, kept in its own history, never placed in
 //      Claude's conversation (localroute.mjs, route.mjs).
 // The local route's tool calls carry { seePrivate: true }; anything without it is Claude's, and sees no private item.
 import fs from 'node:fs';
@@ -47,6 +49,16 @@ export function privateCount(todos, notes) {
   const parts = [todos ? `${todos} to-do${todos === 1 ? '' : 's'} or reminder${todos === 1 ? '' : 's'}` : '', notes ? `${notes} note${notes === 1 ? '' : 's'}` : ''].filter(Boolean);
   return `- Private: ${parts.join(' and ')} made in private mode; you never see their titles or text (shown as ${PRIVATE_WORD}).`;
 }
+
+// Feature 23 (2026-11-26): after a Claude reply that was given a list or a count of the to-dos while private ones were
+// left out, the app adds one line of its own; Claude is never asked to say it. Given: one of these tools ran in that
+// request, or the reply itself counts to-dos or reminders (it had the outline, whose numbers leave private ones out).
+export const TODO_LIST_TOOLS = new Set(['list_commitments', 'show_day', 'plan_day', 'show_matrix']);
+const COUNTED = /\b(?:\d+|no|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a few|several)\s+(?:[a-z]+\s+){0,2}(?:to-?dos?|reminders?)\b/i;
+/** Whether a Claude request gave a list or a count of the to-dos: tools (the names it called), reply (its text). */
+export const listedTodos = (tools = [], reply = '') => tools.some((t) => TODO_LIST_TOOLS.has(t)) || COUNTED.test(String(reply ?? ''));
+/** The app's line after such a reply. n: the private to-dos and reminders. → '' when there are none. */
+export const privateAfter = (n) => (n > 0 ? `${n === 1 ? 'There is 1 private to-do or reminder' : `There are ${n} private to-dos or reminders`}; only the local model can show ${n === 1 ? 'it' : 'them'}.` : '');
 
 // Lifting the mark: said by the owner, matched by code, then a yes in a bubble.
 const LIFT = [

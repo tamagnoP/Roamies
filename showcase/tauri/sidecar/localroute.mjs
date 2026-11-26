@@ -76,7 +76,7 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
         chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: r.model, private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
         run, name: userName, model: r.model, said, state: liteState({ name: userName, now: now(), facts: liteFacts(open, b, now()) }),
         history: history.slice(-local.historyExchanges), maxSteps: local.maxSteps, now: now(), hours, items,
-        confirm: async (p) => confirm(p), confirmChanges: local.confirmChanges,
+        confirm: async (p) => confirm(p), confirmChanges: local.confirmChanges, persona: s.persona?.name ?? '',
       });
     } catch (e) {
       if (signal?.aborted) throw e;
