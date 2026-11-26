@@ -1225,6 +1225,16 @@ server, the tunnel).
     an hour…": no call, its claim replaced by "Nothing was changed."
   - Stopped at the owner's rule; he is to switch the local route to showing each change for a yes before it is saved.
 
+- **Plan of 2026-11-26, after set F: ask before saving what the model decided.** Actions decided by code from fixed
+  words (`DECIDED` in `checks.mjs`: remind, a new to-do, a due time, marked done, off the calendar, a note, open an
+  app; two rows matching decide nothing) are saved at once. A reminder whose time and text code reads is made with no
+  model call. A change the model chose is shown as a code-worded question (`Move the block for "Grant report draft"
+  to Tuesday 1 December at 09:00?`) in the usual yes/no bubble and answer window, never kept as pending; no answer
+  saves nothing. `local.confirmChanges` (default true). The claim check, with no tool called, also catches promises
+  ("I'll", "I will", "noted", "I have"). The written time forms move into `daily.mjs`'s parser. Bench outcomes: saved
+  by code, shown for a yes (right or wrong), asked, misses. Plan:
+  `~/Documents/roamies-reports/2026-11-26_1206_feature-23-confirm-before-saving-plan.md`.
+
 ### 32. Ledger
 
 Agreed 2026-11-24 (the owner); recorded 2026-11-25. Recorded with 23, shown in 21.
@@ -1925,6 +1935,16 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   built from it. Before them: the model's time arguments taken away (the table of placement rules in `checks.mjs`,
   questions naming what is missing, one change per request), then set F; any wrong save on F stops the work and he
   switches the local route to a yes before each change.
+
+- **2026-11-26, after set F (feature 23, the owner).** As agreed, the local route asks before saving, refined: what
+  code decided from fixed words in his sentence is saved at once and confirmed by the code-worded line; what the
+  model decided and changes something is shown first, as a code-worded question with the title, the action and the
+  times as code read them, answered yes or no by voice or buttons in the usual answer window; no answer saves
+  nothing and is not kept. A reminder whose time and text code can read is made with no model call. Reads never ask.
+  `local.confirmChanges` (default true). With no tool called, a reply may not promise or report an action. The
+  parser's written forms go where the missed-task and check-in answers read them. Then C to F once each, no stop on
+  the result, and stages 1 to 6 with one report at the end. Plan:
+  `~/Documents/roamies-reports/2026-11-26_1206_feature-23-confirm-before-saving-plan.md`.
 
 ## 6. Still to test
 
