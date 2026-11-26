@@ -77,6 +77,11 @@ export function addressRule(p, userName, use) {
     : `- Form of address: do not use "${address}" or any other title for ${userName}, anywhere in your replies, until a later [address] part tells you to.`;
 }
 
+/** A line worded by the app with a doubled sentence end taken out: a title or item that ends with its own full stop,
+ *  question or exclamation mark, followed by the line's full stop ("Closed: Call the bank.." → "Closed: Call the
+ *  bank.", "When will you do Call the bank.?" → "… bank?"). An ellipsis ("...", "…") is left as it is. */
+export const oneStop = (text) => String(text ?? '').replace(/(?<![.…])([.!?])\.(?![.\p{L}\p{N}])/gu, '$1').replace(/(?<![.…])\.([?!])(?![.?!\p{L}\p{N}])/gu, '$1');
+
 const ABBREV = /(?:^|[\s(])(?:a\.m|p\.m|e\.g|i\.e|etc|vs|approx|mr|mrs|ms|dr|st|no)$/i;
 /** A sentence worded by the app, with the form of address: once, closing the first sentence of the first line
  *  ("Nudge test is due at 14:05, sir.", "Shall I send it, sir?"), or before the colon of a short label
@@ -151,7 +156,7 @@ export function createAddressClock({ seconds = () => PERSONA_DEFAULT.addressEver
       return true;
     },
     line(text, address, { said = false, again = false } = {}) {
-      const s = String(text ?? ''), out = addressed(s, address);
+      const s = oneStop(text), out = addressed(s, address);
       if (out === s || every() === 0) return out;
       if (again) return lastLine !== null && firstLine(s) === lastLine ? out : s;
       const form = said ? 'said' : 'shown';

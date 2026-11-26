@@ -298,7 +298,7 @@ export function createHandover({ home = os.homedir(), userName = 'the user', log
         how = 'yes';
       }
       if (!close(i.id, how)) return `"${text}" was closed already.`;
-      await say(`Closed: ${text}.`);
+      await say(`Closed: ${text}${/[.!?…]$/.test(text) ? '' : '.'}`);
       return `Closed "${text}". The app has told ${userName} which item it closed: don't repeat it.`;
     },
   }];
