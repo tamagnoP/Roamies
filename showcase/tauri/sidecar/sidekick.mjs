@@ -46,6 +46,7 @@ import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSett
 import { SHORT, leanTools } from './lean.mjs';
 import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
+import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, off by default
 import { BACK_AGAIN, LOCAL_TAG, PRIVATE_OFF, PRIVATE_ON, PRIVATE_TAG, cantLocally, createAnnouncer, isNetworkError, privateAsk, routeFor } from './route.mjs'; // feature 23, stage 4
 import { readState, writeState } from './pi.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
@@ -1290,11 +1291,14 @@ async function liftPrivate(title, byVoice) {
 /** A request answered by the local model: the line saying so when it is the first after a switch, the refusal of
  *  what it can't do, its reply in a bubble tagged "local", said in an exchange started by voice. why: 'offline' or
  *  'private'. Nothing here sends anything to the provider. */
+let localLast = null;
 async function localPrompt(text, byVoice, why, priv) {
+  localLast = null;
   busy = true; quiet = false; flow.activity(); menu();
   controller = new AbortController();
   const ctl = controller, t0 = Date.now();
   let reply = '', mood = 'happy';
+  timing.sent();
   try {
     const first = announcer.before('local', why);
     const cant = cantLocally(text);
@@ -1302,9 +1306,11 @@ async function localPrompt(text, byVoice, why, priv) {
     else {
       privateRequest = !!priv;
       const out = await localRoute.request(text, { signal: ctl.signal, private: !!priv }).finally(() => { privateRequest = false; });
+      localLast = out;
       if (out.problem) { reply = out.problem; mood = 'concerned'; } else reply = out.reply;
     }
     if (ctl.signal.aborted) return;
+    timing.firstText(); timing.replied(); timing.done({ route: priv ? 'local-private' : 'local', tools: localLast?.calls?.map((c) => c.name) ?? [] });
     const full = [first, reply].filter(Boolean).join(' ');
     ui({ kind: 'say', text: sir(full), mood, tag: priv ? PRIVATE_TAG : LOCAL_TAG });
     if (byVoice || flow.spoken()) voiceLine(forVoice(full));
@@ -1366,6 +1372,13 @@ async function localBriefing(briefing, byVoice) {
     logLine('briefing_local', { kind });
   } catch (e) { logLine('briefing_failed', { by: 'local', error: String(e?.message ?? e).slice(0, 160) }); }
 }
+// Feature 23, stage 5: measuring (measureRequests, off by default): numbers and tool names only, in the log.
+const timing = createTiming({
+  on: () => { try { return settingsNow().measureRequests === true; } catch { return false; } },
+  log: (kind, data) => logLine(kind, data),
+  askMemory: () => send({ type: 'measure_memory', asked: Date.now() }),
+  roles: () => ({ [process.pid]: 'sidecar', ...(kokoro.pid ? { [kokoro.pid]: 'kokoro' } : {}), ...(typeof modelServerPid === 'function' && modelServerPid() ? { [modelServerPid()]: 'modelServer' } : {}) }),
+});
 let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
 function recordRequest() {
   const l = ledgerUse; ledgerUse = null;
@@ -1561,8 +1574,10 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     // and say so, instead of waiting silently forever with every later request queued behind it.
     const ctl = controller;
     watch = stallWatch(STALL_MS, () => { stalled = true; logLine('stalled', { turn, ms: Date.now() - use.t }); ctl.abort(); });
+    timing.sent();
     for await (const e of agentEvents(agent.prompt(content))) {
       watch.event(e);
+      if (e.type === 'text_delta') timing.firstText();
       if (e.type === 'text_delta') { const t = echo.push(e.text); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; }
       else if (e.type === 'turn_end') {
         doneWriting();
@@ -1632,6 +1647,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     const { names, ...counted } = use;
     logUsage({ ...counted, ms: Date.now() - use.t });
     recordRequest();
+    timing.replied(); timing.done({ route: 'claude', tools: names, tokens: { new: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out } });
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
     recordRequest(); // feature 32: a request that failed went out all the same
@@ -2101,10 +2117,11 @@ function onVoice(m) {
   // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken by the talk key, an answer
   // window and a spoken request, so that it is ready by the time the reply is.
   if (m.type === 'voice_state' && m.state === 'listening') kokoro.wake(m.window != null ? 'answer window' : 'talk key');
-  else if (m.type === 'voice' && m.text?.trim()) kokoro.wake('spoken request');
+  else if (m.type === 'voice' && m.text?.trim()) { kokoro.wake('spoken request'); timing.heard(); } // feature 23, stage 5: the words have arrived
   if (m.type === 'voice_state') { voiceState = String(m.state ?? 'idle'); ownMicAt = Date.now(); } // Local-only build: sync lines wait while the owner talks (calQuiet); feature 31: Roamies' own listening is not a call
   // Local-only build (feature 22): m.window is the answer window the helper's session belongs to (none: a key press).
   if (m.type === 'voice_state') flow.voice(voiceState, m.window ?? null);
+  if (m.type === 'voice_state' && m.state === 'processing') timing.speechEnd(); // feature 23, stage 5
   if (m.type === 'voice_state' && m.state === 'listening' && m.window != null) { /* the answer window's own listening: nothing is interrupted, and no bubble is told that someone is talking */ }
   else if (m.type === 'voice_state' && m.state === 'listening') {
     if (pi.listening() || answers.listening()) speech.hush(); // local-only build: a Send bubble or a yes/no bubble is open; talking answers it instead of cancelling the request. hush, not stop: what is playing stops, but the reply's voice stays usable, so what Roamies says after the answer is spoken
@@ -2178,6 +2195,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   const ctl = barAsk = new AbortController();
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
+  if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
   if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
 }
 function onWriteTap() {
@@ -2512,6 +2530,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     else if (config.onboarded && !stood?.on()) ui({ kind: 'greet' });
     uiReady = true; offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type === 'stand_down') standDownNow(m.by === 'key' ? 'key' : 'phrase'); // Local-only build (feature 33): from the shell
+  else if (m.type === 'memory') timing.memory(m); // feature 23, stage 5: the shell's memory reading (memory.rs)
+  else if (m.type === 'speech_first') timing.firstSound(); // feature 23, stage 5: the reply's first sound played (voice-out.js)
   else if (m.type === 'presence') presenceSeen(m); // Local-only build (feature 31): idle seconds and the microphone, from the shell
   else if (m.type === 'keybind_error' && m.which === 'stand') standKeyNotice(m);
   else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));

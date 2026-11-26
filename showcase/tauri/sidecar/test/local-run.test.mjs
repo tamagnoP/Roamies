@@ -33,7 +33,7 @@ execFileSync(process.execPath, ['--input-type=module', '-e', `
   import { settingsDefaults } from './pi.mjs';
   await new AuthStorage().setCredentials('anthropic', { accessToken: 'test', refreshToken: '', expiresAt: Date.now() + 864e8, baseUrl: 'http://127.0.0.1:${model.port}' });
   const d = JSON.parse(JSON.stringify(settingsDefaults(os.homedir())));
-  d.voiceEngine = 'system'; d.calendar.syncSeconds = 3600; d.calendar.reviewAt = ''; d.local.address = '${local.address}';
+  d.voiceEngine = 'system'; d.calendar.syncSeconds = 3600; d.calendar.reviewAt = ''; d.local.address = '${local.address}'; d.measureRequests = true;
   fs.writeFileSync(path.join(os.homedir(), 'Documents', 'roamies-pi', 'settings.json'), JSON.stringify(d, null, 2));
 `], { cwd: SIDECAR, env, stdio: ['ignore', 'inherit', 'inherit'] });
 fs.writeFileSync(path.join(home, 'Documents', 'roamies-pi', 'state.json'), JSON.stringify({ calendar: { started: true, adopt: true } }));
@@ -85,6 +85,11 @@ try {
   assert.match(r1.text, /^Claude can't be reached, so the local model on this Mac is answering\. /); assert.equal(r1.tag, 'local');
   assert.equal(provider.length, sent, 'nothing to the provider');
   assert.ok(ledger().some((l) => l.kind === 'warmup' && l.where === 'mac') && ledger().some((l) => l.kind === 'request' && l.where === 'mac' && !l.private));
+  // measuring is on: a timing line for it (numbers and tool names), and the shell is asked for memory
+  await waitFor(() => /timing \{"route":"local"/.test(logText()), 15_000, 'the timing line');
+  assert.ok(out.some((o) => o.m.type === 'measure_memory'), 'the shell is asked');
+  tell({ type: 'memory', processes: [{ pid: 1, parent: null, name: 'roamies', mb: 100 }], webkit: [], pressure: 1, swapMB: 0 });
+  await waitFor(() => / memory \{"mb":\{"shell":100\}/.test(logText()), 5000, 'the memory line');
   // a second local reply: no switch line again
   from = out.length; local.answers.push({ content: 'You are welcome.' });
   await typed('Thanks for that, and one more thing: say hi.');

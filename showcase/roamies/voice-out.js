@@ -59,13 +59,16 @@
 
   const play = (m) => {
     const a = ctx();
-    if (m.id !== id) { stop(); id = m.id; secs = 0; }
+    const first = m.id !== id;
+    if (first) { stop(); id = m.id; secs = 0; }
     const b = pcm(m.pcm, m.rate || 44100), s = a.createBufferSource();
     s.buffer = b; s.connect(out);
     const now = a.currentTime;
     if (!live.length) { out.gain.cancelScheduledValues(now); out.gain.setValueAtTime(1, now); }
     const at = Math.max(endAt, now + LEAD);
     s.start(at); endAt = at + b.duration; secs += b.duration;
+    // Local-only build (feature 23): when a reply's first sound plays, for the sidecar's timing (measureRequests).
+    if (first) setTimeout(() => R.voiceOut.onFirst?.(m.id), Math.max(0, (at - now) * 1000 + ((a.outputLatency || 0) + (a.baseLatency || 0)) * 1000));
     live.push(s);
     s.onended = () => { live = live.filter((x) => x !== s); for (const mk of marks) mk.srcs.delete(s); settle(); };
     all.add(s); s.addEventListener('ended', () => all.delete(s));

@@ -390,7 +390,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -443,6 +443,7 @@ const CLEAN = {
   closingReply: when(full),
   speakNotices: when((v) => typeof v === 'boolean'),
   measurePageRebuild: when((v) => typeof v === 'boolean'),
+  measureRequests: when((v) => typeof v === 'boolean'), // feature 23: timings and memory per request, numbers only, in the activity log
   voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
   kokoro: when(isObj),
   persona: when(isObj),
@@ -577,7 +578,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */

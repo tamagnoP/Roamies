@@ -6,6 +6,7 @@
 #[cfg(target_os = "linux")]
 mod linux;
 mod pipe;
+mod memory;
 mod presence;
 mod sidecar;
 #[cfg(target_os = "macos")]
@@ -1720,6 +1721,12 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
             }
         }
         Some("panel_show") => show_panel(app, None, false),
+        // Local-only build (feature 23): memory, read now (only while "measureRequests" is on, the sidecar asks).
+        Some("measure_memory") => {
+            let app = app.clone();
+            let asked = msg.get("asked").cloned().unwrap_or(Value::Null);
+            thread::spawn(move || to_sidecar(&app, &memory::reading(asked)));
+        }
         Some("diagnostics") => {
             let app = app.clone();
             thread::spawn(move || to_sidecar(&app, &diagnostics(&app)));
