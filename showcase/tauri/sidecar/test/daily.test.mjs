@@ -317,7 +317,9 @@ for (const no of ['review my day and book a call', 'review the slides', 'what is
 // ---- wiring: the evening briefing no longer writes a "Daily log" note; the daily note never reaches the model
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
 assert.match(side, /if \(b\.kind === 'morning'\) dailyDo\('plan', \(\) => daily\.ensure\(\)\);/, 'the morning briefing writes the Plan');
-assert.match(side, /if \(!area\?\.file && isReviewAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); flow\.start\(\);[^\n]*dayReview\('asked'\)[^\n]*return; \}/, 'asked for by voice: answered by the app, never sent to the model');
+assert.match(side, /if \(!area\?\.file && isReviewAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); reviewAsked\(true\); return; \}/, 'asked for by voice: answered by the app, never sent to the model');
+assert.match(side, /if \(isReviewAsk\(text\)\) reviewAsked\(false\);/, 'typed: the same');
+assert.match(side, /function reviewAsked\(byVoice\) \{\n  if \(byVoice\) flow\.start\(\);\n  logLine\('review_asked', \{ typed: !byVoice \}\);\n  dayReview\('asked'\)/);
 assert.match(side, /daily\.reviewDue\(\) && calQuietBase\(\)/, 'by the clock, when nothing else is going on (feature 31: stood down too; its line then waits in the quiet queue)');
 assert.match(side, /if \(by === 'time'\) \{ const t0 = dailyDo\('review', \(\) => daily\.today\(\)\); if \(t0 && !queue\.offer\(\{ kind: 'review', data: \{ key: t0\.key, line: r\.line \}, until: t0\.w\.until \}\)\) return; \}/, 'feature 31: its line goes through the speaking budget');
 assert.match(side, /afterExchange: \{ due: \(\) => daily\.morningDue\(\), run: \(\) => daily\.ask\('morning', dailyIO\) \}/, 'no morning briefing: the end of the first exchange asks');

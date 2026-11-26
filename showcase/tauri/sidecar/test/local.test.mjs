@@ -62,7 +62,7 @@ await assert.rejects(chat({ address: 'http://example.com', body: {} }), /no addr
   const file = path.join(home, 'Documents', 'roamies-pi', 'settings.json');
   loadSettings(home);
   const made = JSON.parse(fs.readFileSync(file, 'utf8')), put = (o) => fs.writeFileSync(file, JSON.stringify(o));
-  assert.deepEqual(settingsDefaults(home).local, { address: '', model: '', whenOffline: true, historyExchanges: 4, maxSteps: 4, confirmChanges: true, start: { python: '', model: 'e4b', port: 8080, sleepAfterMinutes: 10, draft: true } });
+  assert.deepEqual(settingsDefaults(home).local, { address: '', model: '', whenOffline: true, historyExchanges: 4, maxSteps: 4, confirmChanges: true, start: { python: '', model: 'e4b', port: 8080, sleepAfterMinutes: 10, draft: true, waitSeconds: 45 } });
   assert.deepEqual(loadSettings(home).local, made.local);
   for (const [name, list] of Object.entries({ address: ['http://localhost:8080', 'https://127.0.0.1:8080', 'http://192.168.1.4:8080', 42], model: ['a b', 7], whenOffline: ['yes'], historyExchanges: [-1, 21, 2.5], maxSteps: [0, 9], confirmChanges: [0, 'false', null], start: [null, 'x', []] })) for (const v of list) {
     put({ ...made, local: { ...made.local, [name]: v } });

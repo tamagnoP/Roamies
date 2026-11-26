@@ -1179,13 +1179,14 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     const waiting = cal.actions.filter((a) => open.has(a.todo) && a.start >= from && a.start < until).map((a) => ({ todo: a.todo, title: open.get(a.todo).text, start: a.start, minutes: a.minutes, kept: true }));
     return [...booked, ...waiting].sort((a, b) => a.start - b.start);
   }
-  /** The outline, as text for the model: with each request, and for the morning briefing. */
-  function outline() {
+  /** The outline, as text for the model: with each request, and for the morning briefing. Its numbers leave the
+   *  private to-dos out unless seePrivate (the local model's): Claude is told their count apart (privacy.mjs). */
+  function outline({ seePrivate = false } = {}) {
     let cal;
     try { cal = get(); } catch { cal = blank(); }
-    const n = now(), all = listNow(), open = all.filter((t) => t.status === 'open'), done = all.length - open.length;
+    const n = now(), every = listNow(), all = seePrivate ? every : every.filter((t) => !t.private), open = all.filter((t) => t.status === 'open'), done = all.length - open.length;
     const count = (f) => open.filter((t) => DUE[f](t, n)).length;
-    const plan = todayPlan(cal, all);
+    const plan = todayPlan(cal, every); // a private block stays in the plan, its title hidden (redact)
     const taken = lastOk ? dayBlocks(new Date(dayStart(n)), cal).theirs.length : 0;
     return [
       `To-do list, in outline: ${open.length} open: ${count('today')} due today, ${count('week')} due this week, ${count('overdue')} overdue, ${count('none')} without a date.${done ? ` ${done} done today.` : ''}`,
@@ -1229,7 +1230,7 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
         picked = picked.filter((t) => { const x = sorted.get(t.id); return x && (q === 'unsorted' ? !x.sorted : x.sorted && x.urgent === QUADRANT_ARGS[q][0] && x.important === QUADRANT_ARGS[q][1]); });
         said.push(q === 'unsorted' ? 'not sorted into the matrix yet' : quadrant(...QUADRANT_ARGS[q]).toLowerCase());
       }
-      if (!said.length) return outline();
+      if (!said.length) return outline({ seePrivate: !!ctx?.seePrivate });
       picked.sort((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity));
       const cal = get(), n = now(), shown = picked.slice(skip, skip + SP.titlesShown), more = picked.length - skip - shown.length;
       log('calendar_listed', { filters: said.length, found: picked.length, shown: shown.length });

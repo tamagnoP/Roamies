@@ -882,11 +882,11 @@ after.
   - the to-dos with a block or a due time that day, with "(done)" for one already finished;
   - **Needs a new time:** open to-dos whose every time (block and due time) has passed, oldest first;
   - **Coming up:** deadlines in the next 14 days.
-- **Log.** A line when a to-do is finished, whether in Roamies or in Super Productivity (seen at the next check,
-  every 30 seconds), and when a note is taken (`[[its title]]`). A Log line after another section starts a new
+- **Log.** A line when a to-do is finished: in Roamies, at the next check (every 30 seconds); in Super Productivity,
+  right after the sync that finds it (every `calendar.syncSeconds`); and when a note is taken (`[[its title]]`). A Log line after another section starts a new
   `## Log`.
 - **Review.** At `calendar.reviewAt` (18:00), by the evening briefing when that comes first (not when `reviewAt` is
-  `""`), or when you say "review my day" (or another phrase in
+  `""`), or when you say or type "review my day" (or another phrase in
   `reference.dailyNote.reviewPhrases`) on its own. It lists each planned to-do as **done**, **missed** (its time is
   over) or **still open today** (its time is still ahead). Two sentences worded by code follow, then the missed ones
   again under **Needs a new time**. Roamies then says the counts. A second review adds `## Review update (HH:MM)`
@@ -1221,28 +1221,38 @@ request fails with a network error before any reply; and in private mode. A slow
   model server itself (`mlx_vlm.server`, the version tested, the pinned model files by path; it downloads no model),
   under `sandbox-exec`: no network except listening on 127.0.0.1 at that port, writing only in its own temporary
   folder, reading in the home folder only the pinned models' files, starting no other program. It is started on
-  first need and stopped after `local.start.sleepAfterMinutes` without a request, and at quit.
+  first need and stopped after `local.start.sleepAfterMinutes` without a request, and at quit. A start that hasn't
+  loaded the model and answered within `local.start.waitSeconds` (45) is stopped, and the request gets only "The local
+  model could not start, so nothing was sent." To see that it runs sandboxed: `p=$(pgrep -f mlx_vlm.server); for x in
+  $p $(ps -o ppid= -p $p); do /usr/bin/python3 -c "import ctypes,sys; l=ctypes.CDLL('/usr/lib/libsandbox.1.dylib');
+  print(sys.argv[1], 'sandboxed' if l.sandbox_check(int(sys.argv[1]), None, 0) else 'not sandboxed')" $x; done`
+  prints "sandboxed" for the server and "not sandboxed" for Roamies, which started it.
 - **Never silent.** The first local reply after a switch starts with a line saying so, every local bubble carries a
-  "local" tag, and "Claude is answering again." starts the first reply after.
+  "local" tag, and "Claude is answering again." starts the first reply after. The line comes only with an answer
+  from the local model: a refusal by code, or a model that can't start or isn't answering, is said as only that.
 - **Private mode.** "Keep this private" at the start of a request makes that request private; said alone it is a
   mode, with a mark under the character, until you say "back to Claude" (not at the day turn, not at a restart).
   Private requests go to the local model only; if it can't be reached, nothing is sent anywhere. A to-do, reminder
   or note made in private mode carries a private mark (`private: true` in `memory.json`, or in the note's front
   matter): the provider gets only how many there are, never their titles or text, in the live state, any tool
-  result, a search, a side call or the handover. Private exchanges are summarised by the local model only, into the
+  result, a search, a side call or the handover. The outline's numbers leave them out, and after a Claude reply given
+  a list or a count of the to-dos (a list tool, or a reply that counts them) the app adds one line of its own: how
+  many private to-dos or reminders there are, and that only the local model can show them. Private exchanges are summarised by the local model only, into the
   daily note with a mark Claude's note tools leave out. You lift the mark by asking ("lift the private mark from
   ..."), with a yes.
 - **What the local model can do.** Your to-dos and reminders, the calendar, notes, today's daily note when you ask,
   and opening an app by name. A change it chooses is shown as a question and saved only on your yes
   (`local.confirmChanges`); what code decides from your words is saved at once: only when your whole sentence fits one
-  of its frames ("remind me …", "… is due on …", "add a to-do: …", "I'm done with <title>", "open <app>"), and for a
+  of its frames ("remind me …", "… is due on …", "add a to-do: …", "I'm done with <title>", "open <app>"; the
+  persona's name, "please", "can you" or "could you" may come first), and for a
   change to a to-do only with its whole title. "What's on Friday?" and "show me <day>" are looked up by code.
   Times, days and lengths are read by code from what you said, never taken from the model. A hand-off to pi, the
   screen, drawing and clicking are refused by a line.
 - **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the
   kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
   carried, whether it was private. Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
-  is answered from it by code and sent to no model. Requests the claude program reports making by itself (its
+  is answered from it by code and sent to no model, typed or spoken, like "review my day" and "anything waiting?";
+  the local model's warm-ups are named apart from the requests that stayed on this Mac. Requests the claude program reports making by itself (its
   per-model usage in each result, beyond the request's own turns) are counted too. Not counted, because Roamies can't
   see them: what the claude program sends to Anthropic by itself without reporting it (it connects when it starts,
   and makes small checks such as counting tokens), and pi's own requests.
