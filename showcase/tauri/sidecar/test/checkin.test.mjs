@@ -39,7 +39,7 @@ const ids = (list) => list.map((c) => `${c.id}:${c.how}`);
     done: ['done', 'Done.', 'yes', 'yes, done', "it's done", 'all done', 'finished', 'I did it', 'um, done please'],
     still: ['still on it', 'Still working on it.', "I'm on it", 'almost done', 'in progress'],
     notyet: ['not yet', 'no', 'nope', 'not done yet', 'not finished'],
-    none: ['maybe', 'done and dusted', 'not yet, sometime', 'leave it', 'drop it', 'next friday', ''],
+    none: ['maybe', 'done and dusted', 'not yet, sometime', 'leave it', 'drop it', 'next week', ''],
   };
   for (const [kind, list] of Object.entries(table)) for (const t of list) assert.deepEqual(parseCheckIn(t, opts), kind === 'none' ? null : { kind }, `"${t}"`);
   assert.deepEqual(parseCheckIn('not yet, tomorrow at 10', opts), { kind: 'notyet', when: { kind: 'at', start: at(27, 10) } });
@@ -49,6 +49,10 @@ const ids = (list) => list.map((c) => `${c.id}:${c.how}`);
   assert.deepEqual(parseCheckIn("not yet, Friday's fine at half 3", opts), null, 'filler words in the middle are not taken');
   assert.deepEqual(parseCheckIn('not yet, Friday at half 3', opts), { kind: 'notyet', when: { kind: 'at', start: at(27, 15, 30) } });
   assert.deepEqual(parseCheckIn('not yet, leave it', opts), { kind: 'notyet', when: { kind: 'leave' } });
+  // "next friday": which of the two is asked (the owner, 2026-11-26), with the time kept
+  assert.deepEqual(parseCheckIn('next friday', opts), { kind: 'notyet', when: { kind: 'next', name: 'Friday', first: new Date(2026, 10, 27), second: new Date(2026, 11, 4), mins: null } });
+  assert.deepEqual(parseCheckIn('not yet, next Friday at 10', opts), { kind: 'notyet', when: { kind: 'next', name: 'Friday', first: new Date(2026, 10, 27), second: new Date(2026, 11, 4), mins: 600 } });
+  assert.deepEqual(parseCheckIn('not yet, next thursday at 9', opts).when.first, new Date(2026, 11, 3), 'today\'s 09:00 is over: the coming one is a week on');
   assert.deepEqual(parseCheckIn('tomorrow at 10', opts), { kind: 'notyet', when: { kind: 'at', start: at(27, 10) } }, 'a time alone is a "not yet"');
   assert.equal(checkQuestion('block', 'Write methods', 0), 'Your block for Write methods has ended. Is it done?');
   assert.equal(checkQuestion('due', 'Send slides', at(26, 11, 30)), 'Send slides was due at 11:30. Is it done?');
@@ -73,7 +77,7 @@ const ids = (list) => list.map((c) => `${c.id}:${c.how}`);
 const said = [], done = [], moved = [];
 let script = [];
 const io = {
-  ask: async (o) => { const a = script.shift(); io.asked.push(o); if (a instanceof Error) throw a; return typeof a === 'string' ? o.parse(a) : a; }, asked: [],
+  ask: async (o) => { const a = script.shift(); io.asked.push(o); if (a instanceof Error) throw a; return typeof a === 'string' && o.parse ? o.parse(a) : a; }, asked: [],
   say: async (t) => { said.push(t); }, done: async (id) => { done.push(id); const t = todos.find((x) => x.id === id); t.status = 'done'; t.doneAt = clock; delete blocks[id]; },
   reschedule: async (id, when) => { moved.push([id, when]); const t = todos.find((x) => x.id === id); if (when.start && blocks[id]) blocks[id] = { ...blocks[id], start: when.start }; else t.due = when.start ?? when.day.getTime(); return { ok: true, line: 'Moved.' }; },
 };
@@ -213,6 +217,53 @@ const io = {
   blocks.e = { start: at(27, 10, 30), minutes: 60, kept: false }; todos[0].due = at(27, 10, 45);
   assert.deepEqual(checks.atRisk().lines.map((l) => l.id), ['e'], 'a block that ends after the due time does not count');
   assert.deepEqual(logs.filter(([k]) => k === 'deadline_at_risk').at(-1), ['deadline_at_risk', { todos: 1 }]);
+}
+
+// ---- started late (the owner, 2026-11-26): a block or due time that ended more than an hour before start-up gets no
+// check-in, and the review lists it as missed
+let late;
+{
+  fs.rmSync(path.join(dir, 'state.json'), { force: true });
+  fs.rmSync(path.join(vault, 'Daily'), { recursive: true, force: true });
+  todos.splice(0, todos.length,
+    { id: 'h', text: 'Early block', kind: 'commitment', status: 'open', due: null, doneAt: null },
+    { id: 'i', text: 'Late block', kind: 'commitment', status: 'open', due: null, doneAt: null },
+    { id: 'j', text: 'Early due', kind: 'commitment', status: 'open', due: at(26, 12), doneAt: null },
+    { id: 'k', text: 'Last due', kind: 'commitment', status: 'open', due: at(26, 16, 40), doneAt: null });
+  for (const k of Object.keys(blocks)) delete blocks[k];
+  blocks.h = { start: at(26, 9), minutes: 60, kept: false }; // ended at 10:00
+  blocks.i = { start: at(26, 14), minutes: 60, kept: false }; // ended at 15:00
+  clock = at(26, 16);
+  late = createCheckIns({ home, daily, todos: () => todos.map((t) => ({ ...t })), blocks: () => ({ ...blocks }), log: (k, d) => logs.push([k, d]), now: () => clock, startedAt: clock });
+  daily.ensure();
+  assert.deepEqual(ids(late.due()), ['i:block'], 'started at 16:00: the block that ended at 15:00 is asked about; 10:00 and 12:00 are not');
+  assert.equal(late.stale({ kind: 'checkIn', data: { key: '2026-11-26', id: 'h', at: at(26, 10), how: 'block' } }), true, 'one queued before for such a time is out of date');
+  assert.deepEqual(ids(checks.due()), ['h:block', 'j:due', 'i:block'], 'started in the morning, all three would be');
+}
+
+// ---- "next friday" in a check-in answer: the calendar's question between the two days, and its answer taken
+{
+  clock = at(26, 16, 30);
+  const k = late.mark(late.due()[0]);
+  script = ['not yet, next friday at 10', 'second'];
+  assert.equal(await late.ask(k, io), 'notyet');
+  const q = io.asked.at(-1);
+  assert.equal(q.placeholder, 'Late block: Friday the 27th or Friday the 4th?'); assert.equal(q.spoken, 'Friday the 27th or Friday the 4th?');
+  assert.deepEqual(q.choices, ['Friday the 27th', 'Friday the 4th']); assert.ok(q.which.second.includes('the 4th'), 'answered by voice too');
+  assert.deepEqual(moved.at(-1), ['i', { start: new Date(2026, 11, 4, 10).getTime() }]);
+  assert.match(note(), /- 16:30 Rescheduled: Late block → Friday 4 December, 10:00\n$/);
+  assert.deepEqual(logs.filter(([x]) => x === 'daily_next_day').at(-1), ['daily_next_day', { answered: true }]);
+  // no pick: nothing changes, and the Log says "not yet"
+  clock = at(26, 16, 45);
+  const n = moved.length, l = late.mark(late.due()[0]);
+  script = ['next friday', new Unanswered()];
+  assert.equal(await late.ask(l, io), 'notyet');
+  assert.equal(moved.length, n, 'nothing moved'); assert.match(note(), /- 16:45 Check-in: Last due: not yet\n$/);
+  assert.deepEqual(logs.filter(([x]) => x === 'checkin').at(-1), ['checkin', { how: 'due', answer: 'notyet', then: 'none' }]);
+  // the review: the two that got no check-in are missed
+  clock = at(26, 18);
+  const r = daily.review();
+  assert.deepEqual(r.rows.filter((x) => ['h', 'j'].includes(x.id)).map((x) => `${x.title}:${x.status}`).sort(), ['Early block:missed', 'Early due:missed']);
 }
 
 // ---- the log has no words

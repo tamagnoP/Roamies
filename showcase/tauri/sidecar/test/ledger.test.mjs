@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { KINDS, UNSEEN, countTools, createLedger, isLeftAsk, leftLine, ledgerLine } from '../ledger.mjs';
+import { KINDS, UNSEEN, countTools, createLedger, isLeftAsk, leftLine, ledgerLine, shortModel, signInFailed } from '../ledger.mjs';
 
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 // A line holds numbers, names and the kind; whatever else a caller passes is not kept.
@@ -12,7 +12,10 @@ const l = ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', mod
 assert.deepEqual(l, { t: at(26, 9), kind: 'request', where: 'provider', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, captures: { marked: 1, screenshots: 1, photos: 0 }, windowTexts: 2, private: false });
 assert.ok(!JSON.stringify(l).includes('secret'));
 assert.throws(() => ledgerLine({ kind: 'chat' }), /no ledger kind/);
-assert.deepEqual(KINDS, ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own']);
+assert.deepEqual(KINDS, ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed']);
+// the model's name, never a folder of the owner's (the owner, 2026-11-26)
+for (const [m, want] of [['/Users/office/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-it-4bit/snapshots/475b9088', 'gemma-4-e4b-it-4bit'], ['/Users/office/models/my-gemma', 'my-gemma'], ['~/m/x', 'x'], ['C:\\Users\\o\\m', 'm'], ['e4b', 'e4b'], ['mlx-community/gemma-4-e4b-it-4bit', 'mlx-community/gemma-4-e4b-it-4bit'], ['claude-sonnet-5-5', 'claude-sonnet-5-5']]) assert.equal(shortModel(m), want, m);
+assert.equal(ledgerLine({ kind: 'warmup', where: 'mac', model: '/Users/office/models/my-gemma' }).model, 'my-gemma');
 assert.deepEqual(countTools(['take_screenshot', 'read_window', 'see_photo', 'read_window', 'write_note']), { screenshots: 1, photos: 1, windowTexts: 2 });
 
 // The file: appended, read back, pruned after limits.ledgerDays, never with content.
@@ -37,6 +40,16 @@ assert.equal(ledger.left(), 'Sent to anthropic today: 2 requests, 1 fold of the 
   assert.match(l2.left(), /2 requests stayed on this Mac, with the local model, besides 1 warm-up checking it\./);
 }
 assert.equal(UNSEEN, 'Not counted, because Roamies can\'t see them: what the claude program sends to Anthropic by itself without reporting it (it connects when it starts, and makes small checks such as counting tokens), and pi\'s own requests.');
+// A failed sign-in: its own kind, named apart, not among what was sent (the owner, 2026-11-26)
+for (const e of ['Not logged in · Please run /login', 'Invalid API key · Please run /login', 'HTTP 401 Unauthorized', new Error('authentication_error')]) assert.ok(signInFailed(e), String(e));
+for (const e of ['fetch failed', 'Request 4011 failed', 'rate limit']) assert.ok(!signInFailed(e), e);
+{
+  const fail = (t) => ledgerLine({ t, kind: 'signInFailed', provider: 'claude-code', model: 'claude-x' });
+  assert.equal(leftLine([fail(at(26, 9)), fail(at(26, 9, 5))], at(26, 10)), `No request to the provider was answered today. 2 requests to claude-code failed at sign-in and got no answer; what they sent before failing, if anything, isn't known. ${UNSEEN}`);
+  const both = leftLine([fail(at(26, 9)), ledgerLine({ t: at(26, 9), kind: 'request', provider: 'claude-code', tokens: { new: 10, out: 5 } })], at(26, 10));
+  assert.match(both, /^Sent to claude-code today: 1 request; 10 tokens sent .* 1 request to claude-code failed at sign-in and got no answer; what it sent before failing, if anything, isn't known\./);
+}
+assert.match(fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8'), /recordRequest\(err\); \/\/ feature 32/, 'a failed request is recorded with its error');
 // Yesterday's lines are not today's.
 assert.equal(leftLine(ledger.lines(), at(27, 9)), `Nothing went to the provider today. ${UNSEEN}`);
 // What the claude program reported making by itself: in the totals, and said.

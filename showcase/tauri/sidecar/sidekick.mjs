@@ -6,7 +6,7 @@
 // out: {type:'menu', items} {type:'ui', msg} {type:'overlays', ids}
 import { Agent } from '@kenkaiiii/gg-agent';
 import { ClaudeCodeAgent, SDK_TOOL_SHADOWED, closeSpare, isToolShadowWarning } from './claudecode.mjs';
-import { SAFE, checkDrawAction, checkLink, redactArgs } from './safety.mjs';
+import { SAFE, checkDrawAction, checkLink } from './safety.mjs';
 import { agentEvents, stallWatch } from './agentstream.mjs';
 import {
   AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
@@ -24,7 +24,7 @@ import {
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
   setCommitmentPrivate, setPrivateContext,
 } from './store.mjs';
-import { LIFT_NONE, liftAsk, liftQuestion, listedTodos, privateAfter, privateCount, redact, redactResult, unmarkNote } from './privacy.mjs';
+import { LIFT_NONE, argLengths, liftAsk, liftQuestion, listedTodos, privateAfter, privateCount, redact, redactResult, resultLength, unmarkNote } from './privacy.mjs';
 import { matchTitle } from './checks.mjs'; // Local-only build (feature 23): the private mark
 import { resolveToolSchema } from '@kenkaiiii/gg-ai';
 import { createLiveBlocks, stripLive } from './live.mjs';
@@ -44,7 +44,7 @@ import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTr
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
 import { SHORT, leanTools } from './lean.mjs';
-import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
+import { countTools, createLedger, isLeftAsk, signInFailed } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
 import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, off by default
 import { createModelServer } from './modelserver.mjs'; // feature 23, stage 6: the local model server, started by Roamies
@@ -98,6 +98,7 @@ const STAND_PASS = new Set(['list', 'esc', 'cancel_ask', 'ask_text', 'heard', 'h
 function standCatch(msg) {
   if (!stood?.on() || PAGE_SETTINGS.has(msg.kind) || STAND_PASS.has(msg.kind) || (msg.kind === 'speech' && msg.stop)) return false;
   if (msg.kind === 'speech') { if (msg.mark) { const done = played.get(msg.mark); played.delete(msg.mark); done?.(); } return true; }
+  if (msg.kind === 'ask' && msg.bar) return false; // the ask field he opened himself (the owner, 2026-11-26: not a leak)
   if (msg.kind === 'ask') { logLine('stand_down_leak', { kind: 'ask' }); return false; } // a question is never dropped (its answer would never come); every one is held at its source
   if (msg.kind === 'say' && typeof msg.text === 'string' && msg.text.trim()) { queue.hold({ kind: 'caught', text: String(msg.text).slice(0, 2000), mood: typeof msg.mood === 'string' ? msg.mood : null }, 'stood'); logLine('stand_down_caught', { kind: 'say', chars: msg.text.length }); }
   return true;
@@ -1396,11 +1397,11 @@ const timing = createTiming({
   roles: () => ({ [process.pid]: 'sidecar', ...(kokoro.pid ? { [kokoro.pid]: 'kokoro' } : {}), ...(typeof modelServerPid === 'function' && modelServerPid() ? { [modelServerPid()]: 'modelServer' } : {}) }),
 });
 let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
-function recordRequest() {
+function recordRequest(err = null) {
   const l = ledgerUse; ledgerUse = null;
   if (!l) return;
   const u = l.use;
-  ledger.record({ kind: l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names) });
+  ledger.record({ kind: err && signInFailed(err) ? 'signInFailed' : l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names) });
 }
 function logUsage(rec) {
   const day = new Date().toDateString();
@@ -1625,14 +1626,14 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
         releaseBeat(true);
         if (SLOW_TOOLS.has(e.name)) voice?.beat(); // nothing said yet: "One sec." so it's never silent
         use.tools++; use.names.push(e.name);
-        logLine('tool', { turn, id: e.toolCallId, name: e.name, args: redactArgs(e.name, e.args ?? {}) });
+        logLine('tool', { turn, id: e.toolCallId, name: e.name, args: argLengths(e.args ?? {}) }); // the owner, 2026-11-26: names and lengths only
         toolNames.set(e.toolCallId, e.name);
         if (process.env.ROAMIES_USAGE) { toolT.set(e.toolCallId, Date.now()); console.error(`[tool] ${e.name} ${JSON.stringify(e.args ?? {}).slice(0, 160)}`); }
         ui({ kind: 'agent', e: { type: 'tool', id: e.toolCallId, anim: anim(e.name, e.args ?? {}) } });
         if (activity.start(e.toolCallId, e.name, e.args ?? {})) panel();
       } else if (e.type === 'tool_call_end') {
         activity.end(e.toolCallId, e.isError); panel();
-        logLine(e.isError ? 'tool_error' : 'tool_done', { turn, id: e.toolCallId, ms: e.durationMs, result: String(e.result ?? '').replace(/\s+/g, ' ').slice(0, e.isError ? 1000 : 400) });
+        logLine(e.isError ? 'tool_error' : 'tool_done', { turn, id: e.toolCallId, name: toolNames.get(e.toolCallId) ?? '', ms: e.durationMs, chars: resultLength(e.result) });
         if (e.isError && toolNames.get(e.toolCallId) !== 'plan_steps') trail.error(typeof e.result === 'string' ? e.result : '');
         if (process.env.ROAMIES_USAGE) console.error(`[tool_end] ${e.isError ? 'ERROR' : 'ok'} ${Date.now() - (toolT.get(e.toolCallId) ?? Date.now())}ms ${String(typeof e.result === 'string' ? e.result : JSON.stringify(e.result ?? '')).replace(/\s+/g, ' ').slice(0, 160)}`);
         ui({ kind: 'agent', e: { type: 'tool_end', id: e.toolCallId, isError: e.isError } });
@@ -1670,7 +1671,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     timing.replied(); timing.done({ route: 'claude', tools: names, tokens: { new: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out } });
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
-    recordRequest(); // feature 32: a request that failed went out all the same
+    recordRequest(err); // feature 32: a request that failed went out all the same (one that failed at sign-in as its own kind)
     // Feature 23: no reply at all, and the provider can't be reached: this request goes to the local model.
     if (ownAsk && !lastReply && !controller.signal.aborted && !stalled && isNetworkError(err) && local.address && local.whenOffline) { logLine('switch_local', { why: 'network' }); running = running.then(() => localPrompt(text, byVoice, 'offline', false)).catch((e) => console.error('local request', e)); return; }
     lastFailed = true;
@@ -1702,7 +1703,7 @@ const STALL_MS = 120_000;
 const stallMessage = () => `${PROVIDER_LABELS[config.provider] ?? 'The AI'} stopped answering for two minutes, so I gave up on that one. Ask me again?`;
 const friendly = (err) => {
   const m = String(err?.message ?? err);
-  if (/not logged in|NotLoggedIn|401|unauthori/i.test(m)) return `My ${PROVIDER_LABELS[config.provider] ?? config.provider} login isn't working. Sign in again on the Model page in ${PANEL}.`;
+  if (signInFailed(m)) return `My ${PROVIDER_LABELS[config.provider] ?? config.provider} login isn't working. Sign in again on the Model page in ${PANEL}.`;
   if (/usage|quota|rate.?limit|429/i.test(m)) return `I've hit the usage limit on this model. Pick another one on the Model page in ${PANEL}.`;
   return `Something went wrong: ${m.slice(0, 160)}`;
 };
@@ -2216,7 +2217,9 @@ async function typeToAsk({ interrupt = false } = {}) {
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
   if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
-  if (text?.trim()) { standUp('typed'); if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
+  // The stand-down phrase and a closing phrase ("thanks") typed alone are taken as said (the owner, 2026-11-26).
+  if (text?.trim() && isStandDown(text, ...standPhrase())) { standDownNow('typed'); return; }
+  if (text?.trim()) { standUp('typed'); if (!pi.bubble() && !answers.open() && flow.closing(text)) return; if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
 }
 function onWriteTap() {
   if (onboarding) return;
