@@ -24,6 +24,11 @@ import fs from 'node:fs';
 import { only, plainNum, unfilled } from './answers.mjs';
 
 export const PRIVATE_WORD = '[private]';
+/** The activity log's view of a tool call (the owner, 2026-11-26): each argument by its length only, never a title,
+ *  a name, a path or any text. A value that isn't text is measured as JSON. */
+export const argLengths = (args) => Object.fromEntries(Object.entries(args && typeof args === 'object' ? args : {}).map(([k, v]) => [k, typeof v === 'string' ? v.length : (JSON.stringify(v) ?? '').length]));
+/** A tool's result (or error), for the activity log: its length only. */
+export const resultLength = (r) => (typeof r === 'string' ? r : (JSON.stringify(r ?? '') ?? '')).length;
 /** Whether a note's text marks it private (its front matter has `private: true`). */
 export const privateNote = (text) => /^---\r?\n(?:[^\n]*\r?\n)*?private:\s*true\s*\r?\n(?:[^\n]*\r?\n)*?---/.test(String(text ?? ''));
 /** Whether a note file is private. */

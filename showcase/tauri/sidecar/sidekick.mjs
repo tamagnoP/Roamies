@@ -6,7 +6,7 @@
 // out: {type:'menu', items} {type:'ui', msg} {type:'overlays', ids}
 import { Agent } from '@kenkaiiii/gg-agent';
 import { ClaudeCodeAgent, SDK_TOOL_SHADOWED, closeSpare, isToolShadowWarning } from './claudecode.mjs';
-import { SAFE, checkDrawAction, checkLink, redactArgs } from './safety.mjs';
+import { SAFE, checkDrawAction, checkLink } from './safety.mjs';
 import { agentEvents, stallWatch } from './agentstream.mjs';
 import {
   AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
@@ -24,7 +24,7 @@ import {
   touchFacts, forDisk, forProvider, loadLatestSession, newSession, openCommitments, pruneSessions, readJson, renameCommitment, saveSession, takeDueReminders, updateCommitment, writeJson,
   setCommitmentPrivate, setPrivateContext,
 } from './store.mjs';
-import { LIFT_NONE, liftAsk, liftQuestion, listedTodos, privateAfter, privateCount, redact, redactResult, unmarkNote } from './privacy.mjs';
+import { LIFT_NONE, argLengths, liftAsk, liftQuestion, listedTodos, privateAfter, privateCount, redact, redactResult, resultLength, unmarkNote } from './privacy.mjs';
 import { matchTitle } from './checks.mjs'; // Local-only build (feature 23): the private mark
 import { resolveToolSchema } from '@kenkaiiii/gg-ai';
 import { createLiveBlocks, stripLive } from './live.mjs';
@@ -1625,14 +1625,14 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
         releaseBeat(true);
         if (SLOW_TOOLS.has(e.name)) voice?.beat(); // nothing said yet: "One sec." so it's never silent
         use.tools++; use.names.push(e.name);
-        logLine('tool', { turn, id: e.toolCallId, name: e.name, args: redactArgs(e.name, e.args ?? {}) });
+        logLine('tool', { turn, id: e.toolCallId, name: e.name, args: argLengths(e.args ?? {}) }); // the owner, 2026-11-26: names and lengths only
         toolNames.set(e.toolCallId, e.name);
         if (process.env.ROAMIES_USAGE) { toolT.set(e.toolCallId, Date.now()); console.error(`[tool] ${e.name} ${JSON.stringify(e.args ?? {}).slice(0, 160)}`); }
         ui({ kind: 'agent', e: { type: 'tool', id: e.toolCallId, anim: anim(e.name, e.args ?? {}) } });
         if (activity.start(e.toolCallId, e.name, e.args ?? {})) panel();
       } else if (e.type === 'tool_call_end') {
         activity.end(e.toolCallId, e.isError); panel();
-        logLine(e.isError ? 'tool_error' : 'tool_done', { turn, id: e.toolCallId, ms: e.durationMs, result: String(e.result ?? '').replace(/\s+/g, ' ').slice(0, e.isError ? 1000 : 400) });
+        logLine(e.isError ? 'tool_error' : 'tool_done', { turn, id: e.toolCallId, name: toolNames.get(e.toolCallId) ?? '', ms: e.durationMs, chars: resultLength(e.result) });
         if (e.isError && toolNames.get(e.toolCallId) !== 'plan_steps') trail.error(typeof e.result === 'string' ? e.result : '');
         if (process.env.ROAMIES_USAGE) console.error(`[tool_end] ${e.isError ? 'ERROR' : 'ok'} ${Date.now() - (toolT.get(e.toolCallId) ?? Date.now())}ms ${String(typeof e.result === 'string' ? e.result : JSON.stringify(e.result ?? '')).replace(/\s+/g, ' ').slice(0, 160)}`);
         ui({ kind: 'agent', e: { type: 'tool_end', id: e.toolCallId, isError: e.isError } });

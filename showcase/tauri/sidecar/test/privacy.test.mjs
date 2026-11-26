@@ -86,4 +86,15 @@ fs.rmSync(home, { recursive: true, force: true });
   assert.equal(privateAfter(3), 'There are 3 private to-dos or reminders; only the local model can show them.');
 }
 
+// The activity log's tool lines: names and lengths only (the owner, 2026-11-26)
+{
+  const { argLengths, resultLength } = await import('../privacy.mjs');
+  assert.deepEqual(argLengths({ title: 'Call the oncologist', due: '2026-11-27T10:00', minutes: 30, tags: ['a', 'b'], when: null }), { title: 19, due: 16, minutes: 2, tags: 9, when: 4 });
+  assert.deepEqual(argLengths(null), {}); assert.equal(resultLength('Saved "Call the oncologist".'), 28); assert.equal(resultLength({ ok: true }), 11);
+  const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
+  assert.match(side, /logLine\('tool', \{ turn, id: e\.toolCallId, name: e\.name, args: argLengths\(e\.args \?\? \{\}\) \}\);/);
+  assert.match(side, /logLine\(e\.isError \? 'tool_error' : 'tool_done', \{ turn, id: e\.toolCallId, name: toolNames\.get\(e\.toolCallId\) \?\? '', ms: e\.durationMs, chars: resultLength\(e\.result\) \}\);/);
+  assert.equal((side.match(/logLine\('tool/g) ?? []).length, 1, 'no other tool line in the log');
+}
+
 console.log('privacy tests passed');
