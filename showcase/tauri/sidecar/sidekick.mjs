@@ -44,7 +44,7 @@ import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTr
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
 import { SHORT, leanTools } from './lean.mjs';
-import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
+import { countTools, createLedger, isLeftAsk, signInFailed } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
 import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, off by default
 import { createModelServer } from './modelserver.mjs'; // feature 23, stage 6: the local model server, started by Roamies
@@ -1396,11 +1396,11 @@ const timing = createTiming({
   roles: () => ({ [process.pid]: 'sidecar', ...(kokoro.pid ? { [kokoro.pid]: 'kokoro' } : {}), ...(typeof modelServerPid === 'function' && modelServerPid() ? { [modelServerPid()]: 'modelServer' } : {}) }),
 });
 let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
-function recordRequest() {
+function recordRequest(err = null) {
   const l = ledgerUse; ledgerUse = null;
   if (!l) return;
   const u = l.use;
-  ledger.record({ kind: l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names) });
+  ledger.record({ kind: err && signInFailed(err) ? 'signInFailed' : l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names) });
 }
 function logUsage(rec) {
   const day = new Date().toDateString();
@@ -1670,7 +1670,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     timing.replied(); timing.done({ route: 'claude', tools: names, tokens: { new: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out } });
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
-    recordRequest(); // feature 32: a request that failed went out all the same
+    recordRequest(err); // feature 32: a request that failed went out all the same (one that failed at sign-in as its own kind)
     // Feature 23: no reply at all, and the provider can't be reached: this request goes to the local model.
     if (ownAsk && !lastReply && !controller.signal.aborted && !stalled && isNetworkError(err) && local.address && local.whenOffline) { logLine('switch_local', { why: 'network' }); running = running.then(() => localPrompt(text, byVoice, 'offline', false)).catch((e) => console.error('local request', e)); return; }
     lastFailed = true;
@@ -1702,7 +1702,7 @@ const STALL_MS = 120_000;
 const stallMessage = () => `${PROVIDER_LABELS[config.provider] ?? 'The AI'} stopped answering for two minutes, so I gave up on that one. Ask me again?`;
 const friendly = (err) => {
   const m = String(err?.message ?? err);
-  if (/not logged in|NotLoggedIn|401|unauthori/i.test(m)) return `My ${PROVIDER_LABELS[config.provider] ?? config.provider} login isn't working. Sign in again on the Model page in ${PANEL}.`;
+  if (signInFailed(m)) return `My ${PROVIDER_LABELS[config.provider] ?? config.provider} login isn't working. Sign in again on the Model page in ${PANEL}.`;
   if (/usage|quota|rate.?limit|429/i.test(m)) return `I've hit the usage limit on this model. Pick another one on the Model page in ${PANEL}.`;
   return `Something went wrong: ${m.slice(0, 160)}`;
 };

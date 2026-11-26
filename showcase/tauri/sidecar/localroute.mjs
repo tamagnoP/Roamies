@@ -35,6 +35,8 @@ export function liteFacts(todos, blocks, now = Date.now()) {
  *   problem, reset() (the server was started again: check it again), history() }
  */
 export function createLocalRoute({ settings, userName = 'the user', server = null, tool, todos = () => [], blocks = () => ({}), readDaily = async () => '', confirm = async () => null, record = () => {}, log = () => {}, now = () => Date.now(), fetchImpl } = {}) {
+  // The ledger's name for the model: the one local.start names (e4b, e2b) when Roamies started the server.
+  const label = (model) => { try { const st = settings().local.start; return st?.python ? st.model : model; } catch { return model; } };
   let checked = null; // { address, problem, model }: the live check of the server at that address
   const history = [];
   async function ready() {
@@ -51,7 +53,7 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
     const t0 = now();
     let r;
     try { r = await liveCheck({ ...liveCalls(address, fetchImpl), model, name: userName }); } catch (e) { return { problem: NOT_ANSWERING, retry: true, why: String(e?.message ?? e).slice(0, 120) }; }
-    record({ kind: 'warmup', where: 'mac', provider: 'local', model });
+    record({ kind: 'warmup', where: 'mac', provider: 'local', model: label(model) });
     log('local_checked', { ms: now() - t0, problem: !!r.problem, cached: r.cached ?? null });
     checked = { address, model, problem: r.problem, starts: server?.starts ?? 0 };
     return checked;
@@ -73,7 +75,7 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
     let out;
     try {
       out = await liteRequest({
-        chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: r.model, private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
+        chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: label(r.model), private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
         run, name: userName, model: r.model, said, state: liteState({ name: userName, now: now(), facts: liteFacts(open, b, now()) }),
         history: history.slice(-local.historyExchanges), maxSteps: local.maxSteps, now: now(), hours, items,
         confirm: async (p) => confirm(p), confirmChanges: local.confirmChanges, persona: s.persona?.name ?? '',
@@ -96,7 +98,7 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
     if (r.problem) { if (r.retry) checked = null; throw new Error(r.problem); }
     const address = localAddress(settings().local.address);
     const res = await chatOnce({ address, signal, fetchImpl, stream: false, body: { model: r.model, temperature: 0, max_tokens: maxTokens, enable_thinking: false, messages: [{ role: 'system', content: system }, { role: 'user', content: text }] } });
-    record({ kind, where: 'mac', provider: 'local', model: r.model, private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } });
+    record({ kind, where: 'mac', provider: 'local', model: label(r.model), private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } });
     const out = String(res.content ?? '').trim();
     if (!out) throw new Error('the local model gave no answer');
     return out;
