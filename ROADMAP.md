@@ -915,6 +915,164 @@ design: test real function calling through a local server.
 It goes with the natural voice (16), whose conda setup it shares (Kokoro is already running on the Mac), but is
 built later, after the new look (21).
 
+#### The accepted plan (2026-11-25) with the owner's answers and the decisions since
+
+Put together by the owner on 2026-11-26 from Claude Code's plan of 2026-11-25 and his replies, because the plan was
+not saved in the repo or the reports; copied here unchanged from `~/Documents/roamies-reports/offline-plan-and-answers.md`.
+
+**What was measured before the plan (2026-11-25).**
+
+- Roamies' first request: 16,708 tokens. Tool descriptions 10,654 (33 tools; `draw` alone 4,383), instructions
+  5,234, live state 761.
+- Upstream's `lean.mjs` saves 405 tokens (4 %): it only strips length limits from schemas. The description text
+  is 6,177 tokens; upstream's own tools 6,861, ours 3,793.
+- Already available with no new dependency: gg-ai 5.95 has a local provider for OpenAI-compatible servers;
+  gg-agent's Agent takes `baseUrl` and a custom fetch.
+- On the Mac: mlx_vlm 0.8.0 in `localai`, OpenAI-compatible server with tool calls and reuse of a shared prompt
+  start; Gemma 4 E2B, E4B and Qwen3.5 4B in the Hugging Face cache.
+
+**Taken from upstream, and not taken.**
+
+- `lean.mjs`: whole (leanSchema, stripNulls, leanTools). Limits stay enforced by zod in code.
+- `usage.mjs`: already in the fork (`usage.jsonl`); the ledger builds on it.
+- `local.mjs`: only `serverUrl` (address clean-up), `withWindow`, `contextNote`. Not taken: the look-up of Ollama
+  and LM Studio ports, `connectLocal` writing `~/.gg/auth.json`, any host other than 127.0.0.1.
+- `lite.mjs`: the idea only (short prompt, few tools, short history, few steps, "say so instead of trying"). Its
+  prompt is not used; ours is written new.
+- README: its server flags as an example of set-up only. No servers on other machines.
+
+**Stages.**
+
+0. **Measure first.** Done 2026-11-25/26; see "Decisions since the plan".
+1. **Leaner tool descriptions for every model.** Upstream's leanTools for all tools; shorter wording for our own
+   descriptions (rules that code doesn't enforce stay; repetition goes). Token count before and after with
+   `bench/tokens.mjs`. Applied by tool name from `lean.mjs`, so `tools.mjs` stays untouched.
+2. **The ledger (32).** Before the local model, so local requests are recorded from the start. One line per
+   request: requests, folds, the handover's part two, briefings, pi's summaries, the start-up warm-up. Each line:
+   time and kind; where it went (the provider and which, or this Mac); the model; tokens (new, read from cache,
+   written to cache, answered); how many screen captures it carried (a marked area, `take_screenshot`,
+   `see_photo`); how many window texts (`read_window`); whether it was private. Never content. "What left the Mac
+   today?" answered by code and never sent to a model.
+3. **The local model and the lite request.** Address only `http://127.0.0.1:<port>/v1`; the setting is checked and
+   a fetch guard refuses any other host for every request. The opening is fixed byte for byte: a short prompt
+   with no time and no state, ending with what it can't do, then the fixed tool set (to-dos and reminders, the
+   calendar, notes, open an app). Everything that changes goes at the end. Tool names are the real names, bare.
+   History: its own last 4 local exchanges; at most 4 tool steps a request.
+4. **When it is used.**
+   - Claude can't be reached: the Mac has no network (the shell reads the system's network status; no permission,
+     no request sent), or the request fails with a network error before any reply. Then the request goes to the
+     local model. A slow Claude never switches.
+   - Private mode: asked for by phrase, matched by code ("keep this private").
+   - Never silent: the first local reply after a switch starts with a code-worded line; every local bubble carries
+     a "local" tag; "Claude is answering again." when it is.
+   - No automatic fallback in either direction. Offline or private, the local model says what it can't do. Asks
+     for pi, the screen, drawing or clicking are refused by a code-worded line. If the local server doesn't
+     answer: "The local model isn't answering; nothing was sent."
+   - Already answered by code and unchanged offline: check-ins, reminders, "anything waiting?", "review my day",
+     stand down.
+5. **Measuring, off by default (`measureRequests`).** Numbers and tool names only, in the activity log. Per
+   request from the end of speech to the first spoken word: hearing, prompt reading, the reply, the voice. Also
+   tokens, tools called, the route. Memory read by the shell (`proc_pid_rusage`, `sysctl`): the shell, the
+   overlay's WebKit, the sidecar, the voice helper, Kokoro, the model server; memory pressure and swap.
+6. **Roamies starts the model server itself** (owner: yes). Like Kokoro: the Python by full path with fixed
+   arguments, under sandbox-exec, with the offline variables; network denied except listening on 127.0.0.1 at its
+   port; started on first need, stopped after `sleepAfterMinutes` idle. A tunnel to the Mac mini stays the
+   owner's own set-up.
+7. **Reading the screen offline: cut from the first version.** Later, as its own step: the local model gets
+   `read_window`'s accessibility list under the never-look list and points or explains by element id; no
+   clicking or typing. Measure first how often the small model picks the right element.
+
+**Settings.**
+
+- `local`: `address` "" (off), `model` "", `whenOffline` true, `historyExchanges` 4, `maxSteps` 4.
+- `local.start`: `python` "", `model` (default Gemma 4 E4B), `port` 8080, `sleepAfterMinutes` 10, `draft` true.
+- `limits.ledgerDays` 90.
+- `measureRequests` false.
+
+**Files.**
+
+- New: `lean.mjs`, `local.mjs` (address check, fetch guard, probe of the one address), `lite.mjs`, `ledger.mjs`,
+  `timing.mjs`, `modelserver.mjs` / `localserver.mjs`; `presence.rs` gains network status and, when measuring,
+  memory. The checks live in a module of their own (see below).
+- Changed: `sidekick.mjs` (the route, private mode, announcements, ledger and measuring hooks); `calendar.mjs`,
+  `notes.mjs`, `pi.mjs`, `flow.mjs`, `handover.mjs`, `daily.mjs` (shorter texts, or through `lean.mjs`); `pi.mjs`
+  (settings, code reference); `voice.rs` (end-of-speech time); `voice-out.js` and `host.js` (first audio played,
+  the "local" tag, the private mark); the docs.
+
+**What reaches which model.**
+
+- Claude: the lean tools; never a private exchange, nor the title or text of a private item.
+- The local model: the lite tool set; private exchanges; the time, outline and today's blocks at the end of the
+  request; today's daily note through a tool when the owner asks; the ending conversation for the handover.
+- Neither: the ledger, "what left the Mac", measurements, check-ins, the queue, review texts.
+
+**Guarantees (owner's yes given 2026-11-25).**
+
+- Guarantee 1, a second loopback exception: requests to the local model at the one 127.0.0.1 address in
+  `local.address`, only through the guarded fetch, never another host. Stated plainly in LOCAL-ONLY.md: Roamies
+  cannot tell where that port leads; with an SSH tunnel to the Mac mini, what goes to the local model leaves this
+  Mac over the owner's network, encrypted by SSH. "Private" means "not to the provider".
+- Guarantee 2: one more fixed helper, the model server, sandboxed. The ledger file joins `usage.jsonl`.
+- New rule: private exchanges never reach the provider, and nothing switches models without a line saying so.
+- The rule is one-way: everything on disk may reach the local model; private things never reach Claude.
+
+**The owner's answers to the ten questions.**
+
+1. (a) now: strip schemas and shorten our own descriptions. Measure (c), loading `draw` only when needed, and
+   report; build it only if it holds and drawing still works. Not (b).
+2. Switch for that request, with the announcement.
+3. Said at the start of a request, private for that request. Said alone, a mode. **It never ends by itself**, not
+   at the day turn and not at a restart; only on "back to Claude", matched by code. While on, the character
+   carries a visible mark and every bubble the "local" tag. If the local model cannot be reached in private mode,
+   nothing is sent anywhere.
+4. **Hidden from Claude for good.** A to-do, reminder or note made in private mode carries a private mark. Claude
+   gets a count of private items, never titles or text: in the outline, tool results, search and the handover.
+   Check-ins, the daily note and task pages work for them as for any other. The owner can lift the mark by asking,
+   judged by code with a yes/no. State where the mark is kept and every place that must respect it; test each.
+5. Yes, through a tool the local model calls when asked. Not in every request.
+6. Yes. `local.start.sleepAfterMinutes` 10.
+7. Each hand-off recorded; the answer says pi's own requests are not counted.
+8. 90 days.
+9. **When Claude cannot be reached, the local model does these jobs:** the handover's part two (from that day's
+   local exchanges and as much of the end of the old conversation as fits; marked in the note as written by the
+   local model; not redone later; it must not hold up the first request: answer first, write part two afterwards,
+   then start the new conversation) and briefings (worded from the same outline). pi cannot run without its
+   provider: a hand-off asked for offline is refused by a code-worded line. **Private exchanges, online or
+   offline, are summarised only by the local model**; the lines that come from them carry the private mark:
+   written in the note, given to the local model, never to Claude, which gets the count.
+10. For ordinary requests the local model keeps its own short history. For the handover it may read the ending
+    conversation. Nothing from a private exchange is ever placed in Claude's conversation.
+
+**Tests named in the plan.**
+
+`lean.test` (names, required fields and choices unchanged; token counts printed; `tools.mjs` unchanged);
+`local.test` (only 127.0.0.1; the guard refuses other hosts; a probe against a fake server); `lite.test` (the
+opening byte-identical across two requests; the exact tool set; dates from code); `ledger.test` (no request text;
+totals; the "what left" line with no model request); `timing.test` (off writes nothing; on writes numbers and
+names only); `local-run.test.mjs` in test:all (announced switch; private mode sends zero provider requests; no
+fallback; "Claude is answering again"; the ledger lines; a handover with private lines gives Claude only the
+count); cargo test (network status and memory with no permission); TESTS.md group 2 (Wi-Fi off, the real Gemma
+server, the tunnel).
+
+**Decisions since the plan.**
+
+- **Model: Gemma 4 E4B**, replacing the 2026-11-19 choice of E2B (E2B 13 of 18 tool calls, E4B 17 of 18). E2B
+  stays usable by setting.
+- **The drafter** (multi-token prediction) is used, as a setting on by default: `mlx-community/gemma-4-E4B-it-assistant-bf16`
+  at revision 844e008e…, pinned by revision and weights hash. Roamies never downloads a model.
+- **Server**: `APC_ENABLED=1`, cache in memory only, `APC_CHECKPOINT_ENTRIES=6`, the request's own part in
+  `transient_context`. A start-up check confirms version and reuse and doubles as the warm-up.
+- **Replies**: not streamed; after a tool that changes something the reply is worded by code; the thinking token
+  is barred for Gemma 4; on a broken streamed tool call, one silent retry without streaming.
+- **The checks live in a module of their own**, knowing nothing about which model produced the calls, so the
+  Claude route can use them later (feature 39). Not wired into the Claude route now.
+- **The bar**: zero wrong saves, and at least 5 of 6 either done right or correctly asked, on untuned sets.
+- **No reading of `~/.pi`; no downloads without asking first.** Plans, answers and bench sets are saved to the
+  reports folder and the repo before building.
+
+#### Record
+
+
 - **First measurement (2026-11-16, MacBook Air, `gemma-4-e2b-it-4bit`):** a 4,745-token prompt read in 5.4 seconds,
   replies at 20 to 26 tokens a second, 4.4 GB peak memory, 5 of 6 tool calls right (it put "Friday" on the wrong
   date).
@@ -1042,6 +1200,14 @@ built later, after the new look (21).
   refused ("No such tool available") and retried with the right name within 1 to 2 s. A small local model will
   retry less well, so offline the names the model reads and the tools' real names must match. Not to be changed
   now.
+
+- **Plan of 2026-11-26, after the wrong save on E: times taken away from the model** (the owner's answer verbatim
+  and the plan in `~/Documents/roamies-reports/2026-11-26_1140_feature-23-times-taken-from-the-model-plan.md`).
+  The local model's tools have no time, day or length fields: it chooses the action and the to-do by its title.
+  Code reads the times from his sentence with the tools' parser and places them by a table of rules per action
+  (`PLACES` in `checks.mjs`, with tests); what can't be placed, or a time the action needs and he didn't say: nothing
+  saved, a code-worded question naming what is missing ("Which day?", "For how long?"). One change per request.
+  Then set F, committed before it is run; C, D, E, F once; any wrong save on F stops the work.
 
 ### 32. Ledger
 
@@ -1737,6 +1903,12 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   with `createRequestCheck`, `lite.mjs` keeping the prompt, tools, runner and request loop
   (`~/Documents/roamies-reports/2026-11-26_1130_feature-23-checks-module-plan.md`). Done the same day: A and B
   through the real model give the same outcomes, tool arguments and replies as before the move.
+
+- **2026-11-26, afternoon (feature 23, the owner).** The plan of 2026-11-25 with his answers and the decisions since
+  recorded under feature 23 (from `~/Documents/roamies-reports/offline-plan-and-answers.md`); stages 1 to 6 to be
+  built from it. Before them: the model's time arguments taken away (the table of placement rules in `checks.mjs`,
+  questions naming what is missing, one change per request), then set F; any wrong save on F stops the work and he
+  switches the local route to a yes before each change.
 
 ## 6. Still to test
 

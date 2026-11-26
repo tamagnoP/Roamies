@@ -1,29 +1,16 @@
-// Local-only build, feature 23: the checks on a request's tool calls and reply (checks.mjs), with no model: what he
-// said, the calls and the results.
+// Local-only build, feature 23: the checks on a request (checks.mjs), with no model: what he said, the calls and the
+// results.
 import assert from 'node:assert/strict';
 import {
-  NOTHING_CHANGED, TAKES, TIME_FIELDS, askMissingLine, askTimeLine, createRequestCheck, dayAndClock, isSaid, kindFor, lengthSaid, missingHint,
-  missingTimes, refusedHint, reminderLine, startSaid, timeWordsIn, timesIn, unconfirmed, unsaid, updateLine, whenLine, whenSaid,
+  ACTION_OF, NOTHING_CHANGED, ONE_AT_A_TIME, PLACES, createRequestCheck, grouped, kindFor, lengthSaid, matchTitle, oneChange, placeTimes, readTimes,
+  reminderLine, startSaid, timesIn, unconfirmed, updateLine, whenLine, whenSaid,
 } from '../checks.mjs';
 
 const NOW = new Date(2026, 10, 25, 14, 5).getTime(); // a Wednesday
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 
-// ---- a time or day argument must be words he said, case, spacing and punctuation aside
+// ---- his sentence: every time, day and length in it, found by the tools' parsers
 const book = 'Book an hour for the literature search on Monday at 2.';
-assert.deepEqual(unsaid('schedule_block', { day: 'Monday', start: '14:00', title: 'x' }, book), [{ field: 'start', value: '14:00' }]);
-assert.deepEqual(unsaid('schedule_block', { day: '  MONDAY ', start: '2' }, book), []);
-assert.ok(isSaid('half past four', 'Remind me at half   past FOUR to pick up the parcel.'));
-assert.ok(!isSaid('2', 'Remind me in 20 minutes'), 'whole words: "2" is not in "20"');
-assert.ok(isSaid('16:30', 'Move it to 16:30.'));
-assert.ok(!isSaid('Friday 27 November', 'by Friday'), 'a date worked out by the model is refused');
-assert.deepEqual(unsaid('write_note', { title: '3 pm', content: 'x' }, 'note'), [], 'only time and day fields are checked');
-assert.deepEqual(timeWordsIn(book), ['monday', '2']);
-assert.match(refusedHint([{ field: 'start', value: '14:00' }], book, 'Office', 'schedule_block'), /^Refused, nothing was changed: start "14:00" is not Office's words\. Call schedule_block again now.*"monday", "2"/);
-assert.equal(askTimeLine([{ field: 'day', value: 'x' }]), 'Which day do you mean? Nothing was changed.');
-assert.equal(askTimeLine([{ field: 'start', value: 'x' }]), 'What time do you mean? Nothing was changed.');
-
-// ---- the completeness check: every time, day and length he said, found by code
 const T = (s) => timesIn(s, { now: NOW }).map((x) => `${x.kind}:${x.text}${x.minutes ? `=${x.minutes}` : ''}`);
 assert.deepEqual(T(book), ['length:an hour=60', 'day:monday', 'clock:2']);
 assert.deepEqual(T('Block tomorrow from 2 to half past three for the poster draft.'), ['day:tomorrow', 'clock:2', 'clock:half past three']);
@@ -33,23 +20,10 @@ assert.deepEqual(T('New task: order antibodies, due next Monday.'), ['day:next m
 assert.deepEqual(T('Move the lab meeting from Tuesday at 3 to Thursday at 4 for two hours'), ['day:tuesday', 'clock:3', 'day:thursday', 'clock:4', 'length:two hours=120']);
 assert.deepEqual(T('Remind me the day after tomorrow at noon'), ['day:day after tomorrow', 'clock:noon']);
 assert.deepEqual(T('read the second chapter by the 3rd of December at 4 pm'), ['day:3rd of december', 'clock:4 pm']);
+assert.deepEqual(T('Move tomorrow\'s poster session to Friday\'s slot'), ['day:tomorrow', 'day:friday'], 'a day\'s, as a day');
 assert.deepEqual(T('I sat with Bo in the sun on Monday'), ['day:monday'], 'no short day names: "sat" and "sun" are words');
 assert.deepEqual(T('Remind me in an hour, and book 90 minutes at quarter to five'), ['rel:in an hour', 'length:90 minutes=90', 'clock:quarter to five']);
 assert.equal(lengthSaid('an hour and a half'), 90); assert.equal(lengthSaid('for 45 minutes'), 45); assert.equal(lengthSaid('half an hour'), 30); assert.equal(lengthSaid('two'), null);
-assert.deepEqual(missingTimes('schedule_block', { day: 'Monday', start: '2', title: 'x' }, book, { now: NOW }).map((x) => x.text), ['an hour']);
-assert.deepEqual(missingTimes('schedule_block', { day: 'Monday', start: '2', minutes: 60 }, book, { now: NOW }), [], 'a length is used by minutes equal to code\'s reading of it');
-assert.deepEqual(missingTimes('schedule_block', { day: 'Monday', start: '2', minutes: 30 }, book, { now: NOW }).map((x) => x.text), ['an hour']);
-assert.deepEqual(missingTimes('move_block', { todo: 'k3f9', start: '9' }, 'Push the budget review to Thursday at 9.', { now: NOW }).map((x) => x.text), ['thursday']);
-assert.deepEqual(missingTimes('move_block', { todo: 'p2x7', start: '5' }, 'Move the grant report draft from 3 to 5.', { now: NOW }).map((x) => x.text), ['3'], 'a move uses both times');
-assert.deepEqual(missingTimes('move_block', { todo: 'p2x7', from: '3', start: '5' }, 'Move the grant report draft from 3 to 5.', { now: NOW }), []);
-assert.deepEqual(missingTimes('remember_commitment', { text: 'x', when: 'monday' }, 'New task: x, due next Monday.', { now: NOW }).map((x) => x.text), ['next monday']);
-assert.deepEqual(missingTimes('show_day', { day: 'thursday' }, 'What is on Thursday at 9?', { now: NOW }), [], 'only what the tool can take');
-assert.deepEqual(missingTimes('write_note', { title: 't', content: 'c' }, 'Note: the meeting is on Friday at 3.', { now: NOW }), [], 'a tool with no time fields is not checked');
-assert.equal(missingHint([{ kind: 'length', text: 'an hour' }], 'Office', 'schedule_block'), 'Refused, nothing was changed: the call leaves out "an hour" (minutes, as a number) from Office\'s words. Call schedule_block again now with every time, day and length he said, copied exactly.');
-assert.equal(askMissingLine([{ text: 'thursday' }, { text: '9' }]), 'Nothing was changed: I couldn\'t use "thursday" and "9". Could you say it again?');
-assert.deepEqual(dayAndClock('thursday at 3'), { date: 'thursday', clock: '15:00' });
-assert.deepEqual(dayAndClock('3'), { date: undefined, clock: '15:00' });
-assert.equal(dayAndClock('the slides'), null);
 
 // ---- "remind me" decides the kind, in code
 assert.equal(kindFor('Remind me at 4 to call Anna'), 'reminder');
@@ -91,48 +65,154 @@ assert.equal(updateLine({ title: 'Budget review', ms: at(30, 0), dayOnly: true, 
 assert.equal(updateLine({ status: 'dropped', ms: at(26, 9), now: NOW }), 'It is dropped. It is now due tomorrow at 09:00.');
 assert.equal(updateLine({}), 'It is updated.');
 
+// ---- written forms, and the words about time no parser read (stray: they stop a save)
+const R = (s) => { const r = readTimes(s, { now: NOW }); return [r.times.map((x) => `${x.kind}:${x.text}`), r.stray]; };
+assert.deepEqual(R('Move it to Friday at 3pm'), [['day:friday', 'clock:3 pm'], []]);
+assert.deepEqual(R('at 8 p.m.'), [['clock:8 pm'], []]);
+assert.deepEqual(R('at 9.30 for 1.5 hours'), [['clock:9:30', 'length:90 minutes'], []]);
+assert.deepEqual(R('at ten past 3'), [['clock:3:10'], []], 'not "ten"');
+assert.deepEqual(R('at twenty past four'), [['clock:4:20'], []]);
+assert.deepEqual(R('at five to six'), [['clock:5:55'], []]);
+assert.deepEqual(R('from 10 to 11'), [['clock:10', 'clock:11'], []], '"from 2 to 4" is two times');
+assert.deepEqual(R('from ten to eleven'), [['clock:ten', 'clock:eleven'], []]);
+assert.deepEqual(R('at half 3'), [['clock:3:30'], []]);
+assert.deepEqual(R('on Monday week'), [['day:monday'], ['week']]);
+assert.deepEqual(R('tomorrow morning'), [['day:tomorrow'], ['morning']]);
+assert.deepEqual(R('at midnight'), [[], ['midnight']]);
+assert.deepEqual(R('on Dec 5'), [[], ['dec']]);
+assert.deepEqual(R('for a couple of hours'), [[], ['hours']]);
+assert.deepEqual(R('prepare the Friday seminar slides'), [[], ['friday']], 'a weekday after "the" is a name, not read as a day');
+assert.deepEqual(R('tomorrow at 3 o\'clock'), [['day:tomorrow', 'clock:3'], []]);
+assert.deepEqual(R('write up the meeting minutes, chapter 2, figure 3'), [[], []], 'not about time');
+assert.deepEqual(R('I may be late'), [[], []]);
+
+// ---- the groups: after "from"/"between" the from group, after "to"/"until"/"till" (or "and" after "between") the to group
+const G = (s) => grouped(timesIn(s, { now: NOW })).map((x) => `${x.group}:${x.text}`);
+assert.deepEqual(G('Move it from Thursday at 2 to Friday at quarter to five'), ['from:thursday', 'from:2', 'to:friday', 'to:quarter to five']);
+assert.deepEqual(G('Put it on Friday between 1 and 3'), ['none:friday', 'from:1', 'to:3']);
+assert.deepEqual(G('Push the budget review to Thursday at 9.'), ['to:thursday', 'to:9']);
+assert.deepEqual(G('Book an hour on Monday at 2.'), ['none:an hour', 'none:monday', 'none:2']);
+
+// ---- the table: one row per action, each rule tested
+const P = (action, said, o = {}) => placeTimes(action, said, { now: NOW, ...o });
+const due = (ms, dayOnly = false) => ({ due: { ms, dayOnly } });
+assert.deepEqual(Object.keys(PLACES), ['remind', 'todo', 'due', 'mark', 'book', 'move', 'unbook', 'show', 'find', 'none']);
+// remind: a day, a clock time or a time from now; one is needed
+assert.deepEqual(P('remind', 'Remind me in half an hour to check the incubator.'), { places: due(NOW + 30 * 60_000) });
+assert.deepEqual(P('remind', 'Remind me at half past four to pick up the parcel.'), { places: due(at(25, 16, 30)) }, 'a time alone: today');
+assert.deepEqual(P('remind', 'Remind me tomorrow at 9 to send the invoice.'), { places: due(at(26, 9)) });
+assert.deepEqual(P('remind', 'Remind me on Friday to renew the permit.'), { places: due(at(27, 0), true) });
+assert.deepEqual(P('remind', 'Remind me to call Anna.'), { ask: 'When should I remind you? Nothing was changed.' });
+assert.deepEqual(P('remind', 'Remind me at 4 to stretch for 10 minutes.'), { ask: 'I couldn\'t place "10 minutes" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('remind', 'Remind me in 20 minutes or at 5.'), { ask: 'I couldn\'t place "in 20 minutes" and "5" for that. Nothing was changed: could you say it again?' });
+// todo: "by DAY" is a due time; none is no due
+assert.deepEqual(P('todo', 'Add a to-do: finish the slides by Friday.'), { places: due(at(27, 0), true) });
+assert.deepEqual(P('todo', 'Add a to-do: submit the ethics amendment by the 4th of December.'), { places: due(new Date(2026, 11, 4).getTime(), true) });
+assert.deepEqual(P('todo', 'Add a to-do: call the plumber.'), { places: { due: null } });
+assert.deepEqual(P('todo', 'New task: order antibodies, due next Monday.'), { ask: 'Monday the 30th or Monday the 7th? Nothing was changed yet.' }, 'which Monday is asked, not guessed');
+assert.deepEqual(P('todo', 'Add a to-do: read two chapters by Friday and Monday.'), { ask: 'I couldn\'t place "friday" and "monday" for that. Nothing was changed: could you say it again?' });
+// due: a new time is needed; "from DAY to DAY", the first is where it is now
+assert.deepEqual(P('due', 'The grant report draft is now due Monday.'), { places: due(at(30, 0), true) });
+assert.deepEqual(P('due', 'Move the slides from Friday to Monday.'), { places: { ...due(at(30, 0), true), from: { ms: at(27, 0), dayOnly: true } } });
+assert.deepEqual(P('due', 'Change the grant report draft.'), { ask: 'By when? Nothing was changed.' });
+assert.deepEqual(P('remind', 'Remind me tomorrow morning to buy milk.'), { ask: 'I couldn\'t place "morning" for that. Nothing was changed: could you say it again?' }, 'a word about time code can\'t read stops the save');
+assert.deepEqual(P('remind', 'Remind me at 8 tonight to call home.'), { places: due(at(25, 20)) });
+assert.deepEqual(P('todo', 'Add a to-do: prepare the Friday seminar slides.'), { ask: 'I couldn\'t place "friday" for that. Nothing was changed: could you say it again?' });
+// mark: no time
+assert.deepEqual(P('mark', 'Drop the budget review, I won\'t do it.'), { places: {} });
+assert.deepEqual(P('mark', 'I\'m done with the budget review for today.'), { ask: 'I couldn\'t place "today" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('mark', 'Mark the Monday meeting prep done.', { title: 'Monday meeting prep' }), { places: {} }, 'a to-do\'s title is not a time');
+// book: "from X to Y" start and end, "at X for N" start and length; a day, a start and an end or length are needed
+assert.deepEqual(P('book', 'Block tomorrow from 2 to half past three for the poster draft.'), { places: { date: 'tomorrow', start: '14:00', end: '15:30' } });
+assert.deepEqual(P('book', 'Book an hour for the literature search on Monday at 2.'), { places: { date: 'monday', start: '14:00', minutes: 60 } });
+assert.deepEqual(P('book', 'Put it on Friday between 1 and 3.'), { places: { date: 'friday', start: '13:00', end: '15:00' } });
+assert.deepEqual(P('book', 'Book it at 9 until 10:30 on the 3rd of December.'), { places: { date: '2026-12-03', start: '09:00', end: '10:30' } });
+assert.deepEqual(P('book', 'Book the poster for Friday.'), { ask: 'What time? For how long? Nothing was changed.' });
+assert.deepEqual(P('book', 'Book two hours for the thesis at 3.'), { ask: 'Which day? Nothing was changed.' }, 'a missing day is asked as a day');
+assert.deepEqual(P('book', 'Book two hours for the thesis on Friday.'), { ask: 'What time? Nothing was changed.' });
+assert.deepEqual(P('book', 'Book it on Friday at 2 until 4 for an hour.'), { ask: 'I couldn\'t place "4" and "an hour" for that. Nothing was changed: could you say it again?' }, 'an end and a length: neither');
+assert.deepEqual(P('book', 'Book it on Friday or Monday at 2 for an hour.'), { ask: 'I couldn\'t place "friday" and "monday" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('book', 'Book it in 20 minutes for an hour today.'), { ask: 'I couldn\'t place "in 20 minutes" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('book', 'Book it next Friday at 2 for an hour.'), { ask: 'Friday the 27th or Friday the 4th? Nothing was changed yet.' });
+// move: "from X to Y" the block at X to start at Y; "to DAY at X" the new day and start; something new is needed
+assert.deepEqual(P('move', 'Move the grant report draft from 3 to half past four.'), { places: { start: '16:30', from: { date: 'today', clock: '15:00' } } });
+assert.deepEqual(P('move', 'Push the budget review to Thursday at 9.'), { places: { date: 'thursday', start: '09:00' } });
+assert.deepEqual(P('move', 'Move the grant report draft to 16:30.'), { places: { start: '16:30' } });
+assert.deepEqual(P('move', 'Move the poster from Thursday at 2 to Friday at quarter to five.'), { places: { date: 'friday', start: '16:45', from: { date: 'thursday', clock: '14:00' } } });
+assert.deepEqual(P('move', 'Move the poster from 2 to 4 tomorrow.'), { places: { date: 'tomorrow', start: '16:00', from: { date: 'tomorrow', clock: '14:00' } } }, 'one day for both');
+assert.deepEqual(P('move', 'Move the poster to Friday.'), { places: { date: 'friday' } }, 'a day alone: the same time');
+assert.deepEqual(P('move', 'Move the poster to 3 until 5.'), { places: { start: '15:00', end: '17:00' } });
+assert.deepEqual(P('move', 'Make the budget review two hours.'), { places: { minutes: 120 } });
+assert.deepEqual(P('move', 'Move the budget review.'), { ask: 'To when? Nothing was changed.' });
+assert.deepEqual(P('move', 'Move the poster to 3 or 4.'), { ask: 'I couldn\'t place "3" and "4" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('move', 'Move the poster to Friday at 3pm.'), { places: { date: 'friday', start: '15:00' } });
+assert.deepEqual(P('move', 'Move the poster to Monday week.'), { ask: 'I couldn\'t place "week" for that. Nothing was changed: could you say it again?' });
+// unbook: no time; show: one day, today when none; find: one day, "this week", "overdue"
+assert.deepEqual(P('unbook', 'Take the grant report draft off the calendar.'), { places: {} });
+assert.deepEqual(P('unbook', 'Take Friday\'s block off.'), { ask: 'I couldn\'t place "friday" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('show', 'What have I got on Friday?'), { places: { date: 'friday' } });
+assert.deepEqual(P('show', 'What is on my calendar?'), { places: { date: 'today' } });
+assert.deepEqual(P('show', 'What is on Friday at 3?'), { ask: 'I couldn\'t place "3" for that. Nothing was changed: could you say it again?' });
+assert.deepEqual(P('find', 'Do I have any to-dos due tomorrow?'), { places: { due: 'tomorrow' } });
+assert.deepEqual(P('find', 'What is due this week?'), { places: { due: 'this week' } });
+assert.deepEqual(P('find', 'What is due next week?'), { ask: 'I couldn\'t place "week" for that. Nothing was changed: could you say it again?' }, '"this week" only');
+assert.deepEqual(P('find', 'Which to-dos do I have about the thesis?'), { places: { due: undefined } });
+// none: notes, the daily note, open: no time is set, times stay in the text
+assert.deepEqual(P('none', 'Note: the seminar is on Friday at 3 for an hour.'), { places: {} });
+// which action a call is
+assert.equal(ACTION_OF('remember_commitment', {}, 'Remind me at 4'), 'remind');
+assert.equal(ACTION_OF('remember_commitment', {}, 'Add a to-do'), 'todo');
+assert.equal(ACTION_OF('update_commitment', { status: 'done' }, ''), 'mark');
+assert.equal(ACTION_OF('update_commitment', {}, ''), 'due');
+assert.equal(ACTION_OF('write_note', {}, ''), 'none');
+
+// ---- the to-do by its title
+const ITEMS = [{ id: 'k3f9', title: 'Budget review' }, { id: 'p2x7', title: 'Grant report draft' }, { id: 't5', title: 'Thesis chapter 2' }, { id: 'r1', title: 'Annual report' }];
+assert.equal(matchTitle('the budget review', ITEMS).id, 'k3f9');
+assert.equal(matchTitle('grant report', ITEMS).id, 'p2x7');
+assert.equal(matchTitle('thesis', ITEMS).id, 't5', 'one word: a title\'s first word');
+assert.deepEqual(matchTitle('review', ITEMS), { none: true }, 'one word inside a title is not enough');
+assert.equal(matchTitle('grant report draft for the funder', ITEMS).id, 'p2x7', 'his words hold the whole title');
+assert.equal(matchTitle('k3f9', ITEMS).id, 'k3f9');
+assert.deepEqual(matchTitle('report', ITEMS), { none: true });
+assert.deepEqual(matchTitle('the report', [...ITEMS, { id: 'r2', title: 'Report' }]), { id: 'r2', title: 'Report' }, 'an exact title first');
+assert.deepEqual(matchTitle('annual', [...ITEMS, { id: 'r3', title: 'Annual leave' }]), { ask: 'Which one: "Annual report" or "Annual leave"? Nothing was changed.' });
+assert.deepEqual(matchTitle('poster draft', ITEMS), { none: true });
+
+// ---- one change per request
+assert.equal(oneChange(['update_commitment', 'remember_commitment']), ONE_AT_A_TIME);
+assert.equal(oneChange(['show_day', 'open']), '', 'a read and a change are one change');
+assert.equal(oneChange(['show_day', 'search_notes']), '');
+
 // ---- one request's checks: the calls, the results, the reply; nothing about a model
 {
-  const said = 'Push the budget review to Thursday at 9.';
-  const c = createRequestCheck({ said, userName: 'Office', now: NOW });
-  let v = c.call('move_block', { todo: 'k3f9', start: '9:00' });
-  assert.deepEqual([v.run, v.unsaid, v.missing], [undefined, ['start'], ['thursday', '9']]);
-  assert.match(v.refuse, /^Refused, nothing was changed: start "9:00" is not Office's words\. Call move_block again now.* the call leaves out "thursday" \(day\), "9" \(start, end or from\)/);
-  v = c.call('move_block', { todo: 'k3f9', day: 'Thursday', start: '9' });
-  assert.deepEqual(v, { run: true }); assert.equal(c.refusals, 1);
+  const c = createRequestCheck({ said: 'Push the budget review to Thursday at 9.', now: NOW });
+  assert.deepEqual(c.place('move_block', { todo: 'budget review', start: '10:00' }), { action: 'move', places: { date: 'thursday', start: '09:00' } }, 'the model\'s own time is not read');
+  assert.equal(c.turn(['move_block']), '');
   assert.equal(c.result('move_block', { ok: true, text: 'for the model', say: '"Budget review" is moved to Thursday, 09:00.' }), '"Budget review" is moved to Thursday, 09:00.');
+  assert.equal(c.turn(['update_commitment']), ONE_AT_A_TIME, 'after a change, no second one');
   assert.deepEqual(c.finish(''), { reply: '"Budget review" is moved to Thursday, 09:00.', by: 'model', replaced: 0 }, 'after a change, the code-worded line');
 }
 {
-  const c = createRequestCheck({ said: 'Remind me at half past four to pick up the parcel.', userName: 'Office', now: NOW });
-  assert.ok(c.call('remember_commitment', { text: 'parcel', when: '16:30' }).refuse);
-  assert.deepEqual(c.call('remember_commitment', { text: 'parcel', when: '4:30 pm' }), { ask: 'What time do you mean? Nothing was changed.', unsaid: ['when'], missing: ['half past four'] }, 'the second refusal asks');
-  assert.deepEqual(c.finish('I have set a reminder.'), { reply: 'What time do you mean? Nothing was changed.', by: 'refused', replaced: 0 }, 'refused with nothing let through: the ask, never the model\'s words');
+  const c = createRequestCheck({ said: 'Book the poster on Friday.', now: NOW });
+  assert.deepEqual(c.place('schedule_block', { todo: 'poster' }), { action: 'book', ask: 'What time? For how long? Nothing was changed.' });
 }
 {
-  const c = createRequestCheck({ said: 'Push the budget review to Thursday at 9.', userName: 'Office', now: NOW });
-  c.call('move_block', { todo: 'k3f9', start: '9' });
-  assert.equal(c.call('move_block', { todo: 'k3f9', start: '9' }).ask, 'Nothing was changed: I couldn\'t use "thursday". Could you say it again?');
-}
-{
-  const c = createRequestCheck({ said: 'Mark the budget review done.', userName: 'Office', now: NOW });
+  const c = createRequestCheck({ said: 'Mark the budget review done.', now: NOW });
   assert.deepEqual(c.finish('I have marked the budget review as done.'), { reply: NOTHING_CHANGED, by: 'replaced', replaced: 1 }, 'a claim with no result behind it');
-  const d = createRequestCheck({ said: 'What is on Thursday?', userName: 'Office', now: NOW });
-  assert.deepEqual(d.call('show_day', { day: 'Thursday' }), { run: true });
+  const d = createRequestCheck({ said: 'What is on Thursday?', now: NOW });
   assert.equal(d.result('show_day', { ok: true, text: 'Thursday: lab meeting' }), '', 'a read is no change');
   assert.deepEqual(d.finish('You have the lab meeting at 9.'), { reply: 'You have the lab meeting at 9.', by: 'model', replaced: 0 });
-  const e = createRequestCheck({ said: 'Open Zotero.', userName: 'Office', now: NOW });
+  const e = createRequestCheck({ said: 'Open Zotero.', now: NOW });
   assert.equal(e.result('open', { ok: false, text: 'No app Zotero.' }), '');
   assert.equal(e.finish('I opened Zotero.').by, 'replaced', 'a failed tool confirms nothing');
-  const f = createRequestCheck({ said: 'Save a note and open Zotero.', userName: 'Office', now: NOW });
+  const f = createRequestCheck({ said: 'Save a note.', now: NOW });
   f.result('write_note', { ok: true, text: 'Saved the note "x".' });
   assert.equal(f.finish('Zotero is open now, and I opened it.').reply, 'Saved the note "x". Nothing was changed.', 'the line after the change stays; the unconfirmed claim goes');
 }
 {
-  // other tool shapes: the caller's own table of time fields
-  const c = createRequestCheck({ said: 'Remind me on Friday.', userName: 'Office', now: NOW, fields: { remind: ['at'] }, takes: { remind: ['day'] } });
-  assert.deepEqual(c.call('remind', { at: 'friday' }), { run: true });
-  assert.deepEqual(c.call('remember_commitment', { when: 'monday' }), { run: true }, 'a tool not in the table is not checked');
-  assert.ok(TIME_FIELDS.move_block.includes('from') && TAKES.show_day.length === 1);
+  // other tools: the caller's own mapping to actions
+  const c = createRequestCheck({ said: 'Remind me on Friday.', now: NOW, actionOf: (n) => (n === 'remind' ? 'remind' : 'none') });
+  assert.deepEqual(c.place('remind', {}), { action: 'remind', places: due(at(27, 0), true) });
 }
 console.log('checks tests passed');

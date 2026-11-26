@@ -1,63 +1,21 @@
-// Local-only build (feature 23): the checks on a request's tool calls and on the reply, worked out by code. They take
-// what he said, the tool calls and the tool results, and know nothing of which model made the calls: the local model
-// uses them now (lite.mjs), the Claude route is to use them in a later feature.
-//   - A time or day argument must be words he said in that request (case, spacing and punctuation aside). Code parses
-//     them; the model never works out a date or a clock time.
-//   - Every time, day and length he said that the tool can take has to be in the call (the completeness check), found
-//     by the same parsers that read the arguments. A move from one time to another uses both.
-//   - A call that fails either check is refused with a code-worded hint and may be made once more; refused again,
-//     nothing is run and a code-worded line asks him.
+// Local-only build (feature 23): the checks on a request, worked out by code. They take what he said, the tool calls
+// and the tool results, and know nothing of which model made the calls: the local model uses them now (lite.mjs), the
+// Claude route is to use them in a later feature.
+//   - Times are not the model's: code reads every time, day and length from his own sentence with the parsers the
+//     tools use (`timesIn`) and places them by the action's rules (`PLACES`). What can't be placed, or a time the
+//     action needs and he didn't say: nothing is saved, and a code-worded question names what is missing.
+//   - One change per request: a request that asks for two gets a code-worded line asking for one at a time.
+//   - The to-do is named by its title; code finds it (`matchTitle`), or asks which.
 //   - "Remind me" makes a reminder and anything else a to-do.
 //   - A reply that says something was done, moved, booked or saved without a tool result in that request confirming
 //     it is replaced by a code-worded line saying nothing was changed.
 //   - After a tool that changes something, what he is told is a code-worded line from its result.
-// Which argument fields hold times is a table (`TIME_FIELDS`, `TAKES`: the tools that take his words); a caller with
-// other tool shapes passes its own.
 import { nextDays, dayChoice } from './calendar.mjs';
 import { clockSaid, parseWhen, ymd } from './daily.mjs';
 
-/** The fields that hold a time or a day, per tool. */
-export const TIME_FIELDS = { remember_commitment: ['when'], update_commitment: ['when', 'from'], list_commitments: ['day'], schedule_block: ['day', 'start', 'end'], move_block: ['day', 'start', 'end', 'from'], show_day: ['day'] };
-/** What each tool can take of what he said: a day, a clock time, a time from now ("in 20 minutes"), a length. */
-export const TAKES = { remember_commitment: ['day', 'clock', 'rel'], update_commitment: ['day', 'clock', 'rel'], list_commitments: ['day'], show_day: ['day'], schedule_block: ['day', 'clock', 'length'], move_block: ['day', 'clock', 'length'] };
-const DAY_FIELDS = new Set(['day']);
-
 /** Words as they are compared: lower case, spacing and punctuation aside (a colon between digits stays: "16:30"). */
 export const normal = (t) => String(t ?? '').toLowerCase().replace(/[’‘`]/g, '\'').replace(/(\d):(\d)/g, '$1\u0000$2').replace(/[^\p{L}\p{N}'\u0000]+/gu, ' ').replace(/\u0000/g, ':').replace(/\s+/g, ' ').trim();
-/** Whether `value` is words of `said`, whole words in a row. */
-export function isSaid(value, said) {
-  const v = normal(value);
-  if (!v) return false;
-  return ` ${normal(said)} `.includes(` ${v} `);
-}
-/** The time and day arguments of a call that are not words he said. → [{ field, value }] */
-export function unsaid(name, args, said, fields = TIME_FIELDS) {
-  return (fields[name] ?? []).filter((f) => args?.[f] != null && String(args[f]).trim() !== '' && !isSaid(args[f], said)).map((f) => ({ field: f, value: String(args[f]) }));
-}
-
-// Words that say a time or a day, to name in the hint the ones he used.
-const NUM = '(?:\\d{1,2}(?::\\d{2})?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|an?|half an?)';
-const TIME_WORDS = new RegExp([
-  `\\bin ${NUM}(?: \\w+)? (?:minutes?|mins?|hours?|days?|weeks?)\\b`,
-  '\\b(?:next |this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\\b',
-  '\\b(?:today|tonight|tomorrow|noon|midday)\\b',
-  '\\b(?:half past|quarter past|quarter to) (?:\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\b',
-  '\\b\\d{1,2}(?::\\d{2})?(?: ?(?:am|pm|o\'clock))?\\b',
-].join('|'), 'g');
-/** The time and day words in what he said, in order, as they would be copied. */
-export const timeWordsIn = (said) => [...new Set(normal(said).match(TIME_WORDS) ?? [])];
-
-/** The code-worded hint for a refused call, given to the model as the tool's result. */
-export function refusedHint(bad, said, name, tool = '') {
-  const words = timeWordsIn(said);
-  const list = bad.map((b) => `${b.field} "${b.value}"`).join(' and ');
-  return `Refused, nothing was changed: ${list} ${bad.length === 1 ? 'is' : 'are'} not ${name}'s words. Call ${tool || 'the tool'} again now, with times and days copied exactly from his words${words.length ? `: ${words.map((w) => `"${w}"`).join(', ')}` : ''}. The app works out dates and clock times. Leave out a field he gave no words for.`;
-}
-/** The code-worded line that asks him for the time, after a second refusal. */
-export function askTimeLine(bad) {
-  return bad.every((b) => DAY_FIELDS.has(b.field)) ? 'Which day do you mean? Nothing was changed.' : 'What time do you mean? Nothing was changed.';
-}
-// ---- the completeness check: every time, day and length he said ----
+// ---- his sentence: the times, days and lengths in it ----
 const LEN_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, 'forty five': 45, fifty: 50, sixty: 60, ninety: 90 };
 const LEN_UNIT = { minute: 1, minutes: 1, min: 1, mins: 1, hour: 60, hours: 60, hr: 60, hrs: 60 };
 /** A length as said ("an hour", "90 minutes", "half an hour", "an hour and a half", "for two hours"). → minutes, or
@@ -81,13 +39,52 @@ const CLOCK_VOCAB = new Set(['half', 'past', 'quarter', 'to', 'am', 'pm', 'o', '
 const isNum = (w) => /^\d{1,2}(?::\d{2})?$/.test(w);
 const isDayWord = (w) => DAY_VOCAB.has(w) || /^\d{1,2}(?:st|nd|rd|th)?$/.test(w);
 // A bare number ("2", "four") is a time only after one of these: "figure 3" is not a time.
-const BEFORE_A_TIME = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and']);
+const BEFORE_A_TIME = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and', 'or']);
 // A span never starts with these: the words around a time are not part of it.
 const LEAD = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and', 'on', 'this', 'due', 'for', 'the', 'of', 'past', 'o', 'clock', 'am', 'pm']);
-/** The times, days and lengths in what he said, read by the parsers the tools use, in order.
- *  → [{ kind: 'day' | 'clock' | 'rel' | 'length', text (his words), minutes (a length) }] */
-export function timesIn(said, { now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
-  const w = normal(said).split(' ').filter(Boolean), out = [];
+// Written forms read as the parsers take them: "3pm" and "3 p.m." as "3 pm", "9.30" as "9:30", "ten past 3" as
+// "3:10", "at five to six" as "at 5:55" (only after "at", "by", "until" and the like: "from 2 to 4" is two times),
+// "half 3" as "3:30", "1.5 hours" as "90 minutes".
+const HOUR_N = Object.fromEntries(HOUR_NAMES.map((h, k) => [h, k + 1]));
+const MIN_N = { five: 5, ten: 10, twenty: 20, 'twenty five': 25, 'twenty-five': 25 };
+const hourOf = (x) => (/^\d+$/.test(x) ? +x : HOUR_N[x]);
+const HOUR_RE = '(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+function written(said) {
+  return String(said ?? '')
+    .replace(/\b([ap])\.\s?m\b\.?/gi, '$1m').replace(/\b(\d{1,2}(?::\d{2})?)(am|pm)\b/gi, '$1 $2')
+    .replace(/\b(\d+)[.,](\d+)\s*(hours?|hrs?)\b/gi, (_, a, b, u) => `${Math.round(parseFloat(`${a}.${b}`) * 60)} minutes`)
+    .replace(/\b(\d{1,2})\.(\d{2})\b/g, '$1:$2')
+    .replace(new RegExp(`(\\w+ )?\\b(five|ten|twenty five|twenty-five|twenty|\\d{1,2})(?: minutes)? (past|to) ${HOUR_RE}\\b`, 'gi'), (all, lead = '', m, dir, h) => {
+      if (dir.toLowerCase() === 'to' && !/^(at|by|around|about|until|till|before|after) $/i.test(lead)) return all;
+      const mins = /^\d+$/.test(m) ? +m : MIN_N[m.toLowerCase()], hr = hourOf(h.toLowerCase());
+      if (!mins || mins >= 60 || !hr || hr > 12) return all;
+      return lead + (dir.toLowerCase() === 'past' ? `${hr}:${String(mins).padStart(2, '0')}` : `${hr === 1 ? 12 : hr - 1}:${String(60 - mins).padStart(2, '0')}`);
+    })
+    .replace(new RegExp(`\\bhalf ${HOUR_RE}\\b`, 'gi'), (all, h) => { const hr = hourOf(h.toLowerCase()); return hr && hr <= 12 ? `${hr}:30` : all; });
+}
+// Words that say something about time: one of them left over, not placed, means a time code couldn't read.
+const ALWAYS_TIME = new Set([...FULL_DAYS, ...MONTH_WORDS.filter((m) => m !== 'may'), 'today', 'tonight', 'tomorrow', 'yesterday', 'noon', 'midday', 'midnight', 'morning', 'afternoon', 'evening', 'night', 'tonight', 'weekend', 'week', 'weeks', 'fortnight', 'month', 'months', 'am', 'pm', 'oclock', 'o\'clock', 'lunchtime', 'eod', 'mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec']);
+const UNIT_WORDS = new Set(['minute', 'minutes', 'min', 'mins', 'hour', 'hours', 'hr', 'hrs', 'day', 'days']);
+const COUNT_WORDS = new Set(['a', 'an', 'half', 'couple', 'few', 'several', ...Object.keys(LEN_NUM)]);
+const isCount = (x) => /^\d+(?:[.:]\d+)?$/.test(x) || COUNT_WORDS.has(x) || HOUR_NAMES.includes(x);
+function strayAt(w, j) {
+  const x = w[j], prev = w[j - 1] ?? '', next = w[j + 1] ?? '';
+  if (ALWAYS_TIME.has(x)) return true;
+  if (x === 'may' && (isCount(prev) || isCount(next))) return true;
+  if (UNIT_WORDS.has(x)) return isCount(prev) || isCount(w[j - 2] ?? '');
+  if (x === 'half' || x === 'quarter') return isCount(next) || ['past', 'to', 'an', 'hour'].includes(next);
+  if (/^\d{1,2}:\d{2}$/.test(x) || /^\d{1,2}(?:st|nd|rd|th)$/.test(x)) return true;
+  return (/^\d{1,2}$/.test(x) || HOUR_NAMES.includes(x)) && BEFORE_A_TIME.has(prev);
+}
+const NAME_BEFORE = new Set(['the', 'a', 'my', 'our', 'your', 'his', 'her']);
+/** The times, days and lengths in what he said, read by the parsers the tools use, in order, and the words about
+ *  time that none of them read (`stray`). A weekday after "the", "a", "my" ("the Friday seminar") is a name, not a
+ *  day: it is not read, and is stray.
+ *  → { times: [{ kind: 'day' | 'clock' | 'rel' | 'length', text (his words), before (the word before it), minutes (a
+ *  length) }], stray: [words] } */
+export function readTimes(said, { now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
+  const w = normal(written(said)).split(' ').filter(Boolean).map((x) => x.replace(/^(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)'s$/, '$1')), out = [];
+  const used = new Set();
   for (let i = 0; i < w.length;) {
     let found = null;
     for (let n = Math.min(6, w.length - i); n >= 1 && !found; n--) {
@@ -96,6 +93,7 @@ export function timesIn(said, { now = Date.now(), dayStart = 540, dayEnd = 1080 
       if (LEAD.has(w[i]) && !(w[i] === 'the' && /^\d/.test(w[i + 1] ?? ''))) continue;
       const len = prev === 'in' ? null : lengthSaid(span);
       if (len) { found = { kind: 'length', text: span, minutes: len, n }; break; }
+      if (n === 1 && FULL_DAYS.includes(span) && NAME_BEFORE.has(prev)) break;
       if (part.every(isDayWord) && !part.every((x) => /^\d+$/.test(x)) && (nextDays(span, now) || daySaid(span, { now }))) { found = { kind: 'day', text: span.replace(/^the (?=\d)/, ''), n }; break; }
       if (part.every((x) => CLOCK_VOCAB.has(x) || isNum(x)) && startSaid(span, { dayStart, dayEnd })) {
         const bare = n === 1 && (/^\d{1,2}$/.test(span) || HOUR_NAMES.includes(span));
@@ -103,33 +101,14 @@ export function timesIn(said, { now = Date.now(), dayStart = 540, dayEnd = 1080 
         break;
       }
     }
-    if (found) { out.push(found); i += found.n; delete found.n; } else i++;
+    if (found) { found.before = w[i - 1] ?? ''; out.push(found); for (let k = i; k < i + found.n; k++) used.add(k); i += found.n; delete found.n; } else i++;
   }
-  return out;
+  // "o'clock", "am" and "pm" after a time read, and "the"/"of" inside a date, are part of it.
+  const stray = w.filter((x, j) => !used.has(j) && strayAt(w, j) && !(['oclock', 'o\'clock', 'am', 'pm'].includes(x) && used.has(j - 1)));
+  return { times: out, stray };
 }
-/** What a call leaves out of what he said: each time, day and length its tool can take has to be in one of its time
- *  fields (a length: `minutes` equal to code's reading of his words). → [{ kind, text, minutes }] */
-export function missingTimes(name, args, said, opts = {}, { fields = TIME_FIELDS, takes: table = TAKES } = {}) {
-  const takes = table[name];
-  if (!takes) return [];
-  const values = (fields[name] ?? []).map((f) => args?.[f]).filter((v) => v != null && String(v).trim() !== '').map(String);
-  return timesIn(said, opts).filter((x) => takes.includes(x.kind) && !values.some((v) => isSaid(x.text, v)) && !(x.kind === 'length' && args?.minutes === x.minutes));
-}
-const WHERE = {
-  remember_commitment: () => 'when', update_commitment: () => 'when',
-  list_commitments: () => 'day', show_day: () => 'day',
-  schedule_block: (k) => ({ day: 'day', clock: 'start or end', length: 'minutes, as a number' }[k]),
-  move_block: (k) => ({ day: 'day', clock: 'start, end or from', length: 'minutes, as a number' }[k]),
-};
-/** The code-worded hint for a call that leaves out words he said. */
-export function missingHint(miss, name, tool) {
-  const list = miss.map((x) => `"${x.text}" (${WHERE[tool]?.(x.kind) ?? 'its time fields'})`).join(', ');
-  return `Refused, nothing was changed: the call leaves out ${list} from ${name}'s words. Call ${tool} again now with every time, day and length he said, copied exactly.`;
-}
-const quoteList = (xs) => xs.map((x) => `"${x}"`).join(xs.length === 2 ? ' and ' : ', ');
-/** The code-worded line that asks him, after a second refusal for words left out. */
-export const askMissingLine = (miss) => `Nothing was changed: I couldn't use ${quoteList([...new Set(miss.map((x) => x.text))])}. Could you say it again?`;
-
+/** The times, days and lengths in what he said (readTimes without the stray words). */
+export const timesIn = (said, opts) => readTimes(said, opts).times;
 /** "Remind me" makes a reminder; anything else a to-do. */
 export const kindFor = (said) => (/\bremind me\b/.test(normal(said)) ? 'reminder' : 'commitment');
 
@@ -196,21 +175,6 @@ export function startSaid(text, opts = {}) {
   return m === null ? null : hhmm(m);
 }
 
-/** A day, a time or both as said ("thursday at 3", "3", "friday"). → { date (as daySaid gives it), clock (HH:MM) },
- *  either may be missing, or null when it is neither. */
-export function dayAndClock(text, opts = {}) {
-  const w = normal(text).replace(/^(?:from|at|on)\s+/, '').split(' ').filter(Boolean);
-  for (let k = 0; k <= w.length; k++) {
-    const l = w.slice(0, k).join(' '), r = w.slice(k).join(' ');
-    for (const [ds, cs] of [[l, r], [r, l]]) {
-      const d = ds ? daySaid(ds, opts) : null, c = cs ? startSaid(cs, opts) : null;
-      if ((ds && !d) || (cs && !c) || (!d && !c)) continue;
-      return { date: d?.date, clock: c };
-    }
-  }
-  return null;
-}
-
 /** When a time falls, said back by code: "at 14:25", "tomorrow at 09:00", "on Friday 27 November", "on Friday 27
  *  November at 11:00". */
 export function whenLine(ms, dayOnly, now = Date.now()) {
@@ -237,38 +201,169 @@ export function updateLine({ title = '', status = '', ms = null, dayOnly = false
   return [status ? `${what} is ${status}.` : '', ms != null ? `${status ? 'It' : what} is now due ${whenLine(ms, dayOnly, now)}.` : ''].filter(Boolean).join(' ') || `${what} is updated.`;
 }
 
-/** The checks for one request. said: what he said; userName: his name, for the hints.
- *  call(name, args) → { run: true } | { refuse: the hint for the model } | { ask: the line for him } (the second
- *    refusal), with `unsaid` (fields) and `missing` (his words) when refused;
+// ---- placing his times by the action ----
+const FROM_WORDS = new Set(['from', 'between']);
+const TO_WORDS = new Set(['to', 'until', 'till']);
+const END_WORDS = new Set(['until', 'till']);
+/** His times in groups: after "from" or "between" the *from* group, after "to", "until", "till" (or "and" after
+ *  "between ...") the *to* group; a time with no such word before it stays in the group before it ('none' at first). */
+export function grouped(times) {
+  let g = 'none';
+  return times.map((t) => {
+    if (FROM_WORDS.has(t.before)) g = 'from';
+    else if (TO_WORDS.has(t.before) || (t.before === 'and' && g === 'from')) g = 'to';
+    return { ...t, group: g };
+  });
+}
+const ofKind = (xs, kind) => xs.filter((x) => x.kind === kind);
+/** One of a kind at most: → the one, null, or false when there are more. */
+const one = (xs, kind) => { const k = ofKind(xs, kind); return k.length > 1 ? false : k[0] ?? null; };
+const has = (xs, kind) => xs.some((x) => x.kind === kind);
+
+/** A due time from a group of his times: a time from now alone, or a day and a clock time, either. → { due: { ms,
+ *  dayOnly } | null, used: [the times used], ask } */
+function dueFrom(xs, opts) {
+  const rel = one(xs, 'rel'), day = one(xs, 'day'), clock = one(xs, 'clock');
+  if (rel === false || day === false || clock === false || (rel && (day || clock))) return { due: null, used: [] };
+  if (rel) return { due: { ms: whenSaid(rel.text, opts).at, dayOnly: false }, used: [rel] };
+  if (!day && !clock) return { due: null, used: [] };
+  const w = whenSaid([day?.text, clock ? `at ${clock.text}` : ''].filter(Boolean).join(' '), opts);
+  if (w?.ask) return { due: null, used: [day, clock].filter(Boolean), ask: w.ask };
+  if (!w) return { due: null, used: [] };
+  return { due: w.at != null ? { ms: w.at, dayOnly: false } : { ms: w.day.getTime(), dayOnly: true }, used: [day, clock].filter(Boolean) };
+}
+/** A day for the calendar tools ("tomorrow", "thursday", "2026-12-04"). → { date } | { ask } | null */
+function calendarDay(x, opts) {
+  if (!x) return null;
+  const two = nextDays(x.text, opts.now);
+  if (two) return { ask: dayChoice(two).question };
+  return daySaid(x.text, opts);
+}
+/** Where an old and a new group are: with a *to* group, the times before it are where the thing is now. */
+const oldNew = (g) => (g.some((x) => x.group === 'to') ? [g.filter((x) => x.group !== 'to'), g.filter((x) => x.group === 'to')] : [g.filter((x) => x.group === 'from'), g.filter((x) => x.group !== 'from')]);
+
+/** The rules, one row per action: what it takes of his times, what it needs, and how they are placed. Each place()
+ *  gets his times in groups and returns { places, used (the times placed), missing (what it needs and lacks), ask }.
+ *  Times he said that are not in `used` can't be placed: nothing is saved. */
+export const PLACES = {
+  // "remind me ...": a day, a clock time or a time from now; one is needed.
+  remind: { takes: 'day, clock, from now', needs: 'when', place: (g, o) => { const d = dueFrom(g, o); return { places: { due: d.due }, used: d.used, ask: d.ask, missing: d.due || d.ask ? [] : ['when'] }; } },
+  // a to-do: "by DAY", "due DAY", "on DAY at X" is its due time; none is a to-do without a date.
+  todo: { takes: 'day, clock, from now', needs: '', place: (g, o) => { const d = dueFrom(g, o); return { places: { due: d.due }, used: d.used, ask: d.ask, missing: [] }; } },
+  // a new due time; "from DAY to DAY": the first is where it is now (code checks it).
+  due: { takes: 'day, clock, from now; from', needs: 'by when', place: (g, o) => {
+    const [was, next] = oldNew(g), d = dueFrom(next, o), f = was.length ? dueFrom(was, o) : null;
+    return { places: { due: d.due, ...(f?.due ? { from: f.due } : {}) }, used: [...d.used, ...(f?.used ?? [])], ask: d.ask ?? f?.ask, missing: d.due || d.ask ? [] : ['due'] };
+  } },
+  // marked done or dropped: no time.
+  mark: { takes: '', needs: '', place: () => ({ places: {}, used: [], missing: [] }) },
+  // booked: one day; "from X to Y" is start and end, "at X for N" start and length, "X until Y" start and end.
+  book: { takes: 'day, clock, clock, length', needs: 'day, start, length', place: (g, o) => {
+    const day = one(g, 'day'), starts = g.filter((x) => x.kind === 'clock' && x.group !== 'to'), ends = g.filter((x) => x.kind === 'clock' && x.group === 'to'), len = one(g, 'length');
+    const d = day ? calendarDay(day, o) : null, start = starts.length === 1 ? startSaid(starts[0].text, o) : null, end = ends.length === 1 ? startSaid(ends[0].text, o) : null;
+    const used = [...(d && !d.ask ? [day] : []), ...(start ? starts : []), ...(end && !len ? ends : []), ...(len && !ends.length ? [len] : [])];
+    const missing = [...(day === null ? ['day'] : []), ...(!starts.length ? ['start'] : []), ...(!ends.length && !len ? ['length'] : [])];
+    return { places: { date: d?.date, start, ...(used.includes(ends[0]) ? { end } : {}), ...(len && used.includes(len) ? { minutes: len.minutes } : {}) }, used, ask: d?.ask, missing };
+  } },
+  // moved: "from X to Y" is the block at X starting at Y; "to DAY at X" the new day and start; "until Y" a new end;
+  // a length a new length; the *from* group is where the block is now (code checks it against the calendar).
+  move: { takes: 'from: day, clock; to: day, clock, end or length', needs: 'something new', place: (g, o) => {
+    const [was, next] = oldNew(g);
+    const wd = one(was, 'day'), wc = one(was, 'clock');
+    const nd = one(next, 'day'), ns = next.filter((x) => x.kind === 'clock' && !END_WORDS.has(x.before)), ne = next.filter((x) => x.kind === 'clock' && END_WORDS.has(x.before)), nl = one(next, 'length');
+    const d = nd ? calendarDay(nd, o) : null, fd = wd ? calendarDay(wd, o) : null;
+    const start = ns.length === 1 ? startSaid(ns[0].text, o) : null, end = ne.length === 1 ? startSaid(ne[0].text, o) : null, from = wc ? startSaid(wc.text, o) : null;
+    const places = { ...(d?.date ? { date: d.date } : {}), ...(start ? { start } : {}), ...(end && !nl ? { end } : {}), ...(nl && !end ? { minutes: nl.minutes } : {}) };
+    if (wd || wc) places.from = { date: fd?.date ?? d?.date ?? 'today', ...(from ? { clock: from } : {}) };
+    const used = [...(d?.date ? [nd] : []), ...(start ? ns : []), ...(places.end ? ne : []), ...(places.minutes ? [nl] : []), ...(fd?.date ? [wd] : []), ...(from ? [wc] : [])];
+    return { places, used, ask: d?.ask ?? fd?.ask, missing: next.length ? [] : ['new'] };
+  } },
+  // taken off the calendar: no time.
+  unbook: { takes: '', needs: '', place: () => ({ places: {}, used: [], missing: [] }) },
+  // what is on a day: one day, today when none is said.
+  show: { takes: 'day', needs: '', place: (g, o) => { const day = one(g, 'day'), d = day ? calendarDay(day, o) : null; return { places: { date: d?.date ?? (day ? undefined : 'today') }, used: d?.date ? [day] : [], ask: d?.ask, missing: [] }; } },
+  // to-dos found by a day he names, "this week" or "overdue".
+  find: { takes: 'day', needs: '', words: (said) => (/\bthis week\b/.test(normal(said)) ? ['week'] : []), place: (g, o, said) => {
+    const day = one(g, 'day'), d = day ? calendarDay(day, o) : null, word = /\bthis week\b/.test(normal(said)) ? 'this week' : /\boverdue\b/.test(normal(said)) ? 'overdue' : '';
+    return { places: { due: d?.date ?? (word || undefined) }, used: d?.date ? [day] : [], ask: d?.ask, missing: [] };
+  } },
+  // notes, the daily note, opening an app: no time is set; times he said stay in his words in the text.
+  none: { takes: 'none (times stay in the text)', needs: '', place: (g) => ({ places: {}, used: g, missing: [] }) },
+};
+/** The action of a call of the lite tools. */
+export const ACTION_OF = (name, args, said) => ({
+  remember_commitment: kindFor(said) === 'reminder' ? 'remind' : 'todo',
+  update_commitment: args?.status ? 'mark' : 'due',
+  schedule_block: 'book', move_block: 'move', unschedule_block: 'unbook', show_day: 'show', list_commitments: 'find',
+}[name] ?? 'none');
+
+const QUESTIONS = { day: 'Which day?', start: 'What time?', length: 'For how long?', when: 'When should I remind you?', due: 'By when?', new: 'To when?' };
+const quoteList = (xs, word = 'and') => xs.map((x) => `"${x}"`).join(xs.length === 2 ? ` ${word} ` : ', ');
+/** Places his times for an action. title: a to-do's title to leave out of his sentence (its words are not times).
+ *  → { places } or { ask: a code-worded line, nothing to be saved } */
+export function placeTimes(action, said, { now = Date.now(), dayStart = 540, dayEnd = 1080, title = '' } = {}) {
+  const o = { now, dayStart, dayEnd };
+  const t = title ? normal(title) : '';
+  const text = t && ` ${normal(said)} `.includes(` ${t} `) ? ` ${normal(said)} `.replace(` ${t} `, ' it ').trim() : said;
+  const read = readTimes(text, o), g = grouped(read.times), rule = PLACES[action] ?? PLACES.none;
+  const r = rule.place(g, o, said);
+  if (r.ask) return { ask: `${r.ask} Nothing was changed yet.` };
+  const stray = action === 'none' ? [] : read.stray.filter((x) => !(rule.words?.(said) ?? []).includes(x));
+  const left = [...g.filter((x) => !r.used.includes(x)).map((x) => x.text), ...stray];
+  if (left.length) return { ask: `I couldn't place ${quoteList([...new Set(left)])} for that. Nothing was changed: could you say it again?` };
+  if (r.missing.length) return { ask: `${r.missing.map((m) => QUESTIONS[m]).join(' ')} Nothing was changed.` };
+  return { places: r.places };
+}
+
+/** A to-do named by its title, among items [{ id, title }]: an id, an exact title, or the one title that holds his
+ *  words (one word only as a title's first word: "thesis" is "Thesis chapter 2", "review" is not "Budget review"),
+ *  or whose words he used in full. → the item, { none: true }, or { ask } when more than one fits. */
+export function matchTitle(given, items) {
+  const bare = (x) => normal(x).replace(/^(?:the|my|a|an)\s+/, '').replace(/\s+(?:block|to do|todo|task|one)$/, '');
+  const g = bare(given);
+  if (!g) return { none: true };
+  const byId = items.find((i) => i.id === String(given).trim());
+  if (byId) return byId;
+  const uniq = (xs) => [...new Map(xs.map((x) => [x.id, x])).values()];
+  const exact = uniq(items.filter((i) => bare(i.title) === g));
+  if (exact.length === 1) return exact[0];
+  const part = exact.length ? exact : uniq(items.filter((i) => { const t = bare(i.title); return (g.includes(' ') ? ` ${t} `.includes(` ${g} `) : t.split(' ')[0] === g) || (t.includes(' ') && ` ${g} `.includes(` ${t} `)); }));
+  if (part.length === 1) return part[0];
+  if (part.length > 1) return { ask: `Which one: ${quoteList(part.slice(0, 3).map((x) => x.title), 'or')}? Nothing was changed.` };
+  return { none: true };
+}
+
+export const ONE_AT_A_TIME = 'One change at a time, please. Nothing was changed: say the first one again.';
+/** One change per request: → the line asking for one at a time, when the calls change more than one thing. */
+export const oneChange = (names, changes = WRITE_TOOLS) => (names.filter((n) => changes.has(n)).length > 1 ? ONE_AT_A_TIME : '');
+
+/** The checks for one request. said: what he said.
+ *  turn(names) → the line asking for one change at a time, or '' (a model turn's calls, before any runs);
+ *  place(name, args, { title }) → { action, places } or { ask }: his times placed for that call's action;
  *  result(name, { ok, text, say }) → the code-worded line for him after a change, or '';
- *  finish(reply) → { reply, by: 'model' | 'refused' | 'replaced', replaced }: the reply he gets, the lines after
- *    changes first; a reply with a claim nothing confirmed is replaced; refused with nothing let through, the ask. */
-export function createRequestCheck({ said, userName, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, fields = TIME_FIELDS, takes = TAKES, changes = WRITE_TOOLS }) {
-  let refusals = 0, through = 0, lastAsk = '';
+ *  finish(reply) → { reply, by: 'model' | 'replaced', replaced }: the lines after changes first; a reply with a claim
+ *    nothing confirmed is replaced. */
+export function createRequestCheck({ said, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, actionOf = ACTION_OF, changes = WRITE_TOOLS }) {
   const confirmed = new Set(), lines = [];
+  let changed = 0;
   return {
-    get refusals() { return refusals; },
     get lines() { return [...lines]; },
     changes: (name) => changes.has(name),
-    call(name, args) {
-      const bad = unsaid(name, args, said, fields), miss = missingTimes(name, args, said, { now, ...hours }, { fields, takes });
-      if (!bad.length && !miss.length) { through++; return { run: true }; }
-      refusals++;
-      lastAsk = bad.length ? askTimeLine(bad) : askMissingLine(miss);
-      const why = { ...(bad.length ? { unsaid: bad.map((b) => b.field) } : {}), ...(miss.length ? { missing: miss.map((x) => x.text) } : {}) };
-      if (refusals >= 2) return { ask: lastAsk, ...why };
-      return { refuse: [bad.length ? refusedHint(bad, said, userName, name) : '', miss.length ? missingHint(miss, userName, name) : ''].filter(Boolean).join(' '), ...why };
+    turn: (names) => (changed && names.some((n) => changes.has(n)) ? ONE_AT_A_TIME : oneChange(names, changes)),
+    place(name, args, { title = '' } = {}) {
+      const action = actionOf(name, args, said), p = placeTimes(action, said, { now, ...hours, title });
+      return p.ask ? { action, ask: p.ask } : { action, places: p.places };
     },
     result(name, res) {
       if (!res?.ok) return '';
       confirmed.add(name);
       if (!changes.has(name)) return '';
+      changed++;
       const line = String(res.say || res.text || '');
       lines.push(line);
       return line;
     },
     finish(reply) {
-      if (lastAsk && !through) return { reply: lastAsk, by: 'refused', replaced: 0 };
       const claims = unconfirmed(reply, confirmed);
       return { reply: [...lines, claims.length ? NOTHING_CHANGED : String(reply ?? '').trim()].filter(Boolean).join(' '), by: claims.length ? 'replaced' : 'model', replaced: claims.length };
     },
