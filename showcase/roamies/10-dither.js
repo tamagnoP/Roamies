@@ -58,6 +58,9 @@
       // Local-only build (feature 31): how many things wait in the quiet queue, as a small count by the body (0: none).
       let queued = 0;
       const badgeShown = () => (queued > 0 && !stood && pres.state === 'shown' ? queued : 0);
+      // Local-only build (feature 23): private mode's mark, a small label under the body while it is on screen.
+      let mark = '';
+      const markShown = () => (mark && pres.state === 'shown' ? mark : '');
       const jst = { spin: 0, dt: 0.016 };
       const hands = [-1, 1].map((s) => ({ s, x: m.x, y: m.y, vx: 0, vy: 0 }));
       const parts = [];
@@ -623,6 +626,9 @@
         // Local-only build (feature 31): the quiet queue's count (host.js); hidden while stood down.
         setQueued(n) { queued = Math.max(0, Math.floor(Number(n) || 0)); },
         get queued() { return queued; },
+        // Local-only build (feature 23): private mode's mark (host.js): '' for none.
+        setMark(t) { mark = String(t ?? '').slice(0, 20); },
+        get mark() { return mark; },
         resize(env) {
           lastEnv = env;
           const S = Roamie.unit(env);
@@ -903,11 +909,11 @@
             for (let y = pd[1] * K; y < pd[3] * K; y++) for (let i = y * IW + pd[0] * K, e = y * IW + pd[2] * K; i < e; i++) h = Math.imul(h ^ u32[i], 16777619);
             const glide = !!m.drive && pres.state === 'shown';
             const gx = glide ? Math.round((bx - Math.round(bx / P) * P) * 20) : 0, gy = glide ? Math.round((by - Math.round(by / P) * P) * 20) : 0;
-            sig = Math.imul(h ^ (gx * 31 + gy * 1009) ^ (badgeShown() * 7919), 16777619);
+            sig = Math.imul(h ^ (gx * 31 + gy * 1009) ^ (badgeShown() * 7919) ^ (markShown() ? 104729 : 0), 16777619);
           }
           // One cell extra each way: following slides the layer by up to half a cell. Feature 31: room for the count.
-          const b = badgeShown() ? R * 0.6 : 0;
-          return { x0: rect[0] * P - P, y0: rect[1] * P - P - b, x1: rect[2] * P + P + b, y1: rect[3] * P + P, sig };
+          const b = badgeShown() ? R * 0.6 : 0, mk = markShown() ? R * 0.7 : 0;
+          return { x0: rect[0] * P - P - mk, y0: rect[1] * P - P - b, x1: rect[2] * P + P + Math.max(b, mk), y1: rect[3] * P + P + mk, sig };
         },
         draw(ctx, env) {
           if (!ready) this.prepare(env);
@@ -982,6 +988,16 @@
             ctx.fillStyle = `rgb(${PAL[L].join(',')})`; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
             ctx.fillStyle = `rgb(${PAL[0].join(',')})`; ctx.font = `bold ${Math.round(r * 1.25)}px -apple-system, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText(queued > 9 ? '9+' : String(queued), x, y + r * 0.05);
+            ctx.restore();
+          }
+          // Feature 23: private mode's mark, under the body, while it is on screen.
+          if (markShown()) {
+            const fs = Math.max(9, Math.round(R * 0.22)), y = by + R * 1.05;
+            ctx.save();
+            ctx.font = `600 ${fs}px -apple-system, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            const w = ctx.measureText(mark).width + fs;
+            ctx.fillStyle = `rgb(${PAL[L].join(',')})`; ctx.fillRect(Math.round(bx - w / 2), Math.round(y - fs * 0.75), Math.round(w), Math.round(fs * 1.5));
+            ctx.fillStyle = `rgb(${PAL[0].join(',')})`; ctx.fillText(mark, bx, y + fs * 0.05);
             ctx.restore();
           }
           if (o.grid && !clear) {

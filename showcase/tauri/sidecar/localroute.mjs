@@ -30,7 +30,8 @@ export function liteFacts(todos, blocks, now = Date.now()) {
  * real name; todos() → the open to-dos [{ id, title, due (ms or null) }]; blocks() → { id: { start, minutes } };
  * readDaily() → today's daily note as text; confirm({ question }) → true, false or null (the yes/no bubble);
  * record(line) → the ledger; log(kind, data); fetchImpl (tests).
- * → { request(said, { signal }) → { reply, by, calls, ... } or { problem } (a code-worded line), ready() → '' or the
+ * → { request(said, { signal, private }) → { reply, by, calls, ... } or { problem } (a code-worded line; private: the
+ *   ledger lines say so), ready() → '' or the
  *   problem, reset() (the server was started again: check it again), history() }
  */
 export function createLocalRoute({ settings, userName = 'the user', tool, todos = () => [], blocks = () => ({}), readDaily = async () => '', confirm = async () => null, record = () => {}, log = () => {}, now = () => Date.now(), fetchImpl } = {}) {
@@ -52,7 +53,7 @@ export function createLocalRoute({ settings, userName = 'the user', tool, todos 
     checked = { address, model, problem: r.problem };
     return checked;
   }
-  async function request(said, { signal } = {}) {
+  async function request(said, { signal, private: priv = false } = {}) {
     const r = await ready();
     if (r.problem) { if (r.retry) checked = null; return { problem: r.problem }; }
     const s = settings(), local = s.local, address = localAddress(local.address);
@@ -68,7 +69,7 @@ export function createLocalRoute({ settings, userName = 'the user', tool, todos 
     let out;
     try {
       out = await liteRequest({
-        chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: r.model, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
+        chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: r.model, private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
         run, name: userName, model: r.model, said, state: liteState({ name: userName, now: now(), facts: liteFacts(open, b, now()) }),
         history: history.slice(-local.historyExchanges), maxSteps: local.maxSteps, now: now(), hours, items,
         confirm: async (p) => confirm(p), confirmChanges: local.confirmChanges,

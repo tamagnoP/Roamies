@@ -43,6 +43,8 @@ import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSett
 import { SHORT, leanTools } from './lean.mjs';
 import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
+import { BACK_AGAIN, LOCAL_TAG, PRIVATE_OFF, PRIVATE_ON, PRIVATE_TAG, cantLocally, createAnnouncer, isNetworkError, privateAsk, routeFor } from './route.mjs'; // feature 23, stage 4
+import { readState, writeState } from './pi.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -659,9 +661,11 @@ const PRESENCE_FRESH_MS = 30_000, OWN_MIC_MS = 10_000;
 let presence = { idle: null, mic: false, at: 0 }, ownMicAt = 0, presenceLogged = '';
 function speakingNow() { try { return loadSettings(HOME).speaking; } catch { return settingsDefaults(HOME).speaking; } }
 const awayNow = () => { const s = speakingNow(); return s.awayMinutes > 0 && Date.now() - presence.at < PRESENCE_FRESH_MS && Number.isFinite(presence.idle) && presence.idle >= s.awayMinutes * 60; };
+// Feature 23: the Mac has no network, by the shell's reading (presence.rs); one too old counts as not known.
+const offlineNow = () => Date.now() - presence.at < PRESENCE_FRESH_MS && presence.net === false;
 const callNow = () => speakingNow().quietInCalls && Date.now() - presence.at < PRESENCE_FRESH_MS && presence.mic === true && voiceState === 'idle' && !micWindow && Date.now() - ownMicAt > OWN_MIC_MS;
 function presenceSeen(m) {
-  presence = { idle: Number.isFinite(m.idle) ? Math.max(0, m.idle) : null, mic: m.mic === true, at: Date.now() };
+  presence = { idle: Number.isFinite(m.idle) ? Math.max(0, m.idle) : null, mic: m.mic === true, net: typeof m.net === 'boolean' ? m.net : null, at: Date.now() };
   const now_ = JSON.stringify({ away: awayNow(), call: callNow() });
   if (now_ !== presenceLogged) { presenceLogged = now_; logLine('presence', JSON.parse(now_)); } // true/false only, when it changes
 }
@@ -1238,6 +1242,43 @@ const localRoute = createLocalRoute({
   record: (line) => ledger.record(line),
   log: (kind, data) => logLine(kind, data),
 });
+// Feature 23, stage 4: private mode, kept in state.json; it never ends by itself, only on "back to Claude".
+const privateMode = () => readState(settingsNow().dir).privateMode === true;
+function setPrivateMode(on) {
+  const dir = settingsNow().dir;
+  try { writeState(dir, { ...readState(dir), privateMode: !!on }); } catch (e) { console.error('private mode', e); }
+  ui({ kind: 'private', on: !!on });
+  logLine('private_mode', { on: !!on });
+}
+const announcer = createAnnouncer();
+/** A request answered by the local model: the line saying so when it is the first after a switch, the refusal of
+ *  what it can't do, its reply in a bubble tagged "local", said in an exchange started by voice. why: 'offline' or
+ *  'private'. Nothing here sends anything to the provider. */
+async function localPrompt(text, byVoice, why, priv) {
+  busy = true; quiet = false; flow.activity(); menu();
+  controller = new AbortController();
+  const ctl = controller, t0 = Date.now();
+  let reply = '', mood = 'happy';
+  try {
+    const first = announcer.before('local', why);
+    const cant = cantLocally(text);
+    if (cant) { reply = cant; logLine('local_refused', { why: 'cant' }); }
+    else {
+      const out = await localRoute.request(text, { signal: ctl.signal, private: !!priv });
+      if (out.problem) { reply = out.problem; mood = 'concerned'; } else reply = out.reply;
+    }
+    if (ctl.signal.aborted) return;
+    const full = [first, reply].filter(Boolean).join(' ');
+    ui({ kind: 'say', text: sir(full), mood, tag: priv ? PRIVATE_TAG : LOCAL_TAG });
+    if (byVoice || flow.spoken()) voiceLine(forVoice(full));
+  } catch (e) {
+    if (!ctl.signal.aborted) { console.error('local request', e); ui({ kind: 'say', text: sir('The local model ran into a problem; nothing was sent.'), mood: 'concerned', tag: priv ? PRIVATE_TAG : LOCAL_TAG }); }
+  } finally {
+    logLine('local_done', { why, private: !!priv, ms: Date.now() - t0 });
+    busy = false; menu();
+    flow.settle(whenPlayed(speech.mark()));
+  }
+}
 let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
 function recordRequest() {
   const l = ledgerUse; ledgerUse = null;
@@ -1348,6 +1389,22 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   if (stood?.on()) { if (briefing) logLine('stand_down_held', { what: 'briefing', kind: briefing.kind }); else logLine('stand_down_dropped', { what: 'request' }); return; }
   if (briefing) { pi.briefing.done(briefing.kind); briefing.given = true; logLine('briefing', { kind: briefing.kind }); }
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
+  // Local-only build (feature 23, stage 4): which model answers, decided by code (route.mjs).
+  const ownAsk = !intro && !text.startsWith('(');
+  let privateThis = false;
+  if (ownAsk) {
+    const pa = privateAsk(text);
+    if (pa?.mode) { setPrivateMode(true); announcer.before('local', 'private'); aloud(PRIVATE_ON, 'happy'); flow.settle(); return; }
+    if (pa?.back) { const was = privateMode(); setPrivateMode(false); const line = announcer.before('claude'); aloud(was ? `${PRIVATE_OFF} ${BACK_AGAIN}` : line || BACK_AGAIN, 'happy'); flow.settle(); return; }
+    if (pa?.request) { privateThis = true; text = pa.request; }
+  }
+  const local = settingsNow().local, priv = privateThis || privateMode();
+  const route = ownAsk ? routeFor({ privateMode: privateMode(), privateThis, offline: offlineNow(), local }) : priv || (offlineNow() && local.address && local.whenOffline) ? 'skip' : 'claude';
+  if (route === 'none') { logLine('private_unsent', {}); aloud('Private: the local model is off (local.address), so nothing was sent anywhere.', 'concerned'); flow.settle(); return; }
+  if (route === 'skip') { logLine('local_system_skipped', { kind: briefing ? 'briefing' : kind }); return; } // an instruction for Claude while it isn't used: not sent
+  if (route === 'local') return localPrompt(text, byVoice, priv ? 'private' : 'offline', priv);
+  const backLine = announcer.before('claude');
+  if (backLine) { say(backLine, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(backLine)); }
   ownWords = intro || text.startsWith('(') ? '' : text; // Local-only build (feature 18): for item_dealt_with
   let problem = await readyAgent();
   if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
@@ -1487,6 +1544,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
     recordRequest(); // feature 32: a request that failed went out all the same
+    // Feature 23: no reply at all, and the provider can't be reached: this request goes to the local model.
+    if (ownAsk && !lastReply && !controller.signal.aborted && !stalled && isNetworkError(err) && local.address && local.whenOffline) { logLine('switch_local', { why: 'network' }); running = running.then(() => localPrompt(text, byVoice, 'offline', false)).catch((e) => console.error('local request', e)); return; }
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
@@ -2356,6 +2415,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
     ui({ kind: 'look', look: config.look ?? 'classic' });
     if (stood?.on()) ui({ kind: 'stand', on: true }); // Local-only build (feature 33): a new page (a rebuild, a restart) keeps the stood-down look
+    if (privateMode()) ui({ kind: 'private', on: true }); // feature 23: and private mode's mark (it never ends by itself)
     queueCount(); // feature 31: and the quiet queue's count
     if (keep) ui({ kind: 'settle', hold: SETTLE_HOLD_SECONDS, ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
     else if (config.onboarded && !stood?.on()) ui({ kind: 'greet' });
