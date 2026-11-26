@@ -2,13 +2,14 @@
 // SET=C node bench/local/run.mjs [port]   (REPEAT=2 runs the set twice; WARM=0 skips the warm-up and live check)
 // The tools are stand-ins that take what code worked out of his words and report success; nothing is saved. A task
 // is judged on the first call that reached them (sets.mjs).
-// Each task ends as one of: right (done right, or read right), asked (a code-worded question, nothing changed),
+// Each task ends as one of: right (done right, or read right), asked rightly (the question sets.mjs's ASK expects),
+// asked although complete (any other code-worded question, nothing changed),
 // wrong save (a tool that changes something ran, and the task is not right), miss (anything else).
 import { chat } from '../../local.mjs';
 import { WRITE_TOOLS } from '../../checks.mjs';
 import { createLiteRunner, liteRequest, liteState } from '../../lite.mjs';
 import { liveCalls, liveCheck } from '../../localserver.mjs';
-import { SETS } from './sets.mjs';
+import { ASK, SETS } from './sets.mjs';
 
 const port = Number(process.argv[2] || 8099);
 const address = `http://127.0.0.1:${port}/v1`;
@@ -40,9 +41,9 @@ const model = (await (await fetch(`${address}/models`)).json()).data[0].id;
 if (process.env.WARM !== '0') console.log(JSON.stringify({ liveCheck: await liveCheck({ ...liveCalls(address), model, name }) }));
 const rows = [];
 for (let rep = 0; rep < Number(process.env.REPEAT || 1); rep++) {
-  const count = { right: 0, asked: 0, wrongSave: 0, miss: 0 };
+  const count = { right: 0, askedRight: 0, asked: 0, wrongSave: 0, miss: 0 };
   let retries = 0, replaced = 0;
-  for (const [said, check] of tasks) {
+  for (const [k, [said, check]] of tasks.entries()) {
     seen.length = 0;
     const run = createLiteRunner({ tool, todos: async () => TODOS, readDaily: async () => { seen.push({ n: 'read_daily', a: {} }); return '## Plan\n- [ ] Budget review'; }, now: () => NOW, said: () => said, planOf: async (d) => (d === 'today' ? facts.plan : []), dueOf: async (id) => DUE[id] ?? null });
     const t0 = performance.now();
@@ -50,7 +51,7 @@ for (let rep = 0; rep < Number(process.env.REPEAT || 1); rep++) {
     const ms = performance.now() - t0;
     const good = !!check(seen[0], out);
     const writes = seen.filter((s) => WRITE_TOOLS.has(s.n));
-    const outcome = writes.length ? (good ? 'right' : 'wrongSave') : ['ask', 'one'].includes(out.by) ? 'asked' : good ? 'right' : 'miss';
+    const outcome = writes.length ? (good ? 'right' : 'wrongSave') : ['ask', 'one'].includes(out.by) ? (ASK[set]?.[k]?.test(out.reply) ? 'askedRight' : 'asked') : good ? 'right' : 'miss';
     count[outcome]++;
     retries += out.noStreamRetries; replaced += out.by === 'replaced' ? 1 : 0;
     const u = out.usage.filter(Boolean);
@@ -58,5 +59,5 @@ for (let rep = 0; rep < Number(process.env.REPEAT || 1); rep++) {
     rows.push(row);
     console.log(JSON.stringify(row));
   }
-  console.log(`SET ${set}${rep ? ` run ${rep + 1}` : ''}: right ${count.right}, asked ${count.asked}, wrong saves ${count.wrongSave}, misses ${count.miss} (of ${tasks.length})  no-stream retries ${retries}  replies replaced ${replaced}`);
+  console.log(`SET ${set}${rep ? ` run ${rep + 1}` : ''}: right ${count.right}, asked rightly ${count.askedRight}, asked although complete ${count.asked}, wrong saves ${count.wrongSave}, misses ${count.miss} (of ${tasks.length})  no-stream retries ${retries}  replies replaced ${replaced}`);
 }

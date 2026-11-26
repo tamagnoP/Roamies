@@ -66,4 +66,19 @@ export const E = [
   ['Change the budget review to tomorrow at 10.', (r) => is(r, 'move_block') && r.a.todo === 'k3f9' && r.a.date === 'tomorrow' && r.a.start === '10:00'],
 ];
 
-export const SETS = { A, B, C, D, E };
+// New, untuned (2026-11-26, after the model's time arguments were taken away; committed before any run). Tasks 5 and
+// 6 can't be done as said: right for them is a code-worded question (ASK below), with nothing saved.
+export const F = [
+  ['Remind me on Monday at quarter past ten to call the facilities office.', (r) => is(r, 'remember_commitment') && /facilities/i.test(r.a.text ?? '') && r.a.due === '2026-11-30T10:15:00' && r.a.kind === 'reminder'],
+  ['Put the thesis chapter on my calendar on Friday from 1 to 3.', (r) => is(r, 'schedule_block') && r.a.todo === 't5' && r.a.date === 'friday' && r.a.start === '13:00' && (r.a.end === '15:00' || r.a.minutes === 120)],
+  ['Move the budget review from 10 to quarter to twelve.', (r) => is(r, 'move_block') && r.a.todo === 'k3f9' && r.a.start === '11:45' && (!r.a.date || r.a.date === 'today')],
+  ['The grant report draft is now due on Tuesday.', (r) => is(r, 'update_commitment') && r.a.id === 'p2x7' && r.a.due === '2026-12-01' && !r.a.status],
+  ['Mark the budget review done and remind me at 5 to call home.', () => false],
+  ['Book two hours for the grant report draft on Thursday.', () => false],
+];
+
+export const SETS = { A, B, C, D, E, F };
+// The tasks whose right outcome is a code-worded question (by set, the task's index, the line expected). Any other
+// question counts as asked although the request was complete. B's second task: which Monday is asked by the app's
+// rule for "next <day>" (calendar.mjs, nextDays), not by the model.
+export const ASK = { B: { 1: /^Monday the 30th or Monday the 7th\?/ }, F: { 4: /^One change at a time|^I couldn't place/, 5: /^What time\?/ } };
