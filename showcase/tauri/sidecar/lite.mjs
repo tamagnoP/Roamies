@@ -157,8 +157,9 @@ export function liteMessage({ name, said, state, history = [] }) {
 }
 const plainResult = (t) => String(t ?? '').replace(/\s*\[[A-Za-z0-9_-]{2,}\]/g, '').trim();
 
-/** What a call runs when code decided the action (checks.mjs's DECIDED): code's tool, with the to-do code found in
- *  his sentence (else the model's title) and the model's text. */
+/** What a call runs when code decided the action (checks.mjs's DECIDED): code's tool, with the to-do whose whole
+ *  title is in his sentence (a change to a to-do is decided only then), the app as he named it, and the model's text
+ *  (a reminder's, a new to-do's, a note's). */
 function decidedCall(d, name, a) {
   const todo = d.title?.title ?? a.todo ?? a.text ?? '';
   switch (d.tool) {
@@ -166,7 +167,7 @@ function decidedCall(d, name, a) {
     case 'update_commitment': return { todo, ...(d.status ? { status: d.status } : {}) };
     case 'unschedule_block': return { todo };
     case 'write_note': return name === 'write_note' ? a : { title: a.title ?? a.todo ?? 'Note', content: a.content ?? a.text ?? '' };
-    case 'open': return { app: a.app ?? a.target ?? a.todo ?? '' };
+    case 'open': return { app: d.app ?? a.app ?? '' };
     default: return a;
   }
 }
@@ -195,10 +196,21 @@ export async function liteRequest({ chat, run, name, model, said, state, history
     if (res.ok) { check.result('remember_commitment', res); out.by = 'code'; out.reply = check.lines.join(' '); return out; }
     out.by = 'code'; out.reply = `That didn't work: ${res.text || 'the reminder was not saved'}. ${NOT_SAVED}`; return out;
   }
-  let lastRead = '';
+  let lastRead = '', seeded = false;
   const done = (by, reply) => { out.by = by; out.reply = reply; return out; };
+  // Looking up a day, decided by code ("what's on Friday?"): code reads the day and runs show_day first; the model
+  // only words the answer from the result. A read never asks.
+  if (check.decided?.action === 'show') {
+    const res = await run('show_day', {}, place);
+    if (res.ask) { out.calls.push({ name: 'show_day', args: {}, ok: false, asked: true, by: 'code' }); return done('ask', res.ask); }
+    out.calls.push({ name: 'show_day', args: {}, ok: !!res.ok, by: 'code' });
+    check.result('show_day', res);
+    if (res.ok) lastRead = res.text;
+    messages.push({ role: 'assistant', content: null, tool_calls: [{ id: 'code_show_day', type: 'function', function: { name: 'show_day', arguments: '{}' } }] }, { role: 'tool', tool_call_id: 'code_show_day', content: res.text || (res.ok ? 'Nothing.' : 'Failed.') });
+    seeded = true;
+  }
   for (let step = 0; step <= maxSteps; step++) {
-    const r = await chat(step === 0 ? liteBody(model, [system], { transient_context: newest }) : liteBody(model, messages));
+    const r = await chat(step === 0 && !seeded ? liteBody(model, [system], { transient_context: newest }) : liteBody(model, messages));
     out.usage.push(r.usage ?? null); out.noStreamRetries += r.noStreamRetries ?? 0;
     if (out.firstMs == null) out.firstMs = r.firstMs ?? null;
     if (!r.toolCalls?.length) { out.reply = String(r.content ?? '').trim(); break; }

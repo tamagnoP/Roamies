@@ -220,30 +220,42 @@ assert.equal(oneChange(['show_day', 'search_notes']), '');
 {
   const OPEN = [{ id: 'k3f9', title: 'Budget review' }, { id: 'p2x7', title: 'Grant report draft' }, { id: 't5', title: 'Thesis chapter 2' }];
   const D = (s) => { const d = decideAction(s, { items: OPEN, now: NOW }); return d ? `${d.action}${d.status ? `:${d.status}` : ''}${d.title ? `@${d.title.id}` : ''}` : null; };
-  assert.deepEqual(DECIDED.map((r) => r.action), ['remind', 'todo', 'due', 'mark', 'unbook', 'note', 'open']);
+  assert.deepEqual(DECIDED.map((r) => r.action), ['remind', 'todo', 'due', 'mark', 'unbook', 'note', 'open', 'show']);
   for (const [said, want] of [
-    // remind
+    // remind: the sentence starts with "remind me" (polite words aside)
     ['Remind me at half past four to pick up the parcel.', 'remind'], ['Can you remind me tomorrow to call Bo?', 'remind'], ['Remind me by Friday to read the budget review.', 'remind@k3f9'],
-    // a new to-do, its due time from "by" or "due"
+    ['Remind me to make a note about the seminar', 'remind'], ['Remind me at 5 to call home and mark the budget review done', 'remind@k3f9'],
+    // a new to-do: the whole sentence, one request; its due time from "by" or "due"
     ['Add a to-do: finish the slides by Friday.', 'todo'], ['New task: order antibodies, due next Monday.', 'todo'], ['To-do: call the bank', 'todo'], ['Add a task to review the budget review notes', 'todo@k3f9'],
-    // a due time for an open to-do named in his sentence
+    ['Please add a to-do to book the venue, thanks', 'todo'],
+    ['Add a to-do: book the venue, then email Bo.', null], ['Add a to-do and open Zotero', null], ['Could you add a task to call the clinic and also move the budget review', null], ['I need to add a to-do for the poster', null],
+    // a due time for an open to-do named in his sentence (the owner's row, unchanged)
     ['The grant report draft is due on Tuesday.', 'due@p2x7'], ['The budget review is now due tomorrow at 10.', 'due@k3f9'], ['Grant report draft due by Monday', 'due@p2x7'],
     ['The deadline for the thesis chapter 2 is the 4th of December.', 'due@t5'], ['Finish the budget review by Friday.', 'due@k3f9'], ['Get the grant report draft done by 5.', 'due@p2x7'],
     ['Read chapter 2 by Monday.', null], ['The poster is due on Friday.', null], ['The grant report draft is due.', 'due@p2x7'],
-    // marked done
-    ['I\'m done with the budget review.', 'mark:done@k3f9'], ['Mark the grant report draft as done', 'mark:done@p2x7'], ['The budget review is done.', 'mark:done@k3f9'], ['I\'ve finished the thesis chapter', 'mark:done'],
-    // off the calendar
-    ['Take the grant report draft off the calendar.', 'unbook@p2x7'], ['Get the poster off my calendar', 'unbook'],
-    // a note
+    // marked done: the whole sentence, with the whole title
+    ['I\'m done with the budget review.', 'mark:done@k3f9'], ['Mark the grant report draft as done', 'mark:done@p2x7'], ['The budget review is done.', 'mark:done@k3f9'], ['I\'ve finished the thesis chapter 2', 'mark:done@t5'],
+    ['Tick off the budget review, please', 'mark:done@k3f9'], ['OK, I am done with my grant report draft', 'mark:done@p2x7'],
+    ['I\'ve finished the thesis chapter', null], ['I\'m done with the poster.', null], ['Let me know when the budget review is done', null], ['The budget review is done, and book the poster', null],
+    ['Mark the budget review done and remind me at 5 to call home.', null], ['I\'m done with the budget review for today', null],
+    // off the calendar: the whole sentence, with the whole title (or the block for it)
+    ['Take the grant report draft off the calendar.', 'unbook@p2x7'], ['Take the block for the budget review off my calendar', 'unbook@k3f9'], ['Remove the thesis chapter 2 from my calendar', 'unbook@t5'],
+    ['Get the poster off my calendar', null], ['Take the grant report off the calendar', null], ['Take the grant report draft off the calendar and add the poster', null],
+    // a note: the whole sentence, one request
     ['Note down that the reviewer wants more controls in figure 3.', 'note'], ['Make a note about the seminar: bring the HDMI adapter.', 'note'], ['Jot down the room number', 'note'],
-    // open an app
-    ['Open Zotero.', 'open'], ['Please open Mail', 'open'],
+    ['Make a note of the room number, then open Zotero', null], ['Can I make a note here?', null],
+    // open an app: the whole sentence, the app named directly
+    ['Open Zotero.', 'open'], ['Please open Mail', 'open'], ['Open Visual Studio Code', 'open'], ['Open the Zotero app', null],
+    ['Can you open the window?', null], ['Open Zotero and move the budget review', null], ['Open it', null], ['Mark the budget review done and open Zotero', null],
+    // looking up a day: the whole sentence, a day and nothing else (a read)
+    ['What have I got on Friday?', 'show'], ['What\'s on tomorrow?', 'show'], ['Show me next Monday', 'show'], ['What is on my calendar for Friday?', 'show'],
+    ['What do I have on the 4th of December?', 'show'], ['What\'s on today?', 'show'], ['Show me my calendar for Thursday, please', 'show'],
+    ['What\'s on TV tonight?', null], ['What have I got on Friday at 3?', null], ['What do I have to do on Thursday?', null], ['Show me the budget review', null], ['What\'s on this week?', null],
     // no row: the model's choice, shown for a yes
     ['Move the budget review to Friday at 3.', null], ['Push the grant report draft to Thursday.', null], ['Drop the budget review, I won\'t do it.', null], ['Book an hour for the literature search on Monday at 2.', null],
-    ['Schedule 45 minutes for the grant report draft tomorrow at 11.', null], ['What have I got on Friday?', null], ['Can you open the window?', null],
-    // two rows: doubt, nothing decided
-    ['Mark the budget review done and remind me at 5 to call home.', null], ['Remind me to make a note about the seminar', null], ['Add a to-do and open Zotero', null],
+    ['Schedule 45 minutes for the grant report draft tomorrow at 11.', null],
   ]) assert.equal(D(said), want, said);
+  assert.equal(decideAction('Open Visual Studio Code, please', { items: OPEN, now: NOW }).app, 'Visual Studio Code', 'the app in his words');
   assert.equal(titleIn('Move the thesis chapter', OPEN), null, 'part of a title is not a title in his sentence');
   assert.equal(titleIn('the budget review and the grant report draft', OPEN), null, 'two titles: neither');
   assert.equal(titleIn('THE BUDGET REVIEW, please', OPEN).id, 'k3f9');

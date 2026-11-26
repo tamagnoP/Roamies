@@ -122,13 +122,19 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   const f = fake([{ content: 'I have marked the budget review as done.' }]);
   const out = await liteRequest({ chat: f.chat, run: okRun, name: 'Office', model: 'm', said: 'Mark the budget review done.', state: state1 });
   assert.deepEqual([out.by, out.reply], ['replaced', NOTHING_CHANGED]);
-  // a read, then the model's answer, which may stand
+  // a read the model chose, then its answer, which may stand
   const g = fake([{ calls: [['show_day', {}]] }, { content: 'You have the lab meeting at 9.' }]);
-  const out2 = await liteRequest({ chat: g.chat, run: okRun, name: 'Office', model: 'm', said: 'What\'s on Thursday?', state: state1 });
+  const out2 = await liteRequest({ chat: g.chat, run: okRun, name: 'Office', model: 'm', said: 'Anything on Thursday I should know about?', state: state1 });
   assert.deepEqual([out2.by, out2.reply, g.bodies.length], ['model', 'You have the lab meeting at 9.', 2]);
   assert.equal(g.bodies[1].messages[1].content, g.bodies[0].transient_context, 'later calls carry his message as an ordinary one');
+  // looking up a day, decided by code: show_day runs first, whatever the model would choose; the model only words it
+  const g2 = fake([{ content: 'You have the lab meeting at 9.' }]);
+  const out4 = await liteRequest({ chat: g2.chat, run: okRun, name: 'Office', model: 'm', said: 'What\'s on Thursday?', state: state1 });
+  assert.deepEqual([out4.by, out4.reply, g2.bodies.length, out4.calls], ['model', 'You have the lab meeting at 9.', 1, [{ name: 'show_day', args: {}, ok: true, by: 'code' }]]);
+  assert.equal(g2.bodies[0].transient_context, undefined); assert.deepEqual(g2.bodies[0].messages.slice(2).map((m) => m.role), ['assistant', 'tool']);
+  assert.equal(g2.bodies[0].messages[2].tool_calls[0].function.name, 'show_day'); assert.equal(g2.bodies[0].messages[3].content, 'ran show_day');
   // an empty answer after a read: the result itself, without its ids
-  const h = fake([{ calls: [['show_day', {}]] }, { content: '' }]);
+  const h = fake([{ content: '' }]);
   const out3 = await liteRequest({ chat: h.chat, run: async () => ({ ok: true, text: 'Thursday:\n09:00 to 10:00 (60 min): Lab meeting [m1]' }), name: 'Office', model: 'm', said: 'What\'s on Thursday?', state: state1 });
   assert.equal(out3.reply, 'Thursday:\n09:00 to 10:00 (60 min): Lab meeting');
 }
@@ -192,8 +198,14 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   ({ out } = await req('Book the literature search on Monday.', [{ calls: [['schedule_block', { todo: 'literature search' }]] }], { confirm: answer(true) }));
   assert.deepEqual([out.by, asked.length, seen.length], ['ask', 0, 0]);
   // reads never ask
-  ({ out } = await req('What have I got on Friday?', [{ calls: [['show_day', {}]] }, { content: 'Nothing on Friday.' }], { confirm: answer(null) }));
-  assert.deepEqual([out.reply, asked.length], ['Nothing on Friday.', 0]); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
+  ({ out } = await req('What have I got on Friday?', [{ content: 'Nothing on Friday.' }], { confirm: answer(null) }));
+  assert.deepEqual([out.reply, asked.length, out.calls[0].by], ['Nothing on Friday.', 0, 'code']); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
+  // a change decided by code for an open to-do needs its whole title: part of it goes to the model and is shown
+  ({ out } = await req('I\'ve finished the thesis chapter.', [{ calls: [['update_commitment', { todo: 'Thesis chapter 2', status: 'done' }]] }], { confirm: answer(null) }));
+  assert.deepEqual([out.by, seen.length, asked.pop()], ['unanswered', 0, 'Mark "Thesis chapter 2" as done?']);
+  // open: the app as he named it, not the model's
+  ({ out } = await req('Open Zotero.', [{ calls: [['open', { app: 'Zotero 7' }]] }]));
+  assert.deepEqual(seen.pop(), ['open', { target: 'Zotero' }]); assert.equal(out.calls[0].by, 'code');
   // with no tool called, a promise is replaced
   ({ out } = await req('Remind me about the seminar.', [{ content: 'I will remember the seminar.' }]));
   assert.deepEqual([out.by, out.reply], ['replaced', 'Nothing was changed.']);

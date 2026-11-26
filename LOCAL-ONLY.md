@@ -1234,7 +1234,9 @@ request fails with a network error before any reply; and in private mode. A slow
   ..."), with a yes.
 - **What the local model can do.** Your to-dos and reminders, the calendar, notes, today's daily note when you ask,
   and opening an app by name. A change it chooses is shown as a question and saved only on your yes
-  (`local.confirmChanges`); what code decides from your words ("remind me", "is due", "add a to-do") is saved at once.
+  (`local.confirmChanges`); what code decides from your words is saved at once: only when your whole sentence fits one
+  of its frames ("remind me …", "… is due on …", "add a to-do: …", "I'm done with <title>", "open <app>"), and for a
+  change to a to-do only with its whole title. "What's on Friday?" and "show me <day>" are looked up by code.
   Times, days and lengths are read by code from what you said, never taken from the model. A hand-off to pi, the
   screen, drawing and clicking are refused by a line.
 - **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the

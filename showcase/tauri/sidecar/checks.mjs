@@ -330,24 +330,61 @@ export function matchTitle(given, items) {
 }
 
 // ---- actions decided by code, from fixed words in his sentence
-const ADD_WORDS = /\b(?:add|new|make|create|put down)(?: a| an| another)? (?:to ?do|todo|task)\b|^(?:to ?do|todo|task)\b/;
-const REMIND_WORDS = /\bremind me\b/;
-/** The rows: the action, the real tool it runs, the words that decide it (test(said, ctx) on his words as normal()
- *  gives them; ctx: { times: readTimes's times, title: the one open to-do whose title is in his sentence, or null }),
- *  and what the call gets (status). Two rows that match decide nothing: the model's choice is then shown for a yes.
+// Each row is a frame his whole sentence must fit (polite words aside, before and after), never a part of it. A
+// change to an open to-do needs its whole title in the sentence; a slot for free words (a reminder's, a new to-do's,
+// a note's) may not carry a second request ("then", "also", "after that"). Anything looser goes to the model, and a
+// change it chooses is shown for a yes.
+const POLITE_LEAD = String.raw`(?:(?:please|can you|could you|would you|will you|hey|ok|okay|oh|right|so|and)\s+)*`;
+const POLITE_TAIL = String.raw`(?:\s+(?:please|thanks|thank you|cheers))*`;
+const frame = (body) => new RegExp(`^${POLITE_LEAD}(?:${body})${POLITE_TAIL}$`, 'u');
+const ADD_FRAME = frame(String.raw`(?:(?:add|new|make|create|put down)(?: a| an| another)? (?:to ?do|todo|task)|to ?do|todo|task)(?: (?:called|for|to|that says|saying))? (?<slot>.+?)`);
+const REMIND_FRAME = frame(String.raw`remind me (?<slot>.+?)`);
+const MARK_FRAMES = [
+  String.raw`mark (?<slot>.+?) (?:as )?(?:done|finished|complete|completed)`,
+  String.raw`(?:tick|check|cross) off (?<slot>.+?)(?: (?:as )?(?:done|finished|complete|completed))?`,
+  String.raw`(?:i'm|i am) (?:all )?done with (?<slot>.+?)`,
+  String.raw`(?<slot>.+?) (?:is|are) (?:now )?(?:done|finished|complete|completed)`,
+  String.raw`i(?:'ve| have) (?:now |just )?(?:finished|completed|done) (?<slot>.+?)`,
+].map(frame);
+const UNBOOK_FRAMES = [String.raw`(?:take|get|move|put|clear) (?<slot>.+?) off (?:my|the) calendar`, String.raw`(?:remove|clear) (?<slot>.+?) from (?:my|the) calendar`].map(frame);
+const NOTE_FRAME = frame(String.raw`(?:note down|make a note|take a note|write a note|add a note|jot down)(?: (?:that|of|to say|about|saying))? (?<slot>.+?)`);
+const OPEN_FRAME = frame(String.raw`open (?:up )?(?<slot>(?!(?:the|a|an|my|this|that|it|up)\b)[\p{L}\p{N}']+(?: [\p{L}\p{N}']+){0,2}?)(?: app)?`);
+const SHOW_FRAMES = [
+  String.raw`what(?:'s| is|s) (?:on|happening)(?: (?:my|the) calendar)?(?: (?:on|for))? (?<slot>.+?)`,
+  String.raw`what (?:have i|'ve i|i've|do i have|have i got|i have)(?: got)?(?: on| going on)?(?: (?:on|for))? (?<slot>.+?)`,
+  String.raw`show me(?: (?:my|the) calendar| my day| what's on)?(?: (?:on|for))? (?<slot>.+?)`,
+].map(frame);
+const fit = (frames, t) => { for (const f of [].concat(frames)) { const m = f.exec(t); if (m) return m.groups.slot.trim(); } return null; };
+const ONE_REQUEST = (slot) => !!slot && !/^(?:and|then|also)\b/.test(slot) && !/\b(?:and then|then|also|after that|as well as)\b/.test(slot);
+const bareTitle = (x) => normal(x).replace(/^(?:the|my)\s+/, '');
+/** The slot is the open to-do's whole title (a leading "the" or "my" aside), or "the block / time for" it. */
+const isTitle = (slot, item, prefixes = []) => !!item && slot != null && [bareTitle(slot), ...prefixes.map((p) => (bareTitle(slot).startsWith(`${p} `) ? bareTitle(bareTitle(slot).slice(p.length + 1)) : null))].includes(bareTitle(item.title));
+/** The slot is a day and nothing else ("Friday", "tomorrow", "next Monday", "the 4th of December"). */
+const isDay = (slot, o) => { const r = readTimes(slot, o); return !r.stray.length && r.times.length > 0 && r.times.every((x) => x.kind === 'day') && r.words.every((w, i) => r.used.has(i) || (i === 0 && w === 'this')); };
+/** The rows: the action, the real tool it runs, the frame his sentence must fit (test(said, ctx) on his words as
+ *  normal() gives them; ctx: { times: readTimes's times, title: the one open to-do whose whole title is in his
+ *  sentence, or null, now, dayStart, dayEnd }), and what the call gets (status). Two rows that fit decide nothing.
  *  "Drop", "move", "push", "book" and "schedule" are not here: they also name other actions ("drop the block", "push
- *  the deadline", a block for a to-do or a new one). */
+ *  the deadline", a block for a to-do or a new one). show is a read: it never asks. */
 export const DECIDED = [
-  { action: 'remind', tool: 'remember_commitment', words: '"remind me"', test: (t) => REMIND_WORDS.test(t) },
-  { action: 'todo', tool: 'remember_commitment', words: '"add a to-do", "new to-do", "new task", "add a task", "to-do:"', test: (t) => ADD_WORDS.test(t) },
+  { action: 'remind', tool: 'remember_commitment', words: '"remind me …" (the whole sentence)', test: (t) => !!fit(REMIND_FRAME, t) },
+  { action: 'todo', tool: 'remember_commitment', words: '"add a to-do / new task / to-do: <text>" (the whole sentence, one request)', test: (t) => ONE_REQUEST(fit(ADD_FRAME, t)) },
   { action: 'due', tool: 'update_commitment', words: '"is due", "is now due", "due on", "due by", "deadline", "by <day or time>", with an open to-do\'s title in his sentence and no "remind me" or "add a to-do"',
-    test: (t, c) => !!c.title && !REMIND_WORDS.test(t) && !ADD_WORDS.test(t) && (/\b(?:is|are) (?:now )?due\b|\bdue (?:on|by)\b|\bdeadline\b/.test(t) || c.times.some((x) => x.before === 'by' && x.kind !== 'length')) },
-  { action: 'mark', tool: 'update_commitment', status: 'done', words: '"mark … done", "mark … as done", "I\'m done with", "… is done", "I\'ve finished"',
-    test: (t) => /\bmark .+? (?:as )?(?:done|finished|complete|completed)\b|\bi'?m done with\b|\bi am done with\b|\b(?:is|are) (?:now )?done\b|\bi(?:'ve| have) (?:finished|completed)\b/.test(t) },
-  { action: 'unbook', tool: 'unschedule_block', words: '"off the calendar", "off my calendar"', test: (t) => /\boff (?:my|the) calendar\b/.test(t) },
-  { action: 'note', tool: 'write_note', words: '"note down", "make a note", "take a note", "write a note", "add a note", "jot down"', test: (t) => /\b(?:note down|make a note|take a note|write a note|add a note|jot down)\b/.test(t) },
-  { action: 'open', tool: 'open', words: '"open <app>" at the start, or after "and", "then", "also"', test: (t) => /(?:^|\b(?:and|then|also) )(?:please )?open \w/.test(t) },
+    test: (t, c) => !!c.title && !/\bremind me\b/.test(t) && !fit(ADD_FRAME, t) && (/\b(?:is|are) (?:now )?due\b|\bdue (?:on|by)\b|\bdeadline\b/.test(t) || c.times.some((x) => x.before === 'by' && x.kind !== 'length')) },
+  { action: 'mark', tool: 'update_commitment', status: 'done', words: '"mark <title> (as) done", "tick off <title>", "I\'m done with <title>", "<title> is done", "I\'ve finished <title>" (the whole title)',
+    test: (t, c) => MARK_FRAMES.some((f) => isTitle(fit(f, t), c.title)) },
+  { action: 'unbook', tool: 'unschedule_block', words: '"take <title> off the calendar", "remove <title> from my calendar" (the whole title, or "the block for <title>")',
+    test: (t, c) => UNBOOK_FRAMES.some((f) => isTitle(fit(f, t), c.title, ['block for', 'time for', 'slot for'])) },
+  { action: 'note', tool: 'write_note', words: '"note down / make a note / jot down <text>" (the whole sentence, one request)', test: (t) => ONE_REQUEST(fit(NOTE_FRAME, t)) },
+  { action: 'open', tool: 'open', words: '"open <app>": the whole sentence, the app named in one to three words', test: (t) => !!fit(OPEN_FRAME, t) },
+  { action: 'show', tool: 'show_day', words: '"what\'s on <day>", "what have I got on <day>", "show me <day>" (the whole sentence, a day and nothing else)', test: (t, c) => { const d = fit(SHOW_FRAMES, t); return !!d && isDay(d, c); } },
 ];
+/** The words of a slot as he said them (his capitals), or the slot. */
+function hisWords(said, slot) {
+  const toks = String(said ?? '').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '')).filter(Boolean), want = slot.split(' ');
+  for (let i = 0; i + want.length <= toks.length; i++) if (want.every((w, k) => normal(toks[i + k]) === w)) return toks.slice(i, i + want.length).join(' ');
+  return slot;
+}
 /** The open to-do whose whole title is in his sentence (a leading "the" aside), when exactly one is. → the item or
  *  null. items: [{ id, title }] */
 export function titleIn(said, items = []) {
@@ -359,10 +396,10 @@ export function titleIn(said, items = []) {
  *  (title: the one open to-do named in his sentence, or null), or null when no row matches or more than one does. */
 export function decideAction(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
   const t = normal(said), title = titleIn(said, items), times = readTimes(said, { now, dayStart, dayEnd }).times;
-  const rows = DECIDED.filter((r) => r.test(t, { times, title }));
+  const rows = DECIDED.filter((r) => r.test(t, { times, title, now, dayStart, dayEnd }));
   if (rows.length !== 1) return null;
   const r = rows[0];
-  return { action: r.action, tool: r.tool, ...(r.status ? { status: r.status } : {}), title };
+  return { action: r.action, tool: r.tool, ...(r.status ? { status: r.status } : {}), title, ...(r.action === 'open' ? { app: hisWords(said, fit(OPEN_FRAME, t)) } : {}) };
 }
 const POLITE = /^(?:(?:please|can you|could you|would you|will you|hey|ok|okay|oh|and)\s+)*$/;
 const BEFORE_TIME = new Set(['at', 'on', 'by', 'this', 'for', 'around', 'about']);
