@@ -4,9 +4,11 @@
 // time, no state, nothing that changes is in it. What changes goes in the newest message, labelled as coming from the
 // app. The model chooses the action and the to-do, by its title; its tools have no time, day or length fields. Code
 // reads those from his sentence and places them by the action (checks.mjs), with the other checks: one change per
-// request, no unconfirmed claims, code-worded lines after a change. Here are the prompt, the tools, the runner that
-// turns a call and the placed times into the real tools' arguments, and the request loop.
-import { createRequestCheck, kindFor, matchTitle, reminderLine, updateLine } from './checks.mjs';
+// request, no unconfirmed claims, code-worded lines after a change. What code decided from his words (checks.mjs's
+// DECIDED) is saved at once; a change the model chose is shown first as a code-worded question for a yes
+// (`local.confirmChanges`); a reminder code can read whole is made with no model call. Here are the prompt, the
+// tools, the runner that turns a call and the placed times into the real tools' arguments, and the request loop.
+import { NOT_SAVED, changeQuestion, createRequestCheck, kindFor, matchTitle, reminderByCode, reminderLine, updateLine } from './checks.mjs';
 import { ymd } from './daily.mjs';
 
 export const LITE_MAX_TOKENS = 200;
@@ -60,8 +62,10 @@ export function liteState({ name, now = Date.now(), facts = null }) {
  *  ({ execute }); blocks: { schedule_block, move_block } → (args, signal) → { text, say } (the calendar's own line for
  *  him); todos() → the open to-dos [{ id, title }]; readDaily() → today's daily note as text; planOf(day, as the
  *  calendar tools take it) → that day's blocks [{ todo, title, start (ms), minutes }]; dueOf(id) → { ms, dayOnly } or
- *  null. Called as run(name, args, place), place(name, args, { title }) → { places } or { ask } (the request's check).
- *  → { ok, text, say } (say: the line for him, for a tool that changes something) or { ask } (a code-worded line). */
+ *  null. Called as run(name, args, place, signal, { confirm }), place(name, args, { title }) → { places } or { ask }
+ *  (the request's check); confirm({ tool, args, question }) → true (yes), false (no) or null (no answer), asked
+ *  before a change is saved, when given. → { ok, text, say } (say: the line for him, for a tool that changes
+ *  something), { ask } (a code-worded line), or { declined: 'no' | 'none', tool, args, question } (shown, not saved). */
 export function createLiteRunner({ tool, blocks = {}, todos = async () => [], readDaily, now = () => Date.now(), said = () => '', planOf = async () => [], dueOf = async () => null }) {
   const fail = (e) => ({ ok: false, text: String(e?.message ?? e).slice(0, 600) });
   const run = async (name, args, signal) => {
@@ -76,7 +80,17 @@ export function createLiteRunner({ tool, blocks = {}, todos = async () => [], re
   const which = { ask: 'Which to-do do you mean? Nothing was changed.' };
   const find = async (given) => matchTitle(given, [...await todos(), ...(await planOf('today')).map((b) => ({ id: b.todo, title: b.title }))].filter((x) => x.id && x.title));
   const changed = (r) => (r.ok ? { ...r, say: r.say ?? r.text } : r);
-  return async function liteRun(name, a = {}, place = () => ({ places: {} }), signal) {
+  return async function liteRun(name, a = {}, place = () => ({ places: {} }), signal, { confirm = null } = {}) {
+    // A change, shown first when confirm is given: nothing is saved without a yes.
+    const commit = async (tool, args, title, exec) => {
+      if (confirm) {
+        const question = changeQuestion({ tool, args, title, now: now() });
+        let yes = null;
+        try { yes = await confirm({ tool, args, question }); } catch { yes = null; }
+        if (yes !== true) return { declined: yes === false ? 'no' : 'none', tool, args, question };
+      }
+      return exec();
+    };
     const titled = ['update_commitment', 'schedule_block', 'move_block', 'unschedule_block'].includes(name);
     const found = titled ? await find(a.todo) : null;
     if (found?.ask) return found;
@@ -85,15 +99,20 @@ export function createLiteRunner({ tool, blocks = {}, todos = async () => [], re
     const pl = p.places ?? {};
     switch (name) {
       case 'remember_commitment': {
-        const kind = kindFor(said()), text = String(a.text ?? '').trim();
-        const r = await run(name, { text, ...(pl.due ? { due: dueArg(pl.due) } : {}), kind }, signal);
-        return r.ok ? { ...r, say: reminderLine({ text, kind, ms: pl.due?.ms ?? null, dayOnly: !!pl.due?.dayOnly, now: now() }) } : r;
+        const kind = kindFor(said()), text = String(a.text ?? '').trim(), args = { text, ...(pl.due ? { due: dueArg(pl.due) } : {}), kind };
+        return commit(name, args, text, async () => {
+          const r = await run(name, args, signal);
+          return r.ok ? { ...r, say: reminderLine({ text, kind, ms: pl.due?.ms ?? null, dayOnly: !!pl.due?.dayOnly, now: now() }) } : r;
+        });
       }
       case 'update_commitment': {
         if (found.none) return which;
         if (pl.from && !sameDue(pl.from, await dueOf(found.id))) return which;
-        const r = await run(name, { id: found.id, ...(a.status ? { status: a.status } : {}), ...(pl.due ? { due: dueArg(pl.due) } : {}) }, signal);
-        return r.ok ? { ...r, say: updateLine({ title: found.title, status: a.status ?? '', ms: pl.due?.ms ?? null, dayOnly: !!pl.due?.dayOnly, now: now() }) } : r;
+        const args = { id: found.id, ...(a.status ? { status: a.status } : {}), ...(pl.due ? { due: dueArg(pl.due) } : {}) };
+        return commit(name, args, found.title, async () => {
+          const r = await run(name, args, signal);
+          return r.ok ? { ...r, say: updateLine({ title: found.title, status: a.status ?? '', ms: pl.due?.ms ?? null, dayOnly: !!pl.due?.dayOnly, now: now() }) } : r;
+        });
       }
       case 'list_commitments': return run(name, { ...(a.words ? { words: String(a.words) } : {}), ...(pl.due ? { due: pl.due } : {}) }, signal);
       case 'schedule_block': case 'move_block': {
@@ -105,16 +124,18 @@ export function createLiteRunner({ tool, blocks = {}, todos = async () => [], re
         }
         if (name === 'move_block' && !id) return which;
         const args = { ...(id ? { todo: id } : { title: String(a.todo ?? '').trim() }), ...(pl.date ? { date: pl.date } : {}), ...(pl.start ? { start: pl.start } : {}), ...(pl.end ? { end: pl.end } : {}), ...(pl.minutes ? { minutes: pl.minutes } : {}) };
-        if (blocks[name]) { try { const r = await blocks[name](args, signal); return { ok: true, text: String(r?.text ?? ''), say: String(r?.say ?? r?.text ?? '') }; } catch (err) { return fail(err); } }
-        return changed(await run(name, args, signal));
+        return commit(name, args, found.none ? '' : found.title, async () => {
+          if (blocks[name]) { try { const r = await blocks[name](args, signal); return { ok: true, text: String(r?.text ?? ''), say: String(r?.say ?? r?.text ?? '') }; } catch (err) { return fail(err); } }
+          return changed(await run(name, args, signal));
+        });
       }
-      case 'unschedule_block': return found.none ? which : changed(await run(name, { todo: found.id }, signal));
+      case 'unschedule_block': return found.none ? which : commit(name, { todo: found.id }, found.title, async () => changed(await run(name, { todo: found.id }, signal)));
       case 'show_day': return run(name, { date: pl.date ?? 'today' }, signal);
-      case 'write_note': return changed(await run(name, { title: String(a.title ?? ''), content: String(a.content ?? ''), ...(a.append === true ? { append: true } : {}) }, signal));
+      case 'write_note': { const args = { title: String(a.title ?? ''), content: String(a.content ?? ''), ...(a.append === true ? { append: true } : {}) }; return commit(name, args, args.title, async () => changed(await run(name, args, signal))); }
       case 'search_notes': return run(name, { query: String(a.query ?? '') }, signal);
       case 'read_note': return run(name, { title: String(a.title ?? '') }, signal);
       case 'read_daily': try { return { ok: true, text: String(await readDaily() ?? '') || 'Today\'s daily note is empty.' }; } catch (e) { return fail(e); }
-      case 'open': return changed(await run(name, { target: String(a.app ?? '') }, signal));
+      case 'open': { const args = { target: String(a.app ?? '') }; return commit(name, args, args.target, async () => changed(await run(name, args, signal))); }
       default: return { ok: false, text: `No tool ${name}.` };
     }
   };
@@ -136,18 +157,44 @@ export function liteMessage({ name, said, state, history = [] }) {
 }
 const plainResult = (t) => String(t ?? '').replace(/\s*\[[A-Za-z0-9_-]{2,}\]/g, '').trim();
 
+/** What a call runs when code decided the action (checks.mjs's DECIDED): code's tool, with the to-do code found in
+ *  his sentence (else the model's title) and the model's text. */
+function decidedCall(d, name, a) {
+  const todo = d.title?.title ?? a.todo ?? a.text ?? '';
+  switch (d.tool) {
+    case 'remember_commitment': return { text: a.text ?? a.content ?? a.todo ?? '' };
+    case 'update_commitment': return { todo, ...(d.status ? { status: d.status } : {}) };
+    case 'unschedule_block': return { todo };
+    case 'write_note': return name === 'write_note' ? a : { title: a.title ?? a.todo ?? 'Note', content: a.content ?? a.text ?? '' };
+    case 'open': return { app: a.app ?? a.target ?? a.todo ?? '' };
+    default: return a;
+  }
+}
+
 /** One request to the local model, with the checks of checks.mjs. chat(body) → { content, toolCalls, usage, firstMs,
- *  noStreamRetries }; run(name, args, place) → { ok, text, say } or { ask } (createLiteRunner). history: [{ said, reply
- *  }], oldest first. The first call sends the opening as messages and his newest message as the server's transient
+ *  noStreamRetries }; run(name, args, place, signal, { confirm }) → { ok, text, say }, { ask } or { declined }
+ *  (createLiteRunner). history: [{ said, reply }], oldest first. items: the open to-dos [{ id, title }] (a title in
+ *  his sentence, for the actions code decides). confirm({ tool, args, question }) → true, false or null: asks him
+ *  about a change the model chose (the yes/no bubble, its answer window, never kept); confirmChanges false saves
+ *  those at once. The first call sends the opening as messages and his newest message as the server's transient
  *  context, so the server reuses the opening; later calls of the same request carry it as an ordinary message.
- *  → { reply, by ('model' | 'tools' | 'ask' | 'one' | 'replaced' | 'steps' | 'empty'), calls: [{ name, args, ok,
- *  asked }], noStreamRetries, usage: [per model call], firstMs } */
-export async function liteRequest({ chat, run, name, model, said, state, history = [], maxSteps = 4, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 } }) {
+ *  → { reply, by ('code' | 'model' | 'tools' | 'ask' | 'one' | 'declined' | 'unanswered' | 'replaced' | 'steps' |
+ *  'empty'), calls: [{ name, args, ok, asked, by: 'code' | 'model', shown }], shown: { tool, args, question } (the
+ *  change shown for a yes), noStreamRetries, usage: [per model call], firstMs } */
+export async function liteRequest({ chat, run, name, model, said, state, history = [], maxSteps = 4, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, items = [], confirm = async () => null, confirmChanges = true }) {
   const system = { role: 'system', content: liteSystem(name) }, newest = liteMessage({ name, said, state, history });
   const messages = [system, { role: 'user', content: newest }];
   const out = { reply: '', by: 'model', calls: [], noStreamRetries: 0, usage: [], firstMs: null };
-  const check = createRequestCheck({ said, now, hours });
+  const check = createRequestCheck({ said, now, hours, items });
   const place = (n, a, o) => check.place(n, a, o);
+  // A reminder code can read whole: made by code, with no model call.
+  const mine = reminderByCode(said, { items, now, ...hours });
+  if (mine) {
+    const res = await run('remember_commitment', { text: mine.text }, () => ({ action: 'remind', places: { due: mine.due } }));
+    out.calls.push({ name: 'remember_commitment', args: { text: mine.text }, ok: !!res.ok, by: 'code' });
+    if (res.ok) { check.result('remember_commitment', res); out.by = 'code'; out.reply = check.lines.join(' '); return out; }
+    out.by = 'code'; out.reply = `That didn't work: ${res.text || 'the reminder was not saved'}. ${NOT_SAVED}`; return out;
+  }
   let lastRead = '';
   const done = (by, reply) => { out.by = by; out.reply = reply; return out; };
   for (let step = 0; step <= maxSteps; step++) {
@@ -170,11 +217,24 @@ export async function liteRequest({ chat, run, name, model, said, state, history
         again = true;
         continue;
       }
-      const res = await run(c.name, args, place);
-      if (res.ask) { out.calls.push({ name: c.name, args, ok: false, asked: true }); stop = { by: 'ask', reply: res.ask }; messages.push({ role: 'tool', tool_call_id: c.id, content: 'Asked him.' }); continue; }
-      out.calls.push({ name: c.name, args, ok: !!res.ok });
-      check.result(c.name, res);
-      if (!(res.ok && check.changes(c.name))) { again = true; if (res.ok) lastRead = res.text; }
+      // Code decided the action from his words: code's tool runs and is saved at once. Else a change the model chose
+      // is shown first.
+      const d = check.changes(c.name) ? check.decided : null;
+      const callName = d ? d.tool : c.name, callArgs = d ? decidedCall(d, c.name, args) : args, by = d ? 'code' : 'model';
+      const ask = !d && check.changes(callName) && confirmChanges ? confirm : null;
+      const res = await run(callName, callArgs, place, undefined, { confirm: ask });
+      if (res.ask) { out.calls.push({ name: callName, args: callArgs, ok: false, asked: true, by }); stop = { by: 'ask', reply: res.ask }; messages.push({ role: 'tool', tool_call_id: c.id, content: 'Asked him.' }); continue; }
+      if (res.declined) {
+        out.calls.push({ name: callName, args: callArgs, ok: false, by, shown: true, answer: res.declined });
+        out.shown = { tool: res.tool, args: res.args, question: res.question };
+        check.called();
+        stop = { by: res.declined === 'no' ? 'declined' : 'unanswered', reply: NOT_SAVED };
+        messages.push({ role: 'tool', tool_call_id: c.id, content: 'Not saved.' });
+        continue;
+      }
+      out.calls.push({ name: callName, args: callArgs, ok: !!res.ok, by, ...(d ? { model: { name: c.name, args } } : {}), ...(ask ? { shown: true, answer: 'yes' } : {}) });
+      check.result(callName, res);
+      if (!(res.ok && check.changes(callName))) { again = true; if (res.ok) lastRead = res.text; }
       messages.push({ role: 'tool', tool_call_id: c.id, content: res.text || (res.ok ? 'Done.' : 'Failed.') });
     }
     if (stop) return done(stop.by, [...check.lines, stop.reply].join(' '));

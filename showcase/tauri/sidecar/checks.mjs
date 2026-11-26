@@ -6,11 +6,15 @@
 //     action needs and he didn't say: nothing is saved, and a code-worded question names what is missing.
 //   - One change per request: a request that asks for two gets a code-worded line asking for one at a time.
 //   - The to-do is named by its title; code finds it (`matchTitle`), or asks which.
-//   - "Remind me" makes a reminder and anything else a to-do.
+//   - Actions decided by code from fixed words in his sentence (`DECIDED`): "remind me" is a reminder, "is due",
+//     "deadline", "by <day>" a due time, and a few more whose words leave no doubt. What code decided is saved at once;
+//     a change the model chose is first shown to him as a code-worded question (`changeQuestion`) for a yes. A
+//     reminder whose time and text code can read is made by code alone (`reminderByCode`).
 //   - A reply that says something was done, moved, booked or saved without a tool result in that request confirming
-//     it is replaced by a code-worded line saying nothing was changed.
+//     it is replaced by a code-worded line saying nothing was changed; with no tool called at all, so is one that
+//     promises an action ("I'll", "I will", "noted", "I have").
 //   - After a tool that changes something, what he is told is a code-worded line from its result.
-import { nextDays, dayChoice } from './calendar.mjs';
+import { dayChoice, dayFrom, nextDays } from './calendar.mjs';
 import { clockSaid, parseWhen, writtenTimes as written, ymd } from './daily.mjs';
 
 /** Words as they are compared: lower case, spacing and punctuation aside (a colon between digits stays: "16:30"). */
@@ -61,7 +65,7 @@ const NAME_BEFORE = new Set(['the', 'a', 'my', 'our', 'your', 'his', 'her']);
  *  time that none of them read (`stray`). A weekday after "the", "a", "my" ("the Friday seminar") is a name, not a
  *  day: it is not read, and is stray.
  *  → { times: [{ kind: 'day' | 'clock' | 'rel' | 'length', text (his words), before (the word before it), minutes (a
- *  length) }], stray: [words] } */
+ *  length) }], stray: [words], words: [his words as read], used: Set of the indices of the words in a time } */
 export function readTimes(said, { now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
   const w = normal(written(said)).split(' ').filter(Boolean).map((x) => x.replace(/^(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)'s$/, '$1')), out = [];
   const used = new Set();
@@ -85,7 +89,7 @@ export function readTimes(said, { now = Date.now(), dayStart = 540, dayEnd = 108
   }
   // "o'clock", "am" and "pm" after a time read, and "the"/"of" inside a date, are part of it.
   const stray = w.filter((x, j) => !used.has(j) && strayAt(w, j) && !(['oclock', 'o\'clock', 'am', 'pm'].includes(x) && used.has(j - 1)));
-  return { times: out, stray };
+  return { times: out, stray, words: w, used };
 }
 /** The times, days and lengths in what he said (readTimes without the stray words). */
 export const timesIn = (said, opts) => readTimes(said, opts).times;
@@ -116,6 +120,18 @@ export function unconfirmed(reply, confirmed) {
   return out;
 }
 export const NOTHING_CHANGED = 'Nothing was changed.';
+// With no tool called, a sentence that promises or reports an action is a claim too.
+const PROMISE = /\b(i'll|i will|i've|i have|i'm going to|i am going to|i shall|noted|will remember|will remind|got it|all set|on it)\b/;
+/** The sentences of a reply given with no tool called that promise or report an action ("I will remember …",
+ *  "I'll …", "Noted.", "I have …"). A negative sentence or a question is none. → the sentences ([] when none). */
+export function promised(reply) {
+  const out = [];
+  for (const s of String(reply ?? '').split(/(?<=[.!?])\s+|\n+/)) {
+    const t = normal(s) + (/\?\s*$/.test(s) ? '?' : '');
+    if (t && !NOT_A_CLAIM.test(t) && PROMISE.test(t)) out.push(s.trim());
+  }
+  return out;
+}
 
 const pad = (n) => String(n).padStart(2, '0');
 const hhmm = (mins) => `${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`;
@@ -313,6 +329,102 @@ export function matchTitle(given, items) {
   return { none: true };
 }
 
+// ---- actions decided by code, from fixed words in his sentence
+const ADD_WORDS = /\b(?:add|new|make|create|put down)(?: a| an| another)? (?:to ?do|todo|task)\b|^(?:to ?do|todo|task)\b/;
+const REMIND_WORDS = /\bremind me\b/;
+/** The rows: the action, the real tool it runs, the words that decide it (test(said, ctx) on his words as normal()
+ *  gives them; ctx: { times: readTimes's times, title: the one open to-do whose title is in his sentence, or null }),
+ *  and what the call gets (status). Two rows that match decide nothing: the model's choice is then shown for a yes.
+ *  "Drop", "move", "push", "book" and "schedule" are not here: they also name other actions ("drop the block", "push
+ *  the deadline", a block for a to-do or a new one). */
+export const DECIDED = [
+  { action: 'remind', tool: 'remember_commitment', words: '"remind me"', test: (t) => REMIND_WORDS.test(t) },
+  { action: 'todo', tool: 'remember_commitment', words: '"add a to-do", "new to-do", "new task", "add a task", "to-do:"', test: (t) => ADD_WORDS.test(t) },
+  { action: 'due', tool: 'update_commitment', words: '"is due", "is now due", "due on", "due by", "deadline", "by <day or time>", with an open to-do\'s title in his sentence and no "remind me" or "add a to-do"',
+    test: (t, c) => !!c.title && !REMIND_WORDS.test(t) && !ADD_WORDS.test(t) && (/\b(?:is|are) (?:now )?due\b|\bdue (?:on|by)\b|\bdeadline\b/.test(t) || c.times.some((x) => x.before === 'by' && x.kind !== 'length')) },
+  { action: 'mark', tool: 'update_commitment', status: 'done', words: '"mark … done", "mark … as done", "I\'m done with", "… is done", "I\'ve finished"',
+    test: (t) => /\bmark .+? (?:as )?(?:done|finished|complete|completed)\b|\bi'?m done with\b|\bi am done with\b|\b(?:is|are) (?:now )?done\b|\bi(?:'ve| have) (?:finished|completed)\b/.test(t) },
+  { action: 'unbook', tool: 'unschedule_block', words: '"off the calendar", "off my calendar"', test: (t) => /\boff (?:my|the) calendar\b/.test(t) },
+  { action: 'note', tool: 'write_note', words: '"note down", "make a note", "take a note", "write a note", "add a note", "jot down"', test: (t) => /\b(?:note down|make a note|take a note|write a note|add a note|jot down)\b/.test(t) },
+  { action: 'open', tool: 'open', words: '"open <app>" at the start, or after "and", "then", "also"', test: (t) => /(?:^|\b(?:and|then|also) )(?:please )?open \w/.test(t) },
+];
+/** The open to-do whose whole title is in his sentence (a leading "the" aside), when exactly one is. → the item or
+ *  null. items: [{ id, title }] */
+export function titleIn(said, items = []) {
+  const t = ` ${normal(said)} `, bare = (x) => normal(x).replace(/^(?:the|my|a|an)\s+/, '');
+  const hit = [...new Map(items.filter((i) => i.id && bare(i.title) && t.includes(` ${bare(i.title)} `)).map((i) => [i.id, i])).values()];
+  return hit.length === 1 ? hit[0] : null;
+}
+/** The action code decides from his words. items: the open to-dos [{ id, title }]. → { action, tool, status, title }
+ *  (title: the one open to-do named in his sentence, or null), or null when no row matches or more than one does. */
+export function decideAction(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
+  const t = normal(said), title = titleIn(said, items), times = readTimes(said, { now, dayStart, dayEnd }).times;
+  const rows = DECIDED.filter((r) => r.test(t, { times, title }));
+  if (rows.length !== 1) return null;
+  const r = rows[0];
+  return { action: r.action, tool: r.tool, ...(r.status ? { status: r.status } : {}), title };
+}
+const POLITE = /^(?:(?:please|can you|could you|would you|will you|hey|ok|okay|oh|and)\s+)*$/;
+const BEFORE_TIME = new Set(['at', 'on', 'by', 'this', 'for', 'around', 'about']);
+/** A reminder code can make alone: "remind me" (only polite words before it), a time code places, and a text: what
+ *  is left once the time words, the word before each ("at", "on"), "remind me to" and a closing "please" or "thanks" are taken out, in his
+ *  own words and capitals. → { text, due: { ms, dayOnly } } or null (the request then goes to the model). */
+export function reminderByCode(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
+  const d = decideAction(said, { items, now, dayStart, dayEnd });
+  if (d?.action !== 'remind') return null;
+  const p = placeTimes('remind', said, { now, dayStart, dayEnd });
+  if (!p.places?.due || p.places.due.dayOnly) return null;
+  const r = readTimes(said, { now, dayStart, dayEnd });
+  // His own tokens, each with the indices of the words normal() makes of it.
+  const tokens = written(said).split(/\s+/).filter(Boolean), of = [];
+  let k = 0;
+  for (const tok of tokens) { const n = normal(tok.replace(/^(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)['’]s$/i, '$1')).split(' ').filter(Boolean).length; of.push([...Array(n).keys()].map((x) => x + k)); k += n; }
+  if (k !== r.words.length) return null;
+  const drop = new Set(r.used);
+  for (const j of r.used) if (!r.used.has(j - 1) && BEFORE_TIME.has(r.words[j - 1])) drop.add(j - 1);
+  const keep = tokens.filter((_, i) => of[i].length > 0 && of[i].every((j) => !drop.has(j)));
+  const words = keep.join(' ').replace(/[\s,;:.!?]+$/, '').replace(/^[\s,]+/, '');
+  const m = /^(.*?)\bremind me\s+to\s+(.+)$/i.exec(words.replace(/(?:[\s,]+(?:please|thanks|thank you|cheers))+$/i, ''));
+  if (!m || !POLITE.test(normal(m[1]) ? `${normal(m[1])} ` : '')) return null;
+  const text = m[2].replace(/[\s,]+$/, '').trim();
+  if (!text || readTimes(text, { now, dayStart, dayEnd }).times.length) return null;
+  return { text, due: p.places.due };
+}
+
+// ---- the question that shows a change the model chose, before anything is saved
+const dayWords = (date, now) => { const d = dayFrom(date, now); return d ? whenLine(d.getTime(), true, now) : String(date ?? ''); };
+const lengthWords = (m) => (m % 60 === 0 ? `${m / 60} hour${m === 60 ? '' : 's'}` : m > 60 ? `${Math.floor(m / 60)} hour${m < 120 ? '' : 's'} ${m % 60} minutes` : `${m} minutes`);
+const whenOf = (due, now) => { const ms = typeof due === 'number' ? due : dueMs(due); return ms == null ? '' : whenLine(ms, /^\d{4}-\d{2}-\d{2}$/.test(String(due)), now); };
+const dueMs = (due) => { const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(String(due ?? '')); return m ? new Date(+m[1], +m[2] - 1, +m[3], +(m[4] ?? 0), +(m[5] ?? 0)).getTime() : null; };
+/** What would be saved, said back by code from the real tool's arguments, as a question for a yes: the to-do's
+ *  title, the action and the times as code read them. tool: the real tool; args: its arguments; title: the to-do's
+ *  title (for a call by id). → the question. */
+export function changeQuestion({ tool, args = {}, title = '', now = Date.now() }) {
+  const name = quoted(title || args.title || args.text || args.todo || '');
+  const at = (a) => [a.date ? dayWords(a.date, now).replace(/^on /, '') : '', a.start ? `${a.date ? 'at ' : ''}${a.start}` : ''].filter(Boolean).join(' ');
+  switch (tool) {
+    case 'remember_commitment': {
+      const when = args.due ? whenOf(args.due, now) : '';
+      return args.kind === 'reminder' && when && !/^\d{4}-\d{2}-\d{2}$/.test(args.due) ? `Remind you to ${String(args.text).replace(/[.!]+$/, '')} ${when}?` : `Add the to-do ${quoted(args.text)}${when ? `, due ${when}` : ''}?`;
+    }
+    case 'update_commitment': return args.status ? `Mark ${name} as ${args.status}?` : args.due ? `Make ${name} due ${whenOf(args.due, now)}?` : `Change ${name}?`;
+    case 'schedule_block': {
+      const day = args.date ? dayWords(args.date, now) : 'today';
+      const span = args.end ? `from ${args.start} to ${args.end}` : args.minutes ? `at ${args.start} for ${lengthWords(args.minutes)}` : args.start ? `at ${args.start}` : '';
+      return `Book ${name} ${day}${span ? ` ${span}` : ''}?`;
+    }
+    case 'move_block': {
+      const to = at(args), more = [args.end ? `until ${args.end}` : '', args.minutes ? `for ${lengthWords(args.minutes)}` : ''].filter(Boolean).join(' ');
+      return `Move the block for ${name}${to ? ` to ${to}` : ''}${more ? ` ${more}` : ''}?`;
+    }
+    case 'unschedule_block': return `Take the block for ${name} off the calendar?`;
+    case 'write_note': { const c = String(args.content ?? '').replace(/\s+/g, ' ').trim(); return `${args.append ? 'Add to' : 'Save'} the note ${quoted(args.title ?? '')}: "${c.length > 140 ? `${c.slice(0, 139)}…` : c}"?`; }
+    case 'open': return `Open ${String(args.target ?? '').trim()}?`;
+    default: return `Run ${tool}?`;
+  }
+}
+export const NOT_SAVED = 'Nothing was changed.';
+
 export const ONE_AT_A_TIME = 'One change at a time, please. Nothing was changed: say the first one again.';
 /** One change per request: → the line asking for one at a time, when the calls change more than one thing. */
 export const oneChange = (names, changes = WRITE_TOOLS) => (names.filter((n) => changes.has(n)).length > 1 ? ONE_AT_A_TIME : '');
@@ -322,11 +434,15 @@ export const oneChange = (names, changes = WRITE_TOOLS) => (names.filter((n) => 
  *  place(name, args, { title }) → { action, places } or { ask }: his times placed for that call's action;
  *  result(name, { ok, text, say }) → the code-worded line for him after a change, or '';
  *  finish(reply) → { reply, by: 'model' | 'replaced', replaced }: the lines after changes first; a reply with a claim
- *    nothing confirmed is replaced. */
-export function createRequestCheck({ said, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, actionOf = ACTION_OF, changes = WRITE_TOOLS }) {
+ *    nothing confirmed is replaced, and with no tool called (result() or called() never), one that promises an action.
+ *  decided: the action code decided from his words (items: the open to-dos, for a title in his sentence). */
+export function createRequestCheck({ said, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 }, actionOf = ACTION_OF, changes = WRITE_TOOLS, items = [] }) {
   const confirmed = new Set(), lines = [];
-  let changed = 0;
+  let changed = 0, called = 0;
+  const decided = decideAction(said, { items, now, ...hours });
   return {
+    /** The action code decided from his words (decideAction), or null: the model's choice is shown for a yes. */
+    decided,
     get lines() { return [...lines]; },
     changes: (name) => changes.has(name),
     turn: (names) => (changed && names.some((n) => changes.has(n)) ? ONE_AT_A_TIME : oneChange(names, changes)),
@@ -335,6 +451,7 @@ export function createRequestCheck({ said, now = Date.now(), hours = { dayStart:
       return p.ask ? { action, ask: p.ask } : { action, places: p.places };
     },
     result(name, res) {
+      called++;
       if (!res?.ok) return '';
       confirmed.add(name);
       if (!changes.has(name)) return '';
@@ -343,8 +460,9 @@ export function createRequestCheck({ said, now = Date.now(), hours = { dayStart:
       lines.push(line);
       return line;
     },
+    called: () => { called++; },
     finish(reply) {
-      const claims = unconfirmed(reply, confirmed);
+      const claims = [...new Set([...unconfirmed(reply, confirmed), ...(called ? [] : promised(reply))])];
       return { reply: [...lines, claims.length ? NOTHING_CHANGED : String(reply ?? '').trim()].filter(Boolean).join(' '), by: claims.length ? 'replaced' : 'model', replaced: claims.length };
     },
   };

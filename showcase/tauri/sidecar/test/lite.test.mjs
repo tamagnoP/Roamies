@@ -145,4 +145,58 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   const k = fake([{ retried: 1, calls: [['open', { app: 'Zotero' }]] }]);
   assert.equal((await liteRequest({ chat: k.chat, run: okRun, name: 'Office', model: 'm', said: 'Open Zotero.', state: state1 })).noStreamRetries, 1);
 }
+{
+  // what code decided is saved at once; a change the model chose is shown first, and saved only on a yes
+  const seen = [], asked = [];
+  const tool = (n) => ({ execute: async (a) => { seen.push([n, a]); return `ok ${n}`; } });
+  let said = '';
+  const run = createLiteRunner({ tool, todos: async () => TODOS, readDaily: async () => '', now: () => NOW, said: () => said, planOf: async (d) => (d === 'today' ? PLAN : []), dueOf: async () => null });
+  const req = (s, answers, o = {}) => { said = s; const f = fake(answers); return liteRequest({ chat: f.chat, run, name: 'Office', model: 'm', said: s, state: state1, now: NOW, items: TODOS, ...o }).then((out) => ({ out, f })); };
+  const answer = (a) => async (p) => { asked.push(p.question); return a; };
+
+  // a reminder code reads whole: no model call
+  let { out, f } = await req('Remind me at half past four to pick up the parcel.', []);
+  assert.deepEqual([out.by, out.reply, f.bodies.length], ['code', 'I\'ll remind you to pick up the parcel at 16:30.', 0]);
+  assert.deepEqual(seen.pop(), ['remember_commitment', { text: 'pick up the parcel', due: '2026-11-25T16:30:00', kind: 'reminder' }]);
+  // one it can't read whole goes to the model, and "remind me" still decides: saved at once
+  ({ out, f } = await req('Remind me tomorrow to buy milk.', [{ calls: [['remember_commitment', { text: 'buy milk' }]] }], { confirm: answer(null) }));
+  assert.deepEqual([out.by, f.bodies.length, asked.length], ['tools', 1, 0]); assert.deepEqual(seen.pop(), ['remember_commitment', { text: 'buy milk', due: '2026-11-26', kind: 'reminder' }]);
+
+  // code decided a due time; the model chose to move the block: code's action runs, at once
+  ({ out } = await req('The grant report draft is now due on Tuesday.', [{ calls: [['move_block', { todo: 'Grant report draft' }]] }], { confirm: answer(null) }));
+  assert.deepEqual(seen.pop(), ['update_commitment', { id: 'p2x7', due: '2026-12-01' }]);
+  assert.deepEqual([out.by, out.reply, out.calls[0].by, asked.length], ['tools', '"Grant report draft" is now due on Tuesday 1 December.', 'code', 0]);
+
+  // the model chose: shown, and with no answer nothing is saved
+  ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }], { confirm: answer(null) }));
+  assert.deepEqual([out.by, out.reply, seen.length], ['unanswered', 'Nothing was changed.', 0]);
+  assert.equal(asked.pop(), 'Move the block for "Budget review" to tomorrow at 10:00?');
+  assert.deepEqual(out.shown, { tool: 'move_block', args: { todo: 'k3f9', date: 'tomorrow', start: '10:00' }, question: 'Move the block for "Budget review" to tomorrow at 10:00?' });
+  // a no: nothing saved
+  ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }], { confirm: answer(false) }));
+  assert.deepEqual([out.by, out.reply, seen.length], ['declined', 'Nothing was changed.', 0]);
+  // a yes: saved, then code's line
+  ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }], { confirm: answer(true) }));
+  assert.deepEqual(seen.pop(), ['move_block', { todo: 'k3f9', date: 'tomorrow', start: '10:00' }]); assert.equal(out.by, 'tools'); assert.equal(out.calls[0].answer, 'yes');
+  // an answer that fails (the bubble closed by an error) is no answer
+  ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }], { confirm: async () => { throw new Error('closed'); } }));
+  assert.deepEqual([out.by, seen.length], ['unanswered', 0]);
+  // without a way to ask, nothing the model chose is saved
+  ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }]));
+  assert.deepEqual([out.by, seen.length], ['unanswered', 0]);
+  // local.confirmChanges false: saved at once
+  asked.length = 0;
+  ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }], { confirm: answer(null), confirmChanges: false }));
+  assert.deepEqual([out.by, asked.length], ['tools', 0]); assert.equal(seen.pop()[0], 'move_block');
+  // a question about a time comes before any yes/no: nothing is shown
+  ({ out } = await req('Book the literature search on Monday.', [{ calls: [['schedule_block', { todo: 'literature search' }]] }], { confirm: answer(true) }));
+  assert.deepEqual([out.by, asked.length, seen.length], ['ask', 0, 0]);
+  // reads never ask
+  ({ out } = await req('What have I got on Friday?', [{ calls: [['show_day', {}]] }, { content: 'Nothing on Friday.' }], { confirm: answer(null) }));
+  assert.deepEqual([out.reply, asked.length], ['Nothing on Friday.', 0]); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
+  // with no tool called, a promise is replaced
+  ({ out } = await req('Remind me about the seminar.', [{ content: 'I will remember the seminar.' }]));
+  assert.deepEqual([out.by, out.reply], ['replaced', 'Nothing was changed.']);
+  assert.equal(seen.length, 0, 'nothing else ran');
+}
 console.log('lite tests passed');

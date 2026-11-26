@@ -2,8 +2,8 @@
 // results.
 import assert from 'node:assert/strict';
 import {
-  ACTION_OF, NOTHING_CHANGED, ONE_AT_A_TIME, PLACES, createRequestCheck, grouped, kindFor, lengthSaid, matchTitle, oneChange, placeTimes, readTimes,
-  reminderLine, startSaid, timesIn, unconfirmed, updateLine, whenLine, whenSaid,
+  ACTION_OF, DECIDED, NOTHING_CHANGED, ONE_AT_A_TIME, PLACES, changeQuestion, createRequestCheck, decideAction, grouped, kindFor, lengthSaid, matchTitle,
+  oneChange, placeTimes, promised, readTimes, reminderByCode, reminderLine, startSaid, timesIn, titleIn, unconfirmed, updateLine, whenLine, whenSaid,
 } from '../checks.mjs';
 
 const NOW = new Date(2026, 10, 25, 14, 5).getTime(); // a Wednesday
@@ -214,5 +214,89 @@ assert.equal(oneChange(['show_day', 'search_notes']), '');
   // other tools: the caller's own mapping to actions
   const c = createRequestCheck({ said: 'Remind me on Friday.', now: NOW, actionOf: (n) => (n === 'remind' ? 'remind' : 'none') });
   assert.deepEqual(c.place('remind', {}), { action: 'remind', places: due(at(27, 0), true) });
+}
+
+// ---- actions decided by code, from fixed words in his sentence: the table, row by row
+{
+  const OPEN = [{ id: 'k3f9', title: 'Budget review' }, { id: 'p2x7', title: 'Grant report draft' }, { id: 't5', title: 'Thesis chapter 2' }];
+  const D = (s) => { const d = decideAction(s, { items: OPEN, now: NOW }); return d ? `${d.action}${d.status ? `:${d.status}` : ''}${d.title ? `@${d.title.id}` : ''}` : null; };
+  assert.deepEqual(DECIDED.map((r) => r.action), ['remind', 'todo', 'due', 'mark', 'unbook', 'note', 'open']);
+  for (const [said, want] of [
+    // remind
+    ['Remind me at half past four to pick up the parcel.', 'remind'], ['Can you remind me tomorrow to call Bo?', 'remind'], ['Remind me by Friday to read the budget review.', 'remind@k3f9'],
+    // a new to-do, its due time from "by" or "due"
+    ['Add a to-do: finish the slides by Friday.', 'todo'], ['New task: order antibodies, due next Monday.', 'todo'], ['To-do: call the bank', 'todo'], ['Add a task to review the budget review notes', 'todo@k3f9'],
+    // a due time for an open to-do named in his sentence
+    ['The grant report draft is due on Tuesday.', 'due@p2x7'], ['The budget review is now due tomorrow at 10.', 'due@k3f9'], ['Grant report draft due by Monday', 'due@p2x7'],
+    ['The deadline for the thesis chapter 2 is the 4th of December.', 'due@t5'], ['Finish the budget review by Friday.', 'due@k3f9'], ['Get the grant report draft done by 5.', 'due@p2x7'],
+    ['Read chapter 2 by Monday.', null], ['The poster is due on Friday.', null], ['The grant report draft is due.', 'due@p2x7'],
+    // marked done
+    ['I\'m done with the budget review.', 'mark:done@k3f9'], ['Mark the grant report draft as done', 'mark:done@p2x7'], ['The budget review is done.', 'mark:done@k3f9'], ['I\'ve finished the thesis chapter', 'mark:done'],
+    // off the calendar
+    ['Take the grant report draft off the calendar.', 'unbook@p2x7'], ['Get the poster off my calendar', 'unbook'],
+    // a note
+    ['Note down that the reviewer wants more controls in figure 3.', 'note'], ['Make a note about the seminar: bring the HDMI adapter.', 'note'], ['Jot down the room number', 'note'],
+    // open an app
+    ['Open Zotero.', 'open'], ['Please open Mail', 'open'],
+    // no row: the model's choice, shown for a yes
+    ['Move the budget review to Friday at 3.', null], ['Push the grant report draft to Thursday.', null], ['Drop the budget review, I won\'t do it.', null], ['Book an hour for the literature search on Monday at 2.', null],
+    ['Schedule 45 minutes for the grant report draft tomorrow at 11.', null], ['What have I got on Friday?', null], ['Can you open the window?', null],
+    // two rows: doubt, nothing decided
+    ['Mark the budget review done and remind me at 5 to call home.', null], ['Remind me to make a note about the seminar', null], ['Add a to-do and open Zotero', null],
+  ]) assert.equal(D(said), want, said);
+  assert.equal(titleIn('Move the thesis chapter', OPEN), null, 'part of a title is not a title in his sentence');
+  assert.equal(titleIn('the budget review and the grant report draft', OPEN), null, 'two titles: neither');
+  assert.equal(titleIn('THE BUDGET REVIEW, please', OPEN).id, 'k3f9');
+
+  // a reminder code can make alone: a time it places and a text, in his own words
+  const RB = (s) => { const r = reminderByCode(s, { items: OPEN, now: NOW }); return r && [r.text, new Date(r.due.ms).toString().slice(0, 21)]; };
+  assert.deepEqual(RB('Remind me at half past four to pick up the parcel.'), ['pick up the parcel', 'Wed Nov 25 2026 16:30']);
+  assert.deepEqual(RB('Remind me in 20 minutes to call Anna.'), ['call Anna', 'Wed Nov 25 2026 14:25']);
+  assert.deepEqual(RB('Remind me tomorrow at 9 to send the invoice.'), ['send the invoice', 'Thu Nov 26 2026 09:00']);
+  assert.deepEqual(RB('Please remind me to call Anna at ten past 3.'), ['call Anna', 'Wed Nov 25 2026 15:10']);
+  assert.deepEqual(RB('Could you remind me on Monday at 11:30 to email Bo, thanks'), ['email Bo', 'Mon Nov 30 2026 11:30']);
+  assert.deepEqual(RB('Hey, remind me in half an hour to check the incubator!'), ['check the incubator', 'Wed Nov 25 2026 14:35']);
+  assert.equal(RB('Remind me tomorrow to buy milk.'), null, 'a day without a time: the model');
+  assert.equal(RB('Remind me to buy milk.'), null, 'no time');
+  assert.equal(RB('Remind me about the seminar at 4.'), null, '"about": the model');
+  assert.equal(RB('Remind me at 4 that the seminar is at 5.'), null);
+  assert.equal(RB('Remind me tomorrow morning to buy milk.'), null, 'a time word code can\'t place');
+  assert.equal(RB('Remind me next Monday at 9 to call Bo.'), null, 'which Monday is asked');
+  assert.equal(RB('Tell Anna to remind me at 4 to call.'), null, 'only polite words before "remind me"');
+  assert.equal(RB('Mark the budget review done and remind me at 5 to call home.'), null, 'two actions');
+
+  // what a change the model chose would save, said back by code
+  const Q = (tool, args, title) => changeQuestion({ tool, args, title, now: NOW });
+  assert.equal(Q('move_block', { todo: 'p2x7', date: 'tuesday', start: '09:00' }, 'Grant report draft'), 'Move the block for "Grant report draft" to Tuesday 1 December at 09:00?');
+  assert.equal(Q('move_block', { todo: 'p2x7', start: '16:30' }, 'Grant report draft'), 'Move the block for "Grant report draft" to 16:30?');
+  assert.equal(Q('move_block', { todo: 'k3f9', date: 'tomorrow', start: '10:00' }, 'Budget review'), 'Move the block for "Budget review" to tomorrow at 10:00?');
+  assert.equal(Q('move_block', { todo: 'k3f9', minutes: 90 }, 'Budget review'), 'Move the block for "Budget review" for 1 hour 30 minutes?');
+  assert.equal(Q('schedule_block', { title: 'poster draft', date: 'tomorrow', start: '14:00', end: '15:30' }), 'Book "poster draft" tomorrow from 14:00 to 15:30?');
+  assert.equal(Q('schedule_block', { todo: 't5', date: 'friday', start: '13:00', minutes: 120 }, 'Thesis chapter 2'), 'Book "Thesis chapter 2" on Friday 27 November at 13:00 for 2 hours?');
+  assert.equal(Q('schedule_block', { title: 'lit search', date: '2026-12-04', start: '09:00', minutes: 45 }), 'Book "lit search" on Friday 4 December at 09:00 for 45 minutes?');
+  assert.equal(Q('remember_commitment', { text: 'finish the slides', due: '2026-11-27', kind: 'commitment' }), 'Add the to-do "finish the slides", due on Friday 27 November?');
+  assert.equal(Q('remember_commitment', { text: 'call home', kind: 'commitment' }), 'Add the to-do "call home"?');
+  assert.equal(Q('remember_commitment', { text: 'call Anna', due: '2026-11-25T14:25:00', kind: 'reminder' }), 'Remind you to call Anna at 14:25?');
+  assert.equal(Q('update_commitment', { id: 'p2x7', due: '2026-12-01' }, 'Grant report draft'), 'Make "Grant report draft" due on Tuesday 1 December?');
+  assert.equal(Q('update_commitment', { id: 'k3f9', due: '2026-11-26T10:00:00' }, 'Budget review'), 'Make "Budget review" due tomorrow at 10:00?');
+  assert.equal(Q('update_commitment', { id: 'k3f9', status: 'dropped' }, 'Budget review'), 'Mark "Budget review" as dropped?');
+  assert.equal(Q('unschedule_block', { todo: 'p2x7' }, 'Grant report draft'), 'Take the block for "Grant report draft" off the calendar?');
+  assert.equal(Q('write_note', { title: 'Seminar', content: 'Bring the HDMI adapter.' }), 'Save the note "Seminar": "Bring the HDMI adapter."?');
+  assert.equal(Q('open', { target: 'Zotero' }), 'Open Zotero?');
+
+  // with no tool called, a reply may not promise or report an action
+  assert.deepEqual(promised('I will remember to pick up the parcel at half past four.'), ['I will remember to pick up the parcel at half past four.']);
+  assert.deepEqual(promised('Noted!'), ['Noted!']);
+  assert.deepEqual(promised('Sure. I\'ll book it.'), ['I\'ll book it.']);
+  assert.deepEqual(promised('I have added it.'), ['I have added it.']);
+  assert.deepEqual(promised('I cannot send emails for you.'), []);
+  assert.deepEqual(promised('I have no way to do that here.'), [], 'a negative sentence promises nothing');
+  assert.deepEqual(promised('Shall I put it on the calendar?'), []);
+  const c = createRequestCheck({ said: 'Remind me at half past four to pick up the parcel.', now: NOW });
+  assert.deepEqual(c.finish('I will remember to pick up the parcel at half past four.'), { reply: NOTHING_CHANGED, by: 'replaced', replaced: 1 });
+  const r = createRequestCheck({ said: 'What is on today?', now: NOW });
+  r.result('show_day', { ok: true, text: 'Today: lab meeting' });
+  assert.deepEqual(r.finish('You have the lab meeting; I\'ll keep an eye on it.').by, 'model', 'after a read, a promise is not checked: only claims are');
+  assert.equal(createRequestCheck({ said: 'Open Zotero.', now: NOW, items: OPEN }).decided.action, 'open');
 }
 console.log('checks tests passed');
