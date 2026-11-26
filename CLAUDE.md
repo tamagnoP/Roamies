@@ -158,6 +158,9 @@ The way of working from 2026-11-25 (the owner's decision):
 - **Branches.** `local-only` holds what has passed a test session. `next` holds the finished features waiting for
   one. Each new feature branches off `next`, named for the feature. (Feature 18's `daily-note` was made off
   `local-only` before `next` existed.) Do not commit to `main`, and do not force-push.
+- **Lessons first, for every feature** (feature 37). Read `LESSONS.md` in the repo root before planning. After each
+  mistake found in review or testing, add three lines to it (what went wrong, why, what to do differently) and
+  commit them with the fix.
 - **Plan first, for every feature.** The owner answers the plan. Then build the whole feature and report once, at
   the end. Stop and ask before that only when something in the plan doesn't hold, or a guarantee would change.
 - **One commit per coherent change**, with a plain message saying what changed. Push the feature's branch.
