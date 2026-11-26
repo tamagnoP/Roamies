@@ -1730,6 +1730,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   answers and bench sets saved to the reports folder and the repo before building; no download without asking;
   `~/.pi` off limits. Measured the same day: C 6 right; D 4 right, 2 asked; E 2 right, 3 asked, 1 wrong save: stopped.
 
+- **2026-11-26, later still (feature 23, the owner).** The checks (time words are his, nothing about time left out,
+  "remind me", no unconfirmed claims, code-worded confirmations after a change) go in a module of their own with
+  their tests, outside the local model's files: they take a request, the tool calls and the tool results, and know
+  nothing of the model. The Claude route will use it in a later feature; not wired into it now. Plan: `checks.mjs`
+  with `createRequestCheck`, `lite.mjs` keeping the prompt, tools, runner and request loop
+  (`~/Documents/roamies-reports/2026-11-26_1130_feature-23-checks-module-plan.md`). Done the same day: A and B
+  through the real model give the same outcomes, tool arguments and replies as before the move.
+
 ## 6. Still to test
 
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).

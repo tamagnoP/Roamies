@@ -4,7 +4,8 @@
 // Each task ends as one of: right (done right, or read right), asked (a code-worded question, nothing changed),
 // wrong save (a tool that changes something ran, and the task is not right), miss (anything else).
 import { chat } from '../../local.mjs';
-import { WRITE_TOOLS, createLiteRunner, liteRequest, liteState } from '../../lite.mjs';
+import { WRITE_TOOLS } from '../../checks.mjs';
+import { createLiteRunner, liteRequest, liteState } from '../../lite.mjs';
 import { liveCalls, liveCheck } from '../../localserver.mjs';
 import { NEEDS_CALL, SETS } from './sets.mjs';
 
