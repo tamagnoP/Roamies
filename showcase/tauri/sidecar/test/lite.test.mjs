@@ -1,8 +1,9 @@
 // Local-only build, feature 23: the lite request for the local model and the code check on its calls (lite.mjs).
 import assert from 'node:assert/strict';
 import {
-  LITE_NAMES, LITE_TOOLS, NOTHING_CHANGED, askTimeLine, createLiteRunner, isSaid, kindFor, liteBody, liteRequest, liteState, liteSystem,
-  refusedHint, startSaid, timeWordsIn, unconfirmed, unsaid, warmBody, whenSaid, whenLine,
+  LITE_NAMES, LITE_TOOLS, NOTHING_CHANGED, askMissingLine, askTimeLine, createLiteRunner, dayAndClock, isSaid, kindFor, lengthSaid, liteBody,
+  liteRequest, liteState, liteSystem, missingHint, missingTimes, refusedHint, startSaid, timeWordsIn, timesIn, unconfirmed, unsaid, warmBody,
+  whenSaid, whenLine,
 } from '../lite.mjs';
 
 const NOW = new Date(2026, 10, 25, 14, 5).getTime(); // a Wednesday
@@ -34,6 +35,34 @@ assert.deepEqual(timeWordsIn(book), ['monday', '2']);
 assert.match(refusedHint([{ field: 'start', value: '14:00' }], book, 'Office', 'schedule_block'), /^Refused, nothing was changed: start "14:00" is not Office's words\. Call schedule_block again now.*"monday", "2"/);
 assert.equal(askTimeLine([{ field: 'day', value: 'x' }]), 'Which day do you mean? Nothing was changed.');
 assert.equal(askTimeLine([{ field: 'start', value: 'x' }]), 'What time do you mean? Nothing was changed.');
+
+// ---- the completeness check: every time, day and length he said, found by code
+const T = (s) => timesIn(s, { now: NOW }).map((x) => `${x.kind}:${x.text}${x.minutes ? `=${x.minutes}` : ''}`);
+assert.deepEqual(T(book), ['length:an hour=60', 'day:monday', 'clock:2']);
+assert.deepEqual(T('Block tomorrow from 2 to half past three for the poster draft.'), ['day:tomorrow', 'clock:2', 'clock:half past three']);
+assert.deepEqual(T('Remind me in 20 minutes to call Anna.'), ['rel:in 20 minutes'], 'a time from now is one, not a length');
+assert.deepEqual(T('Note down that the reviewer wants more controls in figure 3.'), [], 'a bare number is a time only after "at", "from", "to" and the like');
+assert.deepEqual(T('New task: order antibodies, due next Monday.'), ['day:next monday']);
+assert.deepEqual(T('Move the lab meeting from Tuesday at 3 to Thursday at 4 for two hours'), ['day:tuesday', 'clock:3', 'day:thursday', 'clock:4', 'length:two hours=120']);
+assert.deepEqual(T('Remind me the day after tomorrow at noon'), ['day:day after tomorrow', 'clock:noon']);
+assert.deepEqual(T('read the second chapter by the 3rd of December at 4 pm'), ['day:3rd of december', 'clock:4 pm']);
+assert.deepEqual(T('I sat with Bo in the sun on Monday'), ['day:monday'], 'no short day names: "sat" and "sun" are words');
+assert.deepEqual(T('Remind me in an hour, and book 90 minutes at quarter to five'), ['rel:in an hour', 'length:90 minutes=90', 'clock:quarter to five']);
+assert.equal(lengthSaid('an hour and a half'), 90); assert.equal(lengthSaid('for 45 minutes'), 45); assert.equal(lengthSaid('half an hour'), 30); assert.equal(lengthSaid('two'), null);
+assert.deepEqual(missingTimes('schedule_block', { day: 'Monday', start: '2', title: 'x' }, book, { now: NOW }).map((x) => x.text), ['an hour']);
+assert.deepEqual(missingTimes('schedule_block', { day: 'Monday', start: '2', minutes: 60 }, book, { now: NOW }), [], 'a length is used by minutes equal to code\'s reading of it');
+assert.deepEqual(missingTimes('schedule_block', { day: 'Monday', start: '2', minutes: 30 }, book, { now: NOW }).map((x) => x.text), ['an hour']);
+assert.deepEqual(missingTimes('move_block', { todo: 'k3f9', start: '9' }, 'Push the budget review to Thursday at 9.', { now: NOW }).map((x) => x.text), ['thursday']);
+assert.deepEqual(missingTimes('move_block', { todo: 'p2x7', start: '5' }, 'Move the grant report draft from 3 to 5.', { now: NOW }).map((x) => x.text), ['3'], 'a move uses both times');
+assert.deepEqual(missingTimes('move_block', { todo: 'p2x7', from: '3', start: '5' }, 'Move the grant report draft from 3 to 5.', { now: NOW }), []);
+assert.deepEqual(missingTimes('remember_commitment', { text: 'x', when: 'monday' }, 'New task: x, due next Monday.', { now: NOW }).map((x) => x.text), ['next monday']);
+assert.deepEqual(missingTimes('show_day', { day: 'thursday' }, 'What is on Thursday at 9?', { now: NOW }), [], 'only what the tool can take');
+assert.deepEqual(missingTimes('write_note', { title: 't', content: 'c' }, 'Note: the meeting is on Friday at 3.', { now: NOW }), [], 'a tool with no time fields is not checked');
+assert.equal(missingHint([{ kind: 'length', text: 'an hour' }], 'Office', 'schedule_block'), 'Refused, nothing was changed: the call leaves out "an hour" (minutes, as a number) from Office\'s words. Call schedule_block again now with every time, day and length he said, copied exactly.');
+assert.equal(askMissingLine([{ text: 'thursday' }, { text: '9' }]), 'Nothing was changed: I couldn\'t use "thursday" and "9". Could you say it again?');
+assert.deepEqual(dayAndClock('thursday at 3'), { date: 'thursday', clock: '15:00' });
+assert.deepEqual(dayAndClock('3'), { date: undefined, clock: '15:00' });
+assert.equal(dayAndClock('the slides'), null);
 
 // ---- "remind me" decides the kind, in code
 assert.equal(kindFor('Remind me at 4 to call Anna'), 'reminder');
@@ -98,6 +127,20 @@ assert.deepEqual(unconfirmed('Saved. I\'ll remind you at four.', new Set()).leng
   assert.equal(r.say, '"Poster" is on the calendar.', 'the calendar\'s own line for him');
   r = await createLiteRunner({ tool: () => ({ execute: async () => { throw new Error('No commitment with id x9.'); } }), now: () => NOW })('update_commitment', { id: 'x9', status: 'done' });
   assert.deepEqual(r, { ok: false, text: 'No commitment with id x9.' });
+  // where it is now (`from`), checked against the calendar and the to-do's due time
+  seen.length = 0;
+  const plan = [{ todo: 'k3f9', start: at(25, 10), minutes: 60 }, { todo: 'p2x7', start: at(25, 15), minutes: 60 }];
+  const withPlan = createLiteRunner({ tool, now: () => NOW, planOf: async (d) => (d === 'today' ? plan : []), dueOf: async (id) => (id === 'c4' ? { ms: at(27, 0), dayOnly: true } : null) });
+  await withPlan('move_block', { from: '3', start: '5' }); assert.deepEqual(seen.pop(), ['move_block', { todo: 'p2x7', start: '17:00' }], 'the block at that time');
+  await withPlan('move_block', { todo: 'p2x7', from: 'at 3', start: '5' }); assert.deepEqual(seen.pop(), ['move_block', { todo: 'p2x7', start: '17:00' }]);
+  assert.deepEqual(await withPlan('move_block', { todo: 'k3f9', from: '3', start: '5' }), { ask: 'Which block do you mean? Nothing was changed.' }, 'the id and the time disagree');
+  assert.deepEqual(await withPlan('move_block', { from: '4', start: '5' }), { ask: 'Which block do you mean? Nothing was changed.' }, 'nothing there');
+  assert.deepEqual(await withPlan('move_block', { from: 'thursday', start: '5' }), { ask: 'Which block do you mean? Nothing was changed.' });
+  assert.deepEqual(await run('move_block', { todo: 'p2x7', from: '3', start: '5' }), { ask: 'Which block do you mean? Nothing was changed.' }, 'no calendar to check it against: asked');
+  await withPlan('update_commitment', { id: 'c4', from: 'friday', when: 'monday' }); assert.deepEqual(seen.pop(), ['update_commitment', { id: 'c4', due: '2026-11-30' }]);
+  assert.deepEqual(await withPlan('update_commitment', { id: 'c4', from: 'thursday', when: 'monday' }), { ask: 'Which to-do do you mean? Nothing was changed.' });
+  assert.deepEqual(await withPlan('update_commitment', { id: 'c4', from: 'friday at 3', when: 'monday' }), { ask: 'Which to-do do you mean? Nothing was changed.' }, 'it has no time');
+  assert.equal(seen.length, 0);
 }
 
 // ---- the request: a fake server answers in turn
@@ -129,6 +172,27 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   const hint = f.bodies[1].messages.at(-1);
   assert.equal(hint.role, 'tool'); assert.match(hint.content, /^Refused, nothing was changed: start "14:00"/);
   assert.equal(f.bodies[1].messages[1].content, f.bodies[0].transient_context, 'later calls carry his message as an ordinary one');
+}
+{
+  // a call that leaves out words he said: refused with the missing words named, then made whole
+  const said = 'Push the budget review to Thursday at 9.';
+  const f = fake([{ calls: [['move_block', { todo: 'k3f9', start: '9' }]] }, { calls: [['move_block', { todo: 'k3f9', day: 'Thursday', start: '9' }]] }]);
+  const ran = [];
+  const out = await liteRequest({ chat: f.chat, run: async (n, a) => { ran.push(a); return okRun(n, a); }, name: 'Office', model: 'm', said, state: state1, now: NOW });
+  assert.deepEqual([out.refusals, ran.length, ran[0].day, out.by], [1, 1, 'Thursday', 'tools']);
+  assert.deepEqual(out.calls[0].missing, ['thursday']);
+  assert.match(f.bodies[1].messages.at(-1).content, /^Refused, nothing was changed: the call leaves out "thursday" \(day\)/);
+  // left out twice: nothing is run, and a code-worded line asks him
+  const g = fake([{ calls: [['move_block', { todo: 'k3f9', start: '9' }]] }, { calls: [['move_block', { todo: 'k3f9', start: 'at 9' }]] }]);
+  let n = 0;
+  const out2 = await liteRequest({ chat: g.chat, run: async () => { n++; return { ok: true, text: '' }; }, name: 'Office', model: 'm', said, state: state1, now: NOW });
+  assert.deepEqual([out2.by, n], ['refused', 0]);
+  assert.equal(out2.reply, 'Nothing was changed: I couldn\'t use "thursday". Could you say it again?');
+  // one time unsaid and one left out: both in the hint; the second refusal for either check asks
+  const h = fake([{ calls: [['schedule_block', { day: 'Monday', start: '14:00', title: 'x' }]] }, { content: 'Done.' }]);
+  const out3 = await liteRequest({ chat: h.chat, run: okRun, name: 'Office', model: 'm', said: book, state: state1, now: NOW });
+  assert.match(h.bodies[1].messages.at(-1).content, /start "14:00" is not Office's words.*leaves out "an hour"/);
+  assert.deepEqual([out3.by, out3.reply], ['refused', 'What time do you mean? Nothing was changed.']);
 }
 {
   // refused twice: a code-worded line asks him, and nothing is run

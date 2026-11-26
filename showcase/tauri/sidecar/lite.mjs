@@ -6,6 +6,10 @@
 //   - A time or day argument must be words the owner said in that request (case, spacing and punctuation aside).
 //     Code parses them; the model never works out a date or a clock time. A call with a time he didn't say is refused
 //     with a code-worded hint and may be made again once; refused again, a code-worded line asks him for the time.
+//   - Every time, day and length he said that the tool can take has to be in the call (the completeness check): code
+//     finds them with the same parsers that read the arguments. A call that leaves one out is refused with a hint
+//     naming the missing words; refused again (by either check), nothing is run and a code-worded line asks him.
+//     A move from one time to another uses both: the old one in `from`, which code checks against the calendar.
 //   - "Remind me" makes a reminder and anything else a to-do: decided here, not by the model.
 //   - A reply that says something was done, moved, booked or saved without a tool result in that request confirming
 //     it is replaced by a code-worded line saying nothing was changed.
@@ -18,7 +22,7 @@ export const LITE_MAX_TOKENS = 200;
 export function liteSystem(name) {
   return `You are ${name}'s companion on his Mac, answering on the Mac itself while the main assistant is not in use. Answers are spoken: one or two short plain sentences, no lists, no markdown.
 You can only: keep his to-dos and reminders, put to-dos on his calendar and say what is on it, keep notes in his notes vault, read today's daily note when he asks for it, and open an app he names. Call a tool for each of these; never say something is done unless a tool's result says so.
-Give times and days exactly as he said them, copied from his words ("friday", "tomorrow at 10", "in 20 minutes", "half past four", "2"); the app works out dates and clock times. Use ids only from his message or a tool's result.
+Give times and days exactly as he said them, copied from his words ("friday", "tomorrow at 10", "in 20 minutes", "half past four", "2"), and leave none of them out; the app works out dates and clock times. Use ids only from his message or a tool's result.
 For anything else (files, coding, the web, the screen, drawing, clicking in apps) say in one sentence that you can't do that here, and do nothing.`;
 }
 
@@ -27,10 +31,10 @@ const S = { type: 'string' };
 /** The fixed tool set: names are the real names, bare. */
 export const LITE_TOOLS = [
   fn('remember_commitment', 'Save a to-do or a reminder, also when it has a deadline ("by friday", "due monday"). text: what to do. when: the time or deadline in his words, if any.', { text: S, when: S }, ['text']),
-  fn('update_commitment', 'Mark a to-do or reminder done or dropped, or change its time (when: in his words).', { id: S, status: { type: 'string', enum: ['done', 'dropped'] }, when: S }, ['id']),
+  fn('update_commitment', 'Mark a to-do or reminder done or dropped, or change its time (when: the new time, in his words; from: only when he says the old one).', { id: S, status: { type: 'string', enum: ['done', 'dropped'] }, when: S, from: S }, ['id']),
   fn('list_commitments', 'Find to-dos: words from a title, or a day in his words. Without either: how many are open.', { words: S, day: S }),
   fn('schedule_block', 'Put a to-do on the calendar as a block of time, only when he asks to put it on the calendar, book or schedule it. todo: its id if it has one; otherwise title, in his words. day and start: in his words. "from 10 to 11" is start "10" and end "11"; or give minutes.', { todo: S, title: S, day: S, start: S, end: { type: 'string', description: 'the end in his words, when he gave one ("from 10 to 11": end "11")' }, minutes: { type: 'integer' } }, ['day', 'start']),
-  fn('move_block', 'Move a block on the calendar. todo: the block\'s id. day: in his words, only if the day changes. start: the new start, in his words.', { todo: S, day: S, start: S, end: S, minutes: { type: 'integer' } }, ['todo']),
+  fn('move_block', 'Move a block on the calendar. todo: the block\'s id. day: in his words, only if the day changes. start: the new start, in his words. from: only when he says where it is now, in his words ("from 3 to 5": from "3", start "5"); otherwise leave it out.', { todo: S, day: S, start: S, end: S, minutes: { type: 'integer' }, from: S }, ['todo']),
   fn('unschedule_block', 'Take a to-do\'s block off the calendar.', { todo: S }, ['todo']),
   fn('show_day', 'What is on the calendar on a day (in his words).', { day: S }, ['day']),
   fn('write_note', 'Save a note. title: a few plain words. content: his words, tidied.', { title: S, content: S, append: { type: 'boolean' } }, ['title', 'content']),
@@ -42,7 +46,9 @@ export const LITE_TOOLS = [
 export const LITE_NAMES = LITE_TOOLS.map((t) => t.function.name);
 
 /** The fields that hold a time or a day, per tool. */
-export const TIME_FIELDS = { remember_commitment: ['when'], update_commitment: ['when'], list_commitments: ['day'], schedule_block: ['day', 'start', 'end'], move_block: ['day', 'start', 'end'], show_day: ['day'] };
+export const TIME_FIELDS = { remember_commitment: ['when'], update_commitment: ['when', 'from'], list_commitments: ['day'], schedule_block: ['day', 'start', 'end'], move_block: ['day', 'start', 'end', 'from'], show_day: ['day'] };
+/** What each tool can take of what he said: a day, a clock time, a time from now ("in 20 minutes"), a length. */
+export const TAKES = { remember_commitment: ['day', 'clock', 'rel'], update_commitment: ['day', 'clock', 'rel'], list_commitments: ['day'], show_day: ['day'], schedule_block: ['day', 'clock', 'length'], move_block: ['day', 'clock', 'length'] };
 const DAY_FIELDS = new Set(['day']);
 
 /** Words as they are compared: lower case, spacing and punctuation aside (a colon between digits stays: "16:30"). */
@@ -80,6 +86,79 @@ export function refusedHint(bad, said, name, tool = '') {
 export function askTimeLine(bad) {
   return bad.every((b) => DAY_FIELDS.has(b.field)) ? 'Which day do you mean? Nothing was changed.' : 'What time do you mean? Nothing was changed.';
 }
+// ---- the completeness check: every time, day and length he said ----
+const LEN_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, 'forty five': 45, fifty: 50, sixty: 60, ninety: 90 };
+const LEN_UNIT = { minute: 1, minutes: 1, min: 1, mins: 1, hour: 60, hours: 60, hr: 60, hrs: 60 };
+/** A length as said ("an hour", "90 minutes", "half an hour", "an hour and a half", "for two hours"). → minutes, or
+ *  null when it is not a length alone. */
+export function lengthSaid(text) {
+  const t = normal(text).replace(/^for /, '');
+  if (/^half an? hour$/.test(t)) return 30;
+  if (/^(?:a )?quarter of an hour$/.test(t)) return 15;
+  let m = /^(an?|one|two|three|four|\d{1,2}) hours? and a half$/.exec(t) ?? /^(one|two|three|four|\d{1,2}) and a half hours?$/.exec(t);
+  if (m) { const n = /^\d+$/.test(m[1]) ? +m[1] : LEN_NUM[m[1]]; return n ? n * 60 + 30 : null; }
+  m = /^(\d{1,3}|[a-z]+(?: five)?) (minutes?|mins?|hours?|hrs?)$/.exec(t);
+  if (!m) return null;
+  const n = /^\d+$/.test(m[1]) ? +m[1] : LEN_NUM[m[1]];
+  return n ? n * LEN_UNIT[m[2]] : null;
+}
+const HOUR_NAMES = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const FULL_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const MONTH_WORDS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const DAY_VOCAB = new Set(['today', 'tonight', 'tomorrow', 'next', 'the', 'of', 'day', 'after', 'st', 'nd', 'rd', 'th', ...FULL_DAYS, ...MONTH_WORDS]);
+const CLOCK_VOCAB = new Set(['half', 'past', 'quarter', 'to', 'am', 'pm', 'o', 'clock', 'oclock', 'noon', 'midday', 'in', 'the', 'morning', 'afternoon', 'evening', 'at', 'night', 'oh', 'fifteen', 'twenty', 'thirty', 'forty', ...HOUR_NAMES]);
+const isNum = (w) => /^\d{1,2}(?::\d{2})?$/.test(w);
+const isDayWord = (w) => DAY_VOCAB.has(w) || /^\d{1,2}(?:st|nd|rd|th)?$/.test(w);
+// A bare number ("2", "four") is a time only after one of these: "figure 3" is not a time.
+const BEFORE_A_TIME = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and']);
+// A span never starts with these: the words around a time are not part of it.
+const LEAD = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and', 'on', 'this', 'due', 'for', 'the', 'of', 'past', 'o', 'clock', 'am', 'pm']);
+/** The times, days and lengths in what he said, read by the parsers the tools use, in order.
+ *  → [{ kind: 'day' | 'clock' | 'rel' | 'length', text (his words), minutes (a length) }] */
+export function timesIn(said, { now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
+  const w = normal(said).split(' ').filter(Boolean), out = [];
+  for (let i = 0; i < w.length;) {
+    let found = null;
+    for (let n = Math.min(6, w.length - i); n >= 1 && !found; n--) {
+      const part = w.slice(i, i + n), span = part.join(' '), prev = w[i - 1] ?? '';
+      if (w[i] === 'in' && n > 1 && /^in /.test(span) && !/^in the /.test(span) && whenSaid(span, { now, dayStart, dayEnd })?.at != null) { found = { kind: 'rel', text: span, n }; break; }
+      if (LEAD.has(w[i]) && !(w[i] === 'the' && /^\d/.test(w[i + 1] ?? ''))) continue;
+      const len = prev === 'in' ? null : lengthSaid(span);
+      if (len) { found = { kind: 'length', text: span, minutes: len, n }; break; }
+      if (part.every(isDayWord) && !part.every((x) => /^\d+$/.test(x)) && (nextDays(span, now) || daySaid(span, { now }))) { found = { kind: 'day', text: span.replace(/^the (?=\d)/, ''), n }; break; }
+      if (part.every((x) => CLOCK_VOCAB.has(x) || isNum(x)) && startSaid(span, { dayStart, dayEnd })) {
+        const bare = n === 1 && (/^\d{1,2}$/.test(span) || HOUR_NAMES.includes(span));
+        if (!bare || BEFORE_A_TIME.has(prev)) found = { kind: 'clock', text: span, n };
+        break;
+      }
+    }
+    if (found) { out.push(found); i += found.n; delete found.n; } else i++;
+  }
+  return out;
+}
+/** What a call leaves out of what he said: each time, day and length its tool can take has to be in one of its time
+ *  fields (a length: `minutes` equal to code's reading of his words). → [{ kind, text, minutes }] */
+export function missingTimes(name, args, said, opts = {}) {
+  const takes = TAKES[name];
+  if (!takes) return [];
+  const values = (TIME_FIELDS[name] ?? []).map((f) => args?.[f]).filter((v) => v != null && String(v).trim() !== '').map(String);
+  return timesIn(said, opts).filter((x) => takes.includes(x.kind) && !values.some((v) => isSaid(x.text, v)) && !(x.kind === 'length' && args?.minutes === x.minutes));
+}
+const WHERE = {
+  remember_commitment: () => 'when', update_commitment: () => 'when',
+  list_commitments: () => 'day', show_day: () => 'day',
+  schedule_block: (k) => ({ day: 'day', clock: 'start or end', length: 'minutes, as a number' }[k]),
+  move_block: (k) => ({ day: 'day', clock: 'start, end or from', length: 'minutes, as a number' }[k]),
+};
+/** The code-worded hint for a call that leaves out words he said. */
+export function missingHint(miss, name, tool) {
+  const list = miss.map((x) => `"${x.text}" (${WHERE[tool]?.(x.kind) ?? 'its time fields'})`).join(', ');
+  return `Refused, nothing was changed: the call leaves out ${list} from ${name}'s words. Call ${tool} again now with every time, day and length he said, copied exactly.`;
+}
+const quoteList = (xs) => xs.map((x) => `"${x}"`).join(xs.length === 2 ? ' and ' : ', ');
+/** The code-worded line that asks him, after a second refusal for words left out. */
+export const askMissingLine = (miss) => `Nothing was changed: I couldn't use ${quoteList([...new Set(miss.map((x) => x.text))])}. Could you say it again?`;
+
 /** "Remind me" makes a reminder; anything else a to-do. */
 export const kindFor = (said) => (/\bremind me\b/.test(normal(said)) ? 'reminder' : 'commitment');
 
@@ -161,6 +240,21 @@ export function startSaid(text, opts = {}) {
   return m === null ? null : hhmm(m);
 }
 
+/** A day, a time or both as said ("thursday at 3", "3", "friday"). → { date (as daySaid gives it), clock (HH:MM) },
+ *  either may be missing, or null when it is neither. */
+export function dayAndClock(text, opts = {}) {
+  const w = normal(text).replace(/^(?:from|at|on)\s+/, '').split(' ').filter(Boolean);
+  for (let k = 0; k <= w.length; k++) {
+    const l = w.slice(0, k).join(' '), r = w.slice(k).join(' ');
+    for (const [ds, cs] of [[l, r], [r, l]]) {
+      const d = ds ? daySaid(ds, opts) : null, c = cs ? startSaid(cs, opts) : null;
+      if ((ds && !d) || (cs && !c) || (!d && !c)) continue;
+      return { date: d?.date, clock: c };
+    }
+  }
+  return null;
+}
+
 /** When a time falls, said back by code: "at 14:25", "tomorrow at 09:00", "on Friday 27 November", "on Friday 27
  *  November at 11:00". */
 export function whenLine(ms, dayOnly, now = Date.now()) {
@@ -177,9 +271,11 @@ export const WRITE_TOOLS = new Set(['remember_commitment', 'update_commitment', 
 
 /** Runs a lite call through the real tools, turning his words into what they take. tool(name) → the tool object
  *  ({ execute }); blocks: { schedule_block, move_block } → (args, signal) → { text, say } (the calendar's own line for
- *  him); titleOf(id) → a to-do's title; readDaily() → today's daily note as text.
+ *  him); titleOf(id) → a to-do's title; readDaily() → today's daily note as text; planOf(day, in the words the
+ *  calendar tools take) → that day's blocks [{ todo, start (ms), minutes }]; dueOf(id) → { ms, dayOnly } or null.
+ *  A `from` (where it is now) is checked against planOf or dueOf: without them, or when it doesn't match, he is asked.
  *  → { ok, text, say } (say: the line for him, for a tool that changes something) or { ask } (a code-worded line). */
-export function createLiteRunner({ tool, blocks = {}, titleOf = () => '', readDaily, now = () => Date.now(), hours = () => ({ dayStart: 540, dayEnd: 1080 }), said = () => '' }) {
+export function createLiteRunner({ tool, blocks = {}, titleOf = () => '', readDaily, now = () => Date.now(), hours = () => ({ dayStart: 540, dayEnd: 1080 }), said = () => '', planOf = null, dueOf = null }) {
   const fail = (e) => ({ ok: false, text: String(e?.message ?? e).slice(0, 600) });
   const run = async (name, args, signal) => {
     const t = tool(name);
@@ -203,6 +299,8 @@ export function createLiteRunner({ tool, blocks = {}, titleOf = () => '', readDa
     return v ? { v } : { ask: `What ${field === 'end' ? 'end ' : ''}time do you mean? Nothing was changed.` };
   };
   const quoted = (t) => `"${String(t).trim().replace(/^"|"$/g, '')}"`;
+  const given = (v) => v != null && String(v).trim() !== '';
+  const hm = (ms) => { const x = new Date(ms); return `${pad(x.getHours())}:${pad(x.getMinutes())}`; };
   return async function liteRun(name, a = {}, signal) {
     switch (name) {
       case 'remember_commitment': {
@@ -216,6 +314,12 @@ export function createLiteRunner({ tool, blocks = {}, titleOf = () => '', readDa
       case 'update_commitment': {
         const d = due(a.when); if (d.ask) return d;
         const id = String(a.id ?? '');
+        if (given(a.from)) {
+          const f = dayAndClock(a.from, { now: now(), ...hours() }), was = f && dueOf ? await dueOf(id) : null;
+          const day = f?.date ? whenSaid(f.date, { now: now(), ...hours() }) : null;
+          const same = was && f && (!f.date || (day?.day && ymd(day.day) === ymd(new Date(was.ms)))) && (!f.clock || (!was.dayOnly && hm(was.ms) === f.clock));
+          if (!same) return { ask: 'Which to-do do you mean? Nothing was changed.' };
+        }
         const r = await run(name, { id, ...(a.status ? { status: a.status } : {}), ...(d.due ? { due: d.due } : {}) }, signal);
         if (!r.ok) return r;
         const t = titleOf(id), what = t ? quoted(t) : 'It';
@@ -230,7 +334,14 @@ export function createLiteRunner({ tool, blocks = {}, titleOf = () => '', readDa
         const d = day(a.day); if (d.ask) return d;
         const s = clock(a.start, 'start'); if (s.ask) return s;
         const e = normal(a.end) && normal(a.end) === normal(a.start) ? { v: undefined } : clock(a.end, 'end'); if (e.ask) return e; // an end that is the start is no end
-        const args = { ...(a.todo ? { todo: String(a.todo) } : {}), ...(a.title ? { title: String(a.title) } : {}), ...(d.date ? { date: d.date } : {}), ...(s.v ? { start: s.v } : {}), ...(e.v ? { end: e.v } : {}), ...(Number.isInteger(a.minutes) && !e.v ? { minutes: a.minutes } : {}) };
+        let todo = a.todo ? String(a.todo) : '';
+        if (name === 'move_block' && given(a.from)) {
+          const f = dayAndClock(a.from, { now: now(), ...hours() });
+          const at = f && planOf ? (await planOf(f.date ?? 'today')).filter((b) => !f.clock || hm(b.start) === f.clock) : [];
+          if (todo ? !at.some((b) => b.todo === todo) : at.length !== 1) return { ask: 'Which block do you mean? Nothing was changed.' };
+          todo ||= at[0].todo;
+        }
+        const args = { ...(todo ? { todo } : {}), ...(a.title ? { title: String(a.title) } : {}), ...(d.date ? { date: d.date } : {}), ...(s.v ? { start: s.v } : {}), ...(e.v ? { end: e.v } : {}), ...(Number.isInteger(a.minutes) && !e.v ? { minutes: a.minutes } : {}) };
         if (name === 'schedule_block' && !args.date) return { ask: 'Which day do you mean? Nothing was changed.' };
         if (blocks[name]) { try { const r = await blocks[name](args, signal); return { ok: true, text: String(r?.text ?? ''), say: String(r?.say ?? r?.text ?? '') }; } catch (err) { return fail(err); } }
         const r = await run(name, args, signal);
@@ -270,7 +381,7 @@ const plainResult = (t) => String(t ?? '').replace(/\s*\[[A-Za-z0-9_-]{2,}\]/g, 
  *  server reuses the opening; later calls of the same request carry it as an ordinary message.
  *  → { reply, by ('model' | 'tools' | 'ask' | 'refused' | 'replaced' | 'steps' | 'empty'), calls: [{ name, args,
  *  refused, ok }], refusals, noStreamRetries, usage: [per model call], firstMs } */
-export async function liteRequest({ chat, run, name, model, said, state, history = [], maxSteps = 4 }) {
+export async function liteRequest({ chat, run, name, model, said, state, history = [], maxSteps = 4, now = Date.now(), hours = { dayStart: 540, dayEnd: 1080 } }) {
   const system = { role: 'system', content: liteSystem(name) }, newest = liteMessage({ name, said, state, history });
   const messages = [system, { role: 'user', content: newest }];
   const out = { reply: '', by: 'model', calls: [], refusals: 0, noStreamRetries: 0, usage: [], firstMs: null };
@@ -295,13 +406,13 @@ export async function liteRequest({ chat, run, name, model, said, state, history
         again = true;
         continue;
       }
-      const bad = unsaid(c.name, args, said);
-      if (bad.length) {
+      const bad = unsaid(c.name, args, said), miss = missingTimes(c.name, args, said, { now, ...hours });
+      if (bad.length || miss.length) {
         out.refusals++;
-        out.calls.push({ name: c.name, args, refused: true, ok: false, unsaid: bad.map((b) => b.field) });
-        out.lastBad = bad;
-        if (out.refusals >= 2) { stop = { by: 'refused', reply: askTimeLine(bad) }; messages.push({ role: 'tool', tool_call_id: c.id, content: 'Refused.' }); continue; }
-        messages.push({ role: 'tool', tool_call_id: c.id, content: refusedHint(bad, said, name, c.name) });
+        out.calls.push({ name: c.name, args, refused: true, ok: false, ...(bad.length ? { unsaid: bad.map((b) => b.field) } : {}), ...(miss.length ? { missing: miss.map((x) => x.text) } : {}) });
+        out.lastAsk = bad.length ? askTimeLine(bad) : askMissingLine(miss);
+        if (out.refusals >= 2) { stop = { by: 'refused', reply: out.lastAsk }; messages.push({ role: 'tool', tool_call_id: c.id, content: 'Refused.' }); continue; }
+        messages.push({ role: 'tool', tool_call_id: c.id, content: [bad.length ? refusedHint(bad, said, name, c.name) : '', miss.length ? missingHint(miss, name, c.name) : ''].filter(Boolean).join(' ') });
         again = true;
         continue;
       }
@@ -318,7 +429,7 @@ export async function liteRequest({ chat, run, name, model, said, state, history
     if (lines.length) out.done = [...(out.done ?? []), ...lines];
   }
   // Refused, and then no call he said the words for: a code-worded line asks him, not the model's own words.
-  if (out.lastBad && !out.calls.some((c) => !c.refused)) { out.by = 'refused'; out.reply = askTimeLine(out.lastBad); return out; }
+  if (out.lastAsk && !out.calls.some((c) => !c.refused)) { out.by = 'refused'; out.reply = out.lastAsk; return out; }
   if (!out.reply && lastRead) { out.by = 'empty'; out.reply = plainResult(lastRead); }
   const claims = unconfirmed(out.reply, confirmed);
   if (claims.length) { out.by = 'replaced'; out.replaced = claims.length; out.reply = NOTHING_CHANGED; }
