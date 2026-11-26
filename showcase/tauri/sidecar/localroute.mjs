@@ -82,9 +82,23 @@ export function createLocalRoute({ settings, userName = 'the user', tool, todos 
       return { problem: NOT_ANSWERING };
     }
     log('local_request', { ms: now() - t0, by: out.by, calls: out.calls.map((c) => c.name), steps: out.usage.length, firstMs: out.firstMs, retries: out.noStreamRetries });
-    if (out.reply) history.push({ said, reply: out.reply });
+    if (out.reply) history.push({ said, reply: out.reply, at: now(), private: !!priv });
     while (history.length > 20) history.shift();
     return out;
   }
-  return { request, ready: async () => (await ready()).problem ?? '', reset: () => { checked = null; }, history: () => [...history] };
+  /** One tool-less request (the handover's part two, a briefing, a summary of private exchanges): the fixed opening
+   *  is not used. kind: the ledger's. → the reply's text, or throws. */
+  async function oneShot({ kind, system, text, maxTokens = 400, private: priv = false, signal } = {}) {
+    const r = await ready();
+    if (r.problem) { if (r.retry) checked = null; throw new Error(r.problem); }
+    const address = localAddress(settings().local.address);
+    const res = await chatOnce({ address, signal, fetchImpl, stream: false, body: { model: r.model, temperature: 0, max_tokens: maxTokens, enable_thinking: false, messages: [{ role: 'system', content: system }, { role: 'user', content: text }] } });
+    record({ kind, where: 'mac', provider: 'local', model: r.model, private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } });
+    const out = String(res.content ?? '').trim();
+    if (!out) throw new Error('the local model gave no answer');
+    return out;
+  }
+  /** The private exchanges not yet summarised, and the mark that they are. */
+  const privateSince = (t) => history.filter((h) => h.private && h.at > t);
+  return { request, oneShot, privateSince, ready: async () => (await ready()).problem ?? '', reset: () => { checked = null; }, history: () => [...history] };
 }

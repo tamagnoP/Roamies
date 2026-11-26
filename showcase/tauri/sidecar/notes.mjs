@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { limitsFor, loadSettings, readState, writeState } from './pi.mjs';
-import { noteDay, ymd } from './daily.mjs';
+import { PRIVATE_LINE, noteDay, ymd } from './daily.mjs';
 
 // The sizes and counts are settings ("limits" in settings.json): noteMaxChars, the characters written or read in one
 // go; notesSearched, the notes looked through in a search; noteTitleOnlyBytes, over which a note is searched by its
@@ -253,6 +253,8 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
   }
 
   const text = (n) => { try { return n.titleOnly ? '' : fs.readFileSync(n.file, 'utf8'); } catch { return ''; } };
+  // Feature 23: for Claude's calls, a line from a private exchange (the daily note's PRIVATE_LINE) is not there.
+  const seen = (body, ctx) => (ctx?.seePrivate ? body : body.split('\n').filter((l) => !l.includes(PRIVATE_LINE)).join('\n'));
 
   const tools = [
     {
@@ -309,7 +311,7 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
         if (!terms.length) return `${notes.length} note${notes.length === 1 ? '' : 's'}. Most recently changed:\n${notes.sort((a, b) => b.mtime - a.mtime).slice(0, 20).map((n) => `- ${n.title} (${day(n.mtime)})`).join('\n')}${unseen}`;
         const scored = [];
         for (const n of notes) {
-          const body = text(n), title = n.title.toLowerCase(), lower = body.toLowerCase();
+          const body = seen(text(n), ctx), title = n.title.toLowerCase(), lower = body.toLowerCase();
           const hit = terms.filter((t) => title.includes(t) || lower.includes(t));
           if (!hit.length) continue;
           let score = hit.length * 100;
@@ -331,7 +333,7 @@ export function createNotes({ home = os.homedir(), userName = 'the user', log = 
       execute: async ({ title }, ctx) => {
         const { note, error } = find(all(vault()).filter((n) => ctx?.seePrivate || !privateFile(n.file)), title);
         if (error) throw new Error(error);
-        const body = fs.readFileSync(note.file, 'utf8'), most = limitsFor(home).noteMaxChars;
+        const body = seen(fs.readFileSync(note.file, 'utf8'), ctx), most = limitsFor(home).noteMaxChars;
         return `# ${note.title}\n\n${body.length > most ? `${body.slice(0, most)}\n[Cut off: the note is longer than this.]` : body}`;
       },
     },

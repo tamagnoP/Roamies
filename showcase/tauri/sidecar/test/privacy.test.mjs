@@ -64,5 +64,12 @@ assert.match(await tool('read_note').execute({ title: 'Clinic' }, { seePrivate: 
 // lifted: Claude sees it
 fs.writeFileSync(path.join(vault, 'Clinic.md'), unmarkNote(fs.readFileSync(path.join(vault, 'Clinic.md'), 'utf8')));
 assert.match(await tool('search_notes').execute({ query: 'results' }), /^- Clinic/);
+// a daily note's lines from private exchanges (%%private%%): not there for Claude, there for the local route
+fs.mkdirSync(path.join(vault, 'Daily'), { recursive: true });
+fs.writeFileSync(path.join(vault, 'Daily', '2026-11-26.md'), '# Thursday\n### Private, summarised by the local model\n- Asked about the oncology results. %%private%%\n### Log\n- Met Bo about results.\n');
+const found = await tool('search_notes').execute({ query: 'results' });
+assert.doesNotMatch(found, /oncology/); assert.match(found, /Met Bo about results/);
+assert.doesNotMatch(await tool('read_note').execute({ title: '2026-11-26' }), /oncology/);
+assert.match(await tool('read_note').execute({ title: '2026-11-26' }, { seePrivate: true }), /oncology/);
 fs.rmSync(home, { recursive: true, force: true });
 console.log('privacy tests passed');

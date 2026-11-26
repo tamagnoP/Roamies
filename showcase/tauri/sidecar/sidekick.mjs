@@ -1315,6 +1315,56 @@ async function localPrompt(text, byVoice, why, priv) {
     busy = false; menu();
     flow.settle(whenPlayed(speech.mark()));
   }
+  // Answer 9: Claude can't be reached and the day has turned: the local model writes part two, after the answer.
+  if (why === 'offline') running = running.then(() => localDayTurn()).catch((e) => console.error('local handover', e));
+}
+/** The day turned while Claude can't be reached (the owner's answer 9): part one by code as always; part two by the
+ *  local model, from that day's local exchanges (not the private ones) and as much of the end of the old conversation
+ *  as fits, marked in the note as the local model's and not redone later; then the new conversation starts. */
+const LOCAL_PART_TWO_CHARS = 6000;
+async function localDayTurn() {
+  let need;
+  try { need = session ? handover.needed(session) : null; } catch { return; }
+  if (!need) return;
+  summarisePrivate(need.key).catch((e) => console.error('private summary', e));
+  if (need.kind === 'quiet') { const msg = handover.message(); freshSession(null); handover.given(); if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }]; logLine('handover_new', { from: 'quiet', by: 'local' }); return; }
+  const old = session, key = need.key, t0 = Date.now();
+  if (!handover.partOneDone(old.id, key) && dailyDo('handover', () => daily.handoverPartOne(key, { pending: flow.pending(), kept: cal.kept(), link: (id, title) => notes.pages.link(id, title) }))) handover.markPartOne(old.id, key);
+  let two;
+  try {
+    const known = new Set(todoItems().map((t) => t.id));
+    const mine = localRoute.history().filter((h) => !h.private).map((h) => `${userName}: ${h.said}\nYou: ${h.reply}`).join('\n');
+    const theirs = transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote);
+    const turns = [theirs.slice(-Math.max(0, LOCAL_PART_TWO_CHARS - mine.length)), mine].filter(Boolean).join('\n');
+    two = parsePartTwo(await localRoute.oneShot({ kind: 'handover', system: handoverPrompt(userName), text: handoverInput({ turns, items: handover.openItems() }), maxTokens: 600 }), { known: (id) => known.has(id) });
+  } catch (e) { logLine('handover_failed', { by: 'local', ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 200) }); return; }
+  const msg = handover.finish(key, two);
+  dailyDo('handover', () => daily.handoverPartTwo(key, { decided: two.decided, items: handover.openItems(), remember: two.remember, by: 'local' }));
+  logLine('handover', { by: 'local', ms: Date.now() - t0, decided: two.decided.length, open: two.open.length, remember: two.remember.length });
+  freshSession('day');
+  if (msg) session.messages = [{ role: 'user', content: forClaude(msg) }];
+}
+/** The private exchanges since the last summary, summarised by the local model only, into the daily note with the
+ *  private mark (daily.privateLines). Never by Claude: when the local model can't be reached they wait. */
+async function summarisePrivate(key) {
+  const dir = settingsNow().dir, since = Number(readState(dir).privateSummarisedAt) || 0, list = localRoute.privateSince(since);
+  if (!list.length) return;
+  const text = list.map((h) => `${userName}: ${h.said}\nYou: ${h.reply}`).join('\n');
+  const out = await localRoute.oneShot({ kind: 'handover', private: true, system: `Summarise these private exchanges between ${userName} and their companion in at most three short plain lines, one per line, without dashes: what was decided or asked. Nothing else.`, text, maxTokens: 200 });
+  const lines = out.split('\n').map((l) => l.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean).slice(0, 3);
+  dailyDo('private', () => daily.privateLines(key, lines));
+  writeState(dir, { ...readState(dir), privateSummarisedAt: list.at(-1).at });
+}
+/** A briefing while Claude isn't used (no network, or private mode): worded by the local model from the same
+ *  outline, said with the "local" tag. */
+async function localBriefing(briefing, byVoice) {
+  try {
+    const kind = briefing?.kind === 'evening' ? 'evening' : 'morning';
+    const text = await localRoute.oneShot({ kind: 'briefing', private: privateMode(), system: `Word ${userName}'s short spoken ${kind} briefing from the app's outline below: two or three plain sentences, no lists, nothing that isn't in it.`, text: cal.outline(), maxTokens: 160 });
+    ui({ kind: 'say', text: sir(text), mood: 'happy', tag: privateMode() ? PRIVATE_TAG : LOCAL_TAG });
+    if (byVoice || flow.spoken() || VOICE_ON()) voiceLine(forVoice(text));
+    logLine('briefing_local', { kind });
+  } catch (e) { logLine('briefing_failed', { by: 'local', error: String(e?.message ?? e).slice(0, 160) }); }
 }
 let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
 function recordRequest() {
@@ -1400,6 +1450,7 @@ async function dayTurn(byVoice) {
     return true;
   }
   const old = session, key = need.key, t0 = Date.now();
+  summarisePrivate(key).catch((e) => console.error('private summary', e)); // feature 23: by the local model only
   if (!handover.partOneDone(old.id, key) && dailyDo('handover', () => daily.handoverPartOne(key, { pending: flow.pending(), kept: cal.kept(), link: (id, title) => notes.pages.link(id, title) }))) handover.markPartOne(old.id, key);
   const line = oneMoment(key, need.today);
   say(line, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(line));
@@ -1440,7 +1491,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   const local = settingsNow().local, priv = privateThis || privateMode();
   const route = ownAsk ? routeFor({ privateMode: privateMode(), privateThis, offline: offlineNow(), local }) : priv || (offlineNow() && local.address && local.whenOffline) ? 'skip' : 'claude';
   if (route === 'none') { logLine('private_unsent', {}); aloud('Private: the local model is off (local.address), so nothing was sent anywhere.', 'concerned'); flow.settle(); return; }
-  if (route === 'skip') { logLine('local_system_skipped', { kind: briefing ? 'briefing' : kind }); return; } // an instruction for Claude while it isn't used: not sent
+  if (route === 'skip' && briefing) return localBriefing(briefing, byVoice); // answer 9: worded by the local model
+  if (route === 'skip') { logLine('local_system_skipped', { kind }); return; } // an instruction for Claude while it isn't used: not sent
   if (route === 'local') return localPrompt(text, byVoice, priv ? 'private' : 'offline', priv);
   const backLine = announcer.before('claude');
   if (backLine) { say(backLine, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(backLine)); }

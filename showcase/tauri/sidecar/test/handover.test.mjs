@@ -132,6 +132,12 @@ for (const [k, d] of logs) assert.ok(!/venue|reagents|parking|Bo/i.test(JSON.str
 ### Worth remembering
 - Nothing.
 `), fs.readFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'utf8').slice(-400));
+  // feature 23: part two by the local model says so; private exchanges' lines carry the private mark
+  d.handoverPartTwo('2026-11-26', { decided: ['Keep the venue.'], items: [], remember: [], by: 'local' });
+  assert.ok(fs.readFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'utf8').endsWith(`\n_Part two written by the local model on this Mac: Claude couldn't be reached._\n### Decided\n- Keep the venue.\n### Left open\n- Nothing.\n### Worth remembering\n- Nothing.\n`));
+  assert.equal(d.privateLines('2026-11-26', []), false);
+  d.privateLines('2026-11-26', ['Asked about the clinic results.', 'Will call on Monday.']);
+  assert.ok(fs.readFileSync(path.join(vault, 'Daily', '2026-11-26.md'), 'utf8').endsWith('### Private, summarised by the local model\n- Asked about the clinic results. %%private%%\n- Will call on Monday. %%private%%\n'));
   // a quiet day: one line
   d.handoverPartOne('2026-11-25', {});
   assert.equal(fs.readFileSync(path.join(vault, 'Daily', '2026-11-25.md'), 'utf8'), '---\ndate: 2026-11-25\n---\n\n# Wednesday 25 November 2026\n\n← [[2026-11-24]] · [[2026-11-26]] →\n\n## Handover (written Friday 27 November, 09:12)\n- Nothing changed on the list, no question is waiting, and no block is kept.\n', 'a day with no note yet gets one, without a Plan');

@@ -57,6 +57,8 @@ const LEAVE = only(LEAVE_WORDS), DROP = only(DROP_WORDS);
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n) => String(n).padStart(2, '0');
+/** Feature 23: the mark on a line of the daily note that comes from a private exchange. */
+export const PRIVATE_LINE = '%%private%%';
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const dayLong = (d) => `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}`;
@@ -527,11 +529,20 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     return true;
   }
   /** Part two, under its fixed headings; Left open is every open item, oldest first, as a checkbox with its id. */
-  function handoverPartTwo(key, { decided = [], items = [], remember = [] } = {}) {
+  function handoverPartTwo(key, { decided = [], items = [], remember = [], by = '' } = {}) {
     const list = (xs) => (xs.length ? xs.map((x) => `- ${oneLine(x)}`) : ['- Nothing.']);
     const since = (k) => { const [y, m, dd] = String(k).split('-').map(Number); return y ? dayLong(new Date(y, m - 1, dd)) : k; };
-    section(key, `${['### Decided', ...list(decided), '### Left open', ...(items.length ? items.map((i) => `- [ ] ${oneLine(i.text)} (since ${since(i.day)}) ^${i.id}`) : ['- Nothing.']), '### Worth remembering', ...list(remember)].join('\n')}\n`);
+    // Feature 23: part two written by the local model, when Claude couldn't be reached, says so.
+    section(key, `${[...(by === 'local' ? ['_Part two written by the local model on this Mac: Claude couldn\'t be reached._'] : []), '### Decided', ...list(decided), '### Left open', ...(items.length ? items.map((i) => `- [ ] ${oneLine(i.text)} (since ${since(i.day)}) ^${i.id}`) : ['- Nothing.']), '### Worth remembering', ...list(remember)].join('\n')}\n`);
     log('daily_handover', { part: 2, decided: decided.length, open: items.length, remember: remember.length });
+    return true;
+  }
+  /** Feature 23: the private exchanges of a day, summarised by the local model only: lines carrying the private mark
+   *  (PRIVATE_LINE, an Obsidian comment), which Claude's note tools leave out (notes.mjs). */
+  function privateLines(key, lines) {
+    if (!lines.length) return false;
+    section(key, `${['### Private, summarised by the local model', ...lines.map((l) => `- ${oneLine(l)} ${PRIVATE_LINE}`)].join('\n')}\n`);
+    log('daily_private', { lines: lines.length });
     return true;
   }
   /** Lines for today's Log (feature 18: open items closed or let go). */
@@ -569,5 +580,5 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     log('plan_ticked', { todos: ticked.length });
     return ticked.length;
   }
-  return { tick, noted, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, logged, today, planFor, state: get };
+  return { tick, noted, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, privateLines, logged, today, planFor, state: get };
 }

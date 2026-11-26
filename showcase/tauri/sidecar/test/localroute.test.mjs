@@ -48,6 +48,15 @@ s = settings({ confirmChanges: false }); answer = null; asked.length = 0;
 fake.answers.push({ calls: [['move_block', { todo: 'Budget review' }]] });
 await route.request('Move the budget review to tomorrow at 10.');
 assert.equal(asked.length, 0); assert.equal(ran.pop()[0], 'move_block');
+// a tool-less request (part two, a briefing, a private summary): no tools, its own ledger kind, private when it is
+fake.answers.push({ content: 'You have three to-dos and two blocks today.' });
+assert.equal(await route.oneShot({ kind: 'briefing', system: 'Word the briefing.', text: 'the outline', maxTokens: 120 }), 'You have three to-dos and two blocks today.');
+assert.equal(fake.requests.at(-1).tools, undefined); assert.equal(fake.requests.at(-1).max_tokens, 120);
+assert.deepEqual([lines.at(-1).kind, lines.at(-1).where], ['briefing', 'mac']);
+fake.answers.push({ content: 'Asked about the results.' });
+await route.oneShot({ kind: 'handover', private: true, system: 's', text: 't' });
+assert.equal(lines.at(-1).private, true);
+assert.deepEqual(route.privateSince(0), [], 'no private exchange in this route yet');
 await fake.close();
 // the server gone: a code-worded line, nothing sent anywhere else
 out = await createLocalRoute({ settings: () => s, tool, todos: () => TODOS, now: () => NOW }).request('Hi.');
