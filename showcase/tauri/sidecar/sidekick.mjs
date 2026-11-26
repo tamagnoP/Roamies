@@ -40,6 +40,7 @@ import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
+import { SHORT, leanTools } from './lean.mjs';
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -586,6 +587,7 @@ pageRebuild = createPageRebuild({
 });
 setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
 tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...cal.tools, ...flow.tools, ...handover.tools])); // Local-only build: cal, flow, the open items (feature 18)
+leanTools(tools, { describe: SHORT(userName) }); // Local-only build (feature 23, stage 1): short schemas for every model, our own descriptions in shorter words (lean.mjs)
 
 // ---------- local-only build (feature 33): stand down (standdown.mjs) ----------
 // The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
