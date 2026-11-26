@@ -1,7 +1,11 @@
 // Local-only build, feature 23: the one address of the local model, the guarded fetch, the chat call (local.mjs).
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { chat, guardedFetch, localAddress, probe } from '../local.mjs';
+import { LOCAL, LOCAL_START, loadSettings, settingsDefaults } from '../pi.mjs';
 
 // ---- only http://127.0.0.1:<port>, with or without /v1
 assert.equal(localAddress('http://127.0.0.1:8080'), 'http://127.0.0.1:8080/v1');
@@ -51,4 +55,30 @@ assert.deepEqual(await probe(address), ['gemma-4-e4b']);
 server.close();
 assert.equal(await probe(address, { ms: 300 }), null, 'nothing answering');
 await assert.rejects(chat({ address: 'http://example.com', body: {} }), /no address/);
+
+// ---- the settings: "local" and "local.start"
+{
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'local-home-')));
+  const file = path.join(home, 'Documents', 'roamies-pi', 'settings.json');
+  loadSettings(home);
+  const made = JSON.parse(fs.readFileSync(file, 'utf8')), put = (o) => fs.writeFileSync(file, JSON.stringify(o));
+  assert.deepEqual(settingsDefaults(home).local, { address: '', model: '', whenOffline: true, historyExchanges: 4, maxSteps: 4, confirmChanges: true, start: { python: '', model: 'e4b', port: 8080, sleepAfterMinutes: 10, draft: true } });
+  assert.deepEqual(loadSettings(home).local, made.local);
+  for (const [name, list] of Object.entries({ address: ['http://localhost:8080', 'https://127.0.0.1:8080', 'http://192.168.1.4:8080', 42], model: ['a b', 7], whenOffline: ['yes'], historyExchanges: [-1, 21, 2.5], maxSteps: [0, 9], confirmChanges: [0, 'false', null], start: [null, 'x', []] })) for (const v of list) {
+    put({ ...made, local: { ...made.local, [name]: v } });
+    assert.deepEqual(loadSettings(home).invalid, [{ name: `local.${name}`, using: LOCAL[name].default }], `local.${name}: ${JSON.stringify(v)} is out`);
+  }
+  for (const [name, list] of Object.entries({ python: ['python3', 'relative/py', 5], model: ['qwen', 'E4B'], port: [80, 70000, 8080.5], sleepAfterMinutes: [-1, 1441], draft: ['on'] })) for (const v of list) {
+    put({ ...made, local: { ...made.local, start: { ...made.local.start, [name]: v } } });
+    assert.deepEqual(loadSettings(home).invalid, [{ name: `local.start.${name}`, using: LOCAL_START[name].default }], `local.start.${name}: ${JSON.stringify(v)} is out`);
+  }
+  put({ ...made, local: { ...made.local, address: 'http://127.0.0.1:8099', confirmChanges: false, start: { ...made.local.start, python: '/opt/x/bin/python', model: 'e2b', draft: false } } });
+  const s = loadSettings(home);
+  assert.deepEqual([s.missing, s.invalid], [[], []]);
+  assert.deepEqual([s.local.address, s.local.confirmChanges, s.local.start.model, s.local.start.draft], ['http://127.0.0.1:8099/v1', false, 'e2b', false], 'the address in its one form');
+  const { confirmChanges, ...less } = made.local, { port, ...lessStart } = made.local.start;
+  put({ ...made, local: { ...less, start: lessStart } });
+  assert.deepEqual(loadSettings(home).missing, ['local.confirmChanges', 'local.start.port']); assert.equal(loadSettings(home).local.confirmChanges, true, 'missing: the default, true');
+  fs.rmSync(home, { recursive: true, force: true });
+}
 console.log('local tests passed');

@@ -25,6 +25,7 @@ import { DONE_WORDS, GO_WORDS, HANDOVER_WORDS, HEADINGS, KEEP_WORDS, LINE_CHARS,
 import { STAND_CAUGHT, STAND_FILL } from './standdown.mjs'; // feature 33: shown in settings.default.json
 import { QUEUE_ORDER, WAITING_PHRASES, WHY } from './quiet.mjs'; // feature 31: shown in settings.default.json
 import { CHECK_AGAIN_TIMES, DONE_WORDS as CHECK_DONE_WORDS, NOT_YET_WORDS, STILL_WORDS } from './checkin.mjs'; // feature 25: shown in settings.default.json
+import { localAddress } from './local.mjs'; // feature 23: the one address the local model may have
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -362,12 +363,34 @@ export const SPEAKING = {
   awayMinutes: { default: 10, min: 0, max: 240, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 240 },
   quietInCalls: { ...onOff },
 };
-function partDefaults(table) { return Object.fromEntries(Object.entries(table).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : v.default])); }
+/** Feature 23: the parts of "local", the local model. address: "" (off) or http://127.0.0.1:<port>/v1, nothing else;
+ *  model: the model's id as the server lists it ("" for the first it lists); whenOffline: used when the provider
+ *  can't be reached; historyExchanges: its own last exchanges it is given; maxSteps: tool steps in one request;
+ *  confirmChanges: a change the model chose is shown for a yes before it is saved (false: saved at once); start: how
+ *  Roamies starts the server itself (LOCAL_START). */
+export const LOCAL_MODELS = ['e4b', 'e2b'];
+export const LOCAL_START = {
+  python: { default: '', ok: (v) => v === '' || (text(1000)(v) && v.startsWith('/')) },
+  model: { default: 'e4b', ok: (v) => LOCAL_MODELS.includes(v) },
+  port: { default: 8080, min: 1024, max: 65535, ok: (v) => Number.isInteger(v) && v >= 1024 && v <= 65535 },
+  sleepAfterMinutes: { default: 10, min: 0, max: 1440, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 1440 },
+  draft: { default: true, ok: (v) => typeof v === 'boolean' },
+};
+export const LOCAL = {
+  address: { default: '', ok: (v) => v === '' || (typeof v === 'string' && localAddress(v) !== null) },
+  model: { default: '', ok: (v) => v === '' || (text(200)(v) && /^[\w./:@-]+$/.test(v)) },
+  whenOffline: { default: true, ok: (v) => typeof v === 'boolean' },
+  historyExchanges: { default: 4, min: 0, max: 20, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 20 },
+  maxSteps: { default: 4, min: 1, max: 8, ok: (v) => Number.isInteger(v) && v >= 1 && v <= 8 },
+  confirmChanges: { default: true, ok: (v) => typeof v === 'boolean' },
+  start: { default: null, ok: (v) => v !== null && typeof v === 'object' && !Array.isArray(v) },
+};
+function partDefaults(table) { return Object.fromEntries(Object.entries(table).map(([k, v]) => [k, Array.isArray(v.default) ? [...v.default] : table === LOCAL && k === 'start' ? partDefaults(LOCAL_START) : v.default])); }
 const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, v.default]));
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, measurePageRebuild: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -425,6 +448,7 @@ const CLEAN = {
   persona: when(isObj),
   standDown: when(isObj),
   speaking: when(isObj),
+  local: when(isObj),
   limits: when(isObj),
   calendar: when(isObj),
 };
@@ -503,7 +527,7 @@ export function loadSettings(home) {
   }
   // kokoro, persona, standDown (feature 33) and speaking (features 25 and 31): part by part, the same way.
   const parts = {};
-  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['persona', set.persona, PERSONA], ['standDown', set.standDown, STAND_DOWN], ['speaking', set.speaking, SPEAKING]]) {
+  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['persona', set.persona, PERSONA], ['standDown', set.standDown, STAND_DOWN], ['speaking', set.speaking, SPEAKING], ['local', set.local, LOCAL]]) {
     parts[group] = partDefaults(table);
     if (given === defaults[group]) continue;
     for (const name of Object.keys(table)) {
@@ -513,6 +537,16 @@ export function loadSettings(home) {
     }
   }
   parts.kokoro.python = parts.kokoro.python.trim(); // as written: it is used only if it is a full path (kokorovoice.mjs)
+  // Feature 23: local.start, part by part, the same way; local.address as the one form it may take.
+  { const given = parts.local.start, start = partDefaults(LOCAL_START);
+    if (set.local !== defaults.local && given !== null && typeof given === 'object') {
+      for (const name of Object.keys(LOCAL_START)) {
+        if (!Object.hasOwn(given, name)) missing.push(`local.start.${name}`);
+        else if (!LOCAL_START[name].ok(given[name])) invalid.push({ name: `local.start.${name}`, using: LOCAL_START[name].default });
+        else start[name] = given[name];
+      }
+    }
+    parts.local.start = start; parts.local.address = parts.local.address ? localAddress(parts.local.address) : ''; }
   const calendar = { dayStart: clock(cal.dayStart), dayEnd: clock(cal.dayEnd), lunch: cal.lunch?.length ? cal.lunch.map(clock) : null, gapMinutes: cal.gapMinutes, syncSeconds: cal.syncSeconds, dayTurnsAt: clock(cal.dayTurnsAt), reviewAt: cal.reviewAt === '' ? null : clock(cal.reviewAt) };
   // projects: a list of folders (named by their last part), or { name: folder }.
   const listed = Array.isArray(set.projects) ? set.projects.map((p) => [base(expand(p, home)), p]) : Object.entries(set.projects);
@@ -543,7 +577,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, measurePageRebuild: set.measurePageRebuild, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -1119,6 +1153,7 @@ export function codeReference() {
     kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts', sleepAfterMinutes: { min: KOKORO.sleepAfterMinutes.min, max: KOKORO.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps', wakes: `on the talk key, an answer window, a spoken request, and ${WAKE_BEFORE_BRIEFING_MINUTES} minutes before a briefing; meanwhile the Mac's voice speaks` } },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],
+    localRanges: { address: '"" (off) or http://127.0.0.1:<port>/v1 (port 1024 to 65535); no other host, name or https', model: 'the id the server lists, or "" for the first one', historyExchanges: { min: LOCAL.historyExchanges.min, max: LOCAL.historyExchanges.max, wholeNumber: true }, maxSteps: { min: LOCAL.maxSteps.min, max: LOCAL.maxSteps.max, wholeNumber: true }, confirmChanges: 'true: a change the local model chose is shown as a question and saved only on a yes; what code decided from fixed words is saved at once either way', start: { python: 'a full path to the Python that has mlx-vlm, or "" (Roamies starts no server)', model: [...LOCAL_MODELS], port: { min: LOCAL_START.port.min, max: LOCAL_START.port.max, wholeNumber: true }, sleepAfterMinutes: { min: 0, max: LOCAL_START.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps' }, draft: 'the pinned drafter, when its files are on this Mac; never downloaded' } },
     calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max }, dayTurnsAt: 'HH:MM, not after dayStart: when one day\'s note ends and the next one\'s starts', reviewAt: 'HH:MM, or "" for only when asked; when it is missing it is dayEnd\'s value' },
     superProductivity: {
       address: `http://${SP.host}:${SP.port}`, tokenFile: `${h}/${SP.tokenFile}`, tokenKept: 'read from that file for each request; never stored, logged or shown',

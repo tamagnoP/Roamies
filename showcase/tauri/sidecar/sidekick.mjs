@@ -42,6 +42,7 @@ import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
 import { SHORT, leanTools } from './lean.mjs';
 import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
+import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -1222,6 +1223,21 @@ const usageToday = { day: '', requests: 0, tokens: 0 };
 // Local-only build (feature 32): the ledger, beside usage.jsonl: one line per request to any model, never its content.
 const ledger = createLedger({ file: path.join(path.dirname(USAGE_FILE), 'ledger.jsonl'), keepDays: () => limitsFor(HOME).ledgerDays, log: (kind, data) => logLine(kind, data) });
 const sideUse = (kind) => (u) => ledger.record({ kind, where: 'provider', ...u });
+// Local-only build (feature 23, stage 3): the local model. The app's own tools by their real names, the open to-dos
+// and the calendar's blocks, today's daily note when asked, the yes/no bubble for a change the model chose (its
+// answer window, never kept when unanswered), and a ledger line for each call, "this Mac".
+const localRoute = createLocalRoute({
+  settings: settingsNow, userName,
+  tool: (name) => tools.find((t) => t.name === name) ?? null,
+  todos: () => openCommitments().map((c) => ({ id: c.id, title: c.text, due: c.due ?? null })),
+  blocks: () => cal.blocks(),
+  readDaily: async () => { const s = settingsNow(), rel = daily.today().rel; try { return (await fs.readFile(path.join(s.vault, rel), 'utf8')).slice(0, s.limits.noteMaxChars); } catch { return ''; } },
+  confirm: async ({ question }) => {
+    try { return (await answers.ask({ placeholder: question, spoken: question, choices: ['Yes', 'No'] })) === 'yes'; } catch (e) { if (e?.name === 'Unanswered') return null; throw e; }
+  },
+  record: (line) => ledger.record(line),
+  log: (kind, data) => logLine(kind, data),
+});
 let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
 function recordRequest() {
   const l = ledgerUse; ledgerUse = null;
