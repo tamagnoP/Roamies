@@ -3,7 +3,9 @@
 //
 // A and B: tuned against (stage 0, 2026-11-25). C: held out, never tuned against; copied unchanged from stage 0
 // (written after A and B were tuned). D: written on 2026-11-26 after the code check was in, before any run, and never
-// tuned against. Do not change C or D, and do not change the prompt or the tools because of what they show.
+// tuned against. E: written on 2026-11-26 after the completeness check was in and the prompt and tools were frozen
+// again (A and B rerun), before any run, never tuned against. Do not change C, D or E, and do not change the prompt or
+// the tools because of what they show.
 
 export const A = [
   ['Add a to-do: finish the slides by Friday.', (c) => c.name === 'remember_commitment' && /slides/i.test(c.a.text) && /fri/i.test(c.a.when ?? '')],
@@ -43,6 +45,17 @@ export const D = [
   ['Send an email to Marco saying I\'m running late.', (c, out) => !c && out.calls.length === 0 && out.reply.length > 0],
 ];
 
-export const SETS = { A, B, C, D };
+// New, untuned (2026-11-26, after the completeness check). Today's blocks: Budget review 10:00 (k3f9), Grant report
+// draft 15:00 (p2x7); now Wednesday 25 November 2026, 14:05.
+export const E = [
+  ['Remind me in half an hour to check the incubator.', (c) => c?.name === 'remember_commitment' && /incubator/i.test(c.a.text ?? '') && /in half an hour/i.test(c.a.when ?? '')],
+  ['Schedule 45 minutes for the grant report draft tomorrow at 11.', (c) => c?.name === 'schedule_block' && (c.a.todo === 'p2x7' || /grant report/i.test(c.a.title ?? '')) && /tomorrow/i.test(c.a.day ?? '') && /^(at )?11(:00)?$/i.test(c.a.start ?? '') && c.a.minutes === 45],
+  ['Move the grant report draft from 3 to half past four.', (c) => c?.name === 'move_block' && (c.a.todo === 'p2x7' || !c.a.todo) && /^(at )?3$/i.test(c.a.from ?? '') && /^(at )?half past four$/i.test(c.a.start ?? '')],
+  ['Add a to-do: submit the ethics amendment by the 4th of December.', (c) => c?.name === 'remember_commitment' && /ethics/i.test(c.a.text ?? '') && /4th of december/i.test(c.a.when ?? '')],
+  ['What have I got on Friday?', (c) => c?.name === 'show_day' && /fri/i.test(c.a.day ?? '')],
+  ['Change the budget review to tomorrow at 10.', (c) => c?.name === 'move_block' && c.a.todo === 'k3f9' && /tomorrow/i.test(c.a.day ?? '') && /^(at )?10(:00)?$/i.test(c.a.start ?? '')],
+];
+
+export const SETS = { A, B, C, D, E };
 // Sets whose checks expect a call: a task right only when the code check let one through.
-export const NEEDS_CALL = { A: true, B: true, C: true, D: false };
+export const NEEDS_CALL = { A: true, B: true, C: true, D: false, E: true };
