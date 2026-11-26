@@ -293,6 +293,7 @@ export const LIMITS = {
   answerWindowSeconds: { default: 10, min: 3, max: 30 }, // how long the microphone stays open by itself after Roamies has asked something
   exchangeEndSeconds: { default: 20, min: 5, max: 600 }, // quiet time after Roamies' last reply that ends an exchange (a pending question is then raised)
   pendingKeepHours: { default: 24, min: 1, max: 720 }, // a question nobody answered is dropped when it is older than this
+  ledgerDays: { default: 90, min: 7, max: 3650, whole: true }, // feature 32: days of lines the ledger keeps (ledger.jsonl: one line per request to any model, never its content)
   spokenQuestionChars: { default: 200, min: 40, max: 1000, whole: true }, // characters of a question (or of a hand-off's first sentence) that are said aloud
   heardLineChars: { default: 80, min: 20, max: 300, whole: true }, // characters of a phrase that wasn't taken, as shown in the bubble's last line
   kokoroTimeoutSeconds: { default: 20, min: 2, max: 120 }, // how long the natural voice may take over one sentence (and, six times that, to start) before the macOS voice takes over

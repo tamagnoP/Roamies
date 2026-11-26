@@ -41,6 +41,7 @@ import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTr
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
 import { SHORT, leanTools } from './lean.mjs';
+import { countTools, createLedger, isLeftAsk } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -386,14 +387,14 @@ const pi = createPi({
         const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
         // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
         const asks = /\?\s*$/.test(r.reply ?? '');
-        await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks });
+        await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks, kind: 'piSummary' });
       },
       show: (text) => sayAsIs(text, r.status === 'error' ? 'concerned' : 'happy'), // pi's own words: no form of address
       speak: (text) => voiceLine(text), // feature 24: the leftovers notice, after the gist
       played: quietAgain,
     });
   },
-  log: (kind, data) => logLine(kind, data),
+  log: (kind, data) => { logLine(kind, data); if (kind === 'pi_start') ledger.record({ kind: 'pi', where: 'provider' }); }, // feature 32: each hand-off; pi's own requests are not counted
   onChange: () => menu(),
 });
 // Local-only build: at start-up settings.default.json is written beside the owner's settings.json (every setting with
@@ -730,6 +731,12 @@ async function quietGive(by = 'exchange') {
   return true;
 }
 /** "anything waiting?", said or typed alone: answered by the app, never by the model. */
+/** Feature 32: "what left the Mac today?", worded by code from the ledger; never sent to a model. */
+function leftAsked() {
+  logLine('left_asked', {});
+  aloud(ledger.left(), 'happy');
+  flow.settle();
+}
 function waitingAsked(byVoice) {
   if (byVoice) flow.start();
   logLine('queue_asked', { items: queue.count() });
@@ -985,12 +992,12 @@ let credsBaseUrl;
 let queued = 0;
 let briefingWaiting = false; // feature 33: a briefing chosen, on its way to its request
 // Local-only build (feature 33): briefing: { kind, given } for a briefing's request, given set once it is made.
-function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false, briefing = null } = {}) {
+function enqueue(text, { interrupt = false, image = null, note = '', byVoice = false, briefing = null, kind = 'request' } = {}) { // kind: the ledger's (feature 32)
   if (interrupt && busy) interruptQuietly();
   if (interrupt && byVoice) flow.start(); // Local-only build (feature 22): a request made by voice opens the exchange
   queued++;
   const own = !intro && !text.startsWith('('); // feature 33: the owner's own request, typed or spoken
-  running = running.then(() => prompt(text, image, note, byVoice, briefing)).catch((e) => console.error('prompt', e))
+  running = running.then(() => prompt(text, image, note, byVoice, briefing, kind)).catch((e) => console.error('prompt', e))
     .finally(() => {
       if (briefing) briefingWaiting = false;
       // Features 31 and 33: a typed request's reply is an exchange of the owner's (a spoken one ends in flow.mjs,
@@ -1101,7 +1108,7 @@ function maybeCompact() {
   compacting = (async () => {
     try {
       const facts = listFacts();
-      const { text, model } = await oneShot({ ...(await sideRoute()), system: foldPrompt(userName), text: foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName }) });
+      const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('fold'), system: foldPrompt(userName), text: foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName }) });
       const out = parseBrain(text, { knownIds: facts.map((f) => f.id), wantSummary: true });
       const learned = await learnFacts(out.facts);
       if (s !== session) { logLine('compact_dropped', { session: s.id, why: 'new conversation' }); return; }
@@ -1145,7 +1152,7 @@ async function memoryPass(s, why) {
   const t0 = Date.now();
   try {
     const facts = listFacts();
-    const { text, model } = await oneShot({ ...(await sideRoute()), system: memoryPrompt(userName), text: memoryInput({ facts, turns }) });
+    const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('memory'), system: memoryPrompt(userName), text: memoryInput({ facts, turns }) });
     const out = parseBrain(text, { knownIds: facts.map((f) => f.id) });
     const learned = await learnFacts(out.facts);
     logLine('memory', { why, session: s.id, model, ms: Date.now() - t0, facts: learned.length, replaced: out.facts.filter((f) => f.replaces).length });
@@ -1212,6 +1219,16 @@ process.on('uncaughtException', (e, origin) => {
 // One line per request in ~/.gg/sidekick/usage.jsonl: token counts and timings only, never what was said.
 const USAGE_FILE = path.join(process.env.ROAMIES_DATA_DIR ? path.join(process.env.ROAMIES_DATA_DIR, 'sidekick') : path.join(HOME, '.gg', 'sidekick'), 'usage.jsonl');
 const usageToday = { day: '', requests: 0, tokens: 0 };
+// Local-only build (feature 32): the ledger, beside usage.jsonl: one line per request to any model, never its content.
+const ledger = createLedger({ file: path.join(path.dirname(USAGE_FILE), 'ledger.jsonl'), keepDays: () => limitsFor(HOME).ledgerDays, log: (kind, data) => logLine(kind, data) });
+const sideUse = (kind) => (u) => ledger.record({ kind, where: 'provider', ...u });
+let ledgerUse = null; // the request being made: what the ledger records once, when it ends (answered or failed)
+function recordRequest() {
+  const l = ledgerUse; ledgerUse = null;
+  if (!l) return;
+  const u = l.use;
+  ledger.record({ kind: l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names) });
+}
 function logUsage(rec) {
   const day = new Date().toDateString();
   if (usageToday.day !== day) Object.assign(usageToday, { day, requests: 0, tokens: 0 });
@@ -1295,7 +1312,7 @@ async function dayTurn(byVoice) {
   let two, model;
   try {
     const known = new Set(todoItems().map((t) => t.id));
-    const r = await oneShot({ ...(await sideRoute()), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() }) });
+    const r = await oneShot({ ...(await sideRoute()), onUsage: sideUse('handover'), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() }) });
     two = parsePartTwo(r.text, { known: (id) => known.has(id) }); model = r.model;
   } catch (e) {
     logLine('handover_failed', { ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 300) });
@@ -1308,7 +1325,7 @@ async function dayTurn(byVoice) {
   if (msg) session.messages = [{ role: 'user', content: msg }];
   return true;
 }
-async function prompt(text, image = null, note = '', byVoice = false, briefing = null) {
+async function prompt(text, image = null, note = '', byVoice = false, briefing = null, kind = 'request') {
   // Local-only build (feature 33): a request still waiting when stand down began is not made (the owner's own next
   // request ends stand down before it is queued). A briefing's is held: it is marked given only once it is made, so
   // it comes again after, while its window is open (the owner, 2026-11-25).
@@ -1362,7 +1379,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     });
     const turn = nextTurn();
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
-    const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
+    const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0, names: [] };
+    ledgerUse = { use, kind: briefing ? 'briefing' : kind, marked: image ? 1 : 0, provider: agentRoute === 'claude-code' ? 'claude-code' : config.provider };
     const soon = frontSoon; frontSoon = null;
     const where = soon && Date.now() - soon.at < limitsFor(HOME).frontReuseSeconds * 1000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
     frontNow = guard.front(where.line, where.app); // Local-only build: an app on the never-look list isn't named; its name decides
@@ -1410,7 +1428,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
         spoken?.flush(); // a beat before a tool is said now, not after the tool
         releaseBeat(true);
         if (SLOW_TOOLS.has(e.name)) voice?.beat(); // nothing said yet: "One sec." so it's never silent
-        use.tools++;
+        use.tools++; use.names.push(e.name);
         logLine('tool', { turn, id: e.toolCallId, name: e.name, args: redactArgs(e.name, e.args ?? {}) });
         toolNames.set(e.toolCallId, e.name);
         if (process.env.ROAMIES_USAGE) { toolT.set(e.toolCallId, Date.now()); console.error(`[tool] ${e.name} ${JSON.stringify(e.args ?? {}).slice(0, 160)}`); }
@@ -1447,9 +1465,12 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     autoTurn = null;
     ui({ kind: 'agent', e: stalled ? { type: 'error', message: sir(stallMessage()) } : { type: 'done' } });
     if (stalled && flow.spoken()) voiceLine(stallMessage()); // a failure is said too
-    logUsage({ ...use, ms: Date.now() - use.t });
+    const { names, ...counted } = use;
+    logUsage({ ...counted, ms: Date.now() - use.t });
+    recordRequest();
     logLine('request_done', { turn, ms: Date.now() - use.t, calls: use.calls, tools: use.tools, in: use.in, cacheRead: use.cacheRead, cacheWrite: use.cacheWrite, out: use.out });
   } catch (err) {
+    recordRequest(); // feature 32: a request that failed went out all the same
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
@@ -1991,7 +2012,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   const ctl = barAsk = new AbortController();
   const text = await ask({ placeholder: 'Ask me anything…', bar: true }, ctl.signal);
   if (barAsk === ctl) barAsk = null;
-  if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
+  if (text?.trim()) { standUp('typed'); if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; feature 31: "anything waiting?" is the app's
 }
 function onWriteTap() {
   if (onboarding) return;
@@ -2115,6 +2136,8 @@ async function onSpoken(text, area, window = null) {
   if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); flow.start(); logLine('review_asked', {}); dayReview('asked').catch((e) => console.error('daily review', e)); return; }
   // Local-only build (feature 31): "anything waiting?" (quiet.mjs, said alone): the quiet queue, given by the app.
   if (!area?.file && isWaitingAsk(text)) { ui({ kind: 'heard' }); waitingAsked(true); return; }
+  // Local-only build (feature 32): "what left the Mac today?" (ledger.mjs, said alone): answered by code from the ledger.
+  if (!area?.file && isLeftAsk(text)) { ui({ kind: 'heard' }); flow.start(); leftAsked(); return; }
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);

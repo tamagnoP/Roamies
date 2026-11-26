@@ -27,7 +27,7 @@ export function sideThinking(provider, model, cap) {
   return LEVELS.indexOf(cap) < LEVELS.indexOf(lowest) ? cap : lowest;
 }
 
-async function once({ system, text, provider, model, cc, credsFor, cwd, signal, chatThinking }) {
+async function once({ system, text, provider, model, cc, credsFor, cwd, signal, chatThinking, onUsage }) {
   const thinking = sideThinking(provider, model, chatThinking);
   const common = { model, system, tools: [], maxTurns: 1, thinking, signal };
   const agent = cc
@@ -38,17 +38,23 @@ async function once({ system, text, provider, model, cc, credsFor, cwd, signal, 
       baseUrl: (await credsFor(model).catch(() => null))?.baseUrl,
     });
   let out = '';
-  for await (const e of agentEvents(agent.prompt(text))) {
-    if (e.type === 'text_delta') out += e.text;
-    else if (e.type === 'error') throw e.error;
-  }
+  // Local-only build (feature 32): the call's tokens, for the ledger, whether it answers or fails.
+  const used = { new: 0, cacheRead: 0, cacheWrite: 0, out: 0 };
+  try {
+    for await (const e of agentEvents(agent.prompt(text))) {
+      if (e.type === 'text_delta') out += e.text;
+      else if (e.type === 'turn_end') { const u = e.usage ?? {}; used.new += u.inputTokens ?? 0; used.cacheRead += u.cacheRead ?? 0; used.cacheWrite += u.cacheWrite ?? 0; used.out += u.outputTokens ?? 0; }
+      else if (e.type === 'error') throw e.error;
+    }
+  } finally { try { onUsage?.({ provider: cc ? 'claude-code' : provider, model, tokens: used }); } catch { /* the ledger never stops a call */ } }
   if (!out.trim()) throw new Error('empty reply');
   return out;
 }
 
 /**
  * One tool-less turn: { system, text, provider, model (the current one), cc (Claude Code route or null),
- * credsFor(modelId), cwd, signal, chatThinking (the chat's level, null when off) }. Runs on the summary model, then once more on the current model if that fails.
+ * credsFor(modelId), cwd, signal, chatThinking (the chat's level, null when off), onUsage({ provider, model, tokens }) (each
+ * call made, for the ledger) }. Runs on the summary model, then once more on the current model if that fails.
  * Resolves { text, model }.
  */
 export async function oneShot(o) {
