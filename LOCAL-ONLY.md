@@ -1207,9 +1207,47 @@ The logs record what kind of change a sync made (which fields), never a title.
 
 Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition.
 
+## The local model and the ledger (features 23 and 32)
+
+Off until `local.address` is set in `settings.json`. Then a Gemma 4 model served on this Mac answers in two cases,
+decided by code: when the Mac has no network (the shell reads the system's status; nothing is sent to find out) or a
+request fails with a network error before any reply; and in private mode. A slow provider never switches.
+
+- **The second loopback exception.** Requests to the local model go only to the one `http://127.0.0.1:<port>/v1`
+  address in `local.address`, through a fetch that refuses any other host. Roamies can't tell where that port leads:
+  with an SSH tunnel to another Mac, what goes to the local model leaves this Mac over your network, encrypted by
+  SSH. "Private" means "not to the provider".
+- **One more fixed helper.** With `local.start.python` set and the address at `local.start.port`, Roamies starts the
+  model server itself (`mlx_vlm.server`, the version tested, the pinned model files by path; it downloads no model),
+  under `sandbox-exec`: no network except listening on 127.0.0.1 at that port, writing only in its own temporary
+  folder, reading in the home folder only the pinned models' files, starting no other program. It is started on
+  first need and stopped after `local.start.sleepAfterMinutes` without a request, and at quit.
+- **Never silent.** The first local reply after a switch starts with a line saying so, every local bubble carries a
+  "local" tag, and "Claude is answering again." starts the first reply after.
+- **Private mode.** "Keep this private" at the start of a request makes that request private; said alone it is a
+  mode, with a mark under the character, until you say "back to Claude" (not at the day turn, not at a restart).
+  Private requests go to the local model only; if it can't be reached, nothing is sent anywhere. A to-do, reminder
+  or note made in private mode carries a private mark (`private: true` in `memory.json`, or in the note's front
+  matter): the provider gets only how many there are, never their titles or text, in the live state, any tool
+  result, a search, a side call or the handover. Private exchanges are summarised by the local model only, into the
+  daily note with a mark Claude's note tools leave out. You lift the mark by asking ("lift the private mark from
+  ..."), with a yes.
+- **What the local model can do.** Your to-dos and reminders, the calendar, notes, today's daily note when you ask,
+  and opening an app by name. A change it chooses is shown as a question and saved only on your yes
+  (`local.confirmChanges`); what code decides from your words ("remind me", "is due", "add a to-do") is saved at once.
+  Times, days and lengths are read by code from what you said, never taken from the model. A hand-off to pi, the
+  screen, drawing and clicking are refused by a line.
+- **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the
+  kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
+  carried, whether it was private. Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
+  is answered from it by code and sent to no model.
+- **Measuring** (`measureRequests`, off): per request, the hearing, the prompt reading and the voice up to the first
+  sound, and the memory of Roamies' processes read by the shell; numbers and tool names only, in the activity log.
+
 ## What still uses the network
 
 - Requests to Super Productivity on this Mac (`127.0.0.1:3876`). They don't leave the Mac.
+- Requests to the local model at `local.address` (`127.0.0.1` only; where that port leads is your set-up).
 - Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, an outline
   of your to-do list (numbers, and today's planned blocks), the to-dos you ask about, and screenshots or window
   text when you ask about your screen.

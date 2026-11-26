@@ -195,7 +195,34 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
 
 ## Group 2: features 23, 32, 14, 29 and 30
 
-Not on `next` yet.
+### Features 23 and 32: the local model, private mode, the ledger (branch `offline-ledger`; 14, 29 and 30 not built)
+
+**Before.** In `~/Documents/roamies-pi/settings.json`: `"local": { "address": "http://127.0.0.1:8080/v1", "model": "",
+"whenOffline": true, "historyExchanges": 4, "maxSteps": 4, "confirmChanges": true, "start": { "python":
+"/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "e4b", "port": 8080, "sleepAfterMinutes": 10, "draft": true } }`,
+`"measureRequests": true`, and in `limits`: `"ledgerDays": 90`. Gemma 4 E4B and its drafter in the Hugging Face cache.
+
+1. **Wi-Fi off, then ask "What's on my calendar on Friday?"**
+   You should see: after the server starts (about 10 s the first time), "Claude can't be reached, so the local model
+   on this Mac is answering." and the answer, in a bubble tagged "local". `ps` shows `mlx_vlm.server` under
+   `sandbox-exec`.
+2. **Say "Remind me at half past four to pick up the parcel."**
+   You should see: "I'll remind you to pick up the parcel at 16:30." at once (made by code, no model).
+3. **Say "Move the budget review to Friday at 3pm."**
+   You should see: a yes/no bubble "Move the block for "Budget review" to Friday … at 15:00?", said aloud with the
+   answer window; no answer saves nothing and nothing is kept.
+4. **Wi-Fi on, ask anything.** You should see: "Claude is answering again." first.
+5. **Say "Keep this private." then "Add a to-do: call the clinic."** You should see: the "private" mark under the
+   character, the bubble tagged "local · private", and the to-do on the list. **Then "Back to Claude." and "What's
+   open today?"**: Claude's reply mentions one private to-do, never its title.
+6. **Private mode with the local server stopped** (`pkill -f mlx_vlm.server`, `local.start.python` ""): "The local
+   model isn't answering; nothing was sent."
+7. **Say "What left the Mac today?"** You should see: the provider's requests, tokens, screen captures and window
+   texts, how many stayed on this Mac, and the hand-offs to pi; no model is asked.
+8. **The tunnel** (your own, to the Mac mini, on another port in `local.address`): the same answers; Roamies starts
+   and stops no server.
+9. **The activity log**: `timing {route, hearing, ready, reading, voice, …}`, `memory {mb: {shell, sidecar, voice,
+   kokoro, modelServer, webkit}, pressure, swapMB}`, `local_request`, `private_mode`; numbers and names only.
 
 ## Group 3: features 19 and 21
 
