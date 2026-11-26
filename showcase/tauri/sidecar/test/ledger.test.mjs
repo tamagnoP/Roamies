@@ -28,6 +28,14 @@ assert.equal((fs.statSync(file).mode & 0o777).toString(8), '600');
 assert.ok(!fs.readFileSync(file, 'utf8').includes('never kept'));
 assert.equal(ledger.lines().length, 5);
 assert.equal(ledger.left(), 'Sent to anthropic today: 2 requests, 1 fold of the conversation; 35,000 tokens sent (30,500 of them read from its cache) and 500 answered. Screen captures: 1 marked area, 1 screenshot. Window texts: 1. 1 request stayed on this Mac, with the local model. 1 hand-off to pi. ' + UNSEEN);
+// the local model's warm-ups are told apart from the requests that stayed on this Mac
+{
+  const f2 = path.join(path.dirname(file), 'ledger-warm.jsonl'), l2 = createLedger({ file: f2, keepDays: () => 90, now: () => clock });
+  l2.record({ kind: 'warmup', where: 'mac', provider: 'local', model: 'm' });
+  assert.match(l2.left(), /Nothing was asked of the local model on this Mac, apart from 1 warm-up checking it\./);
+  l2.record({ kind: 'request', where: 'mac', provider: 'local', model: 'm' }); l2.record({ kind: 'request', where: 'mac', provider: 'local', model: 'm' });
+  assert.match(l2.left(), /2 requests stayed on this Mac, with the local model, besides 1 warm-up checking it\./);
+}
 assert.equal(UNSEEN, 'Not counted, because Roamies can\'t see them: what the claude program sends to Anthropic by itself without reporting it (it connects when it starts, and makes small checks such as counting tokens), and pi\'s own requests.');
 // Yesterday's lines are not today's.
 assert.equal(leftLine(ledger.lines(), at(27, 9)), `Nothing went to the provider today. ${UNSEEN}`);
