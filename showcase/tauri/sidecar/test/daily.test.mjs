@@ -175,6 +175,9 @@ for (const [said, want] of [
   ['tonight at 8', 'Thu Nov 26 2026 20:00'], ['28 November at 9', 'Sat Nov 28 2026 09:00'], ['on the 30th at 11', 'Mon Nov 30 2026 11:00'],
   ['tomorrow', 'day Fri Nov 27 2026'], ['monday', 'day Mon Nov 30 2026'], ['the 28th', 'day Sat Nov 28 2026'], ['december 1st', 'day Tue Dec 01 2026'],
   ['thursday', 'day Thu Dec 03 2026'], ['the day after tomorrow', 'day Sat Nov 28 2026'],
+  ['tomorrow at ten past 3', 'Fri Nov 27 2026 15:10'], ['twenty past four on monday', 'Mon Nov 30 2026 16:20'], ['five to six', 'Fri Nov 27 2026 17:55'],
+  ['half 3 tomorrow', 'Fri Nov 27 2026 15:30'], ['tomorrow at 9.30', 'Fri Nov 27 2026 09:30'], ["friday's", 'day Fri Nov 27 2026'], ['at 3 p.m. on friday', 'Fri Nov 27 2026 15:00'],
+  ['from 10 to 11', null],
   ['leave it', 'leave'], ['Not now.', 'leave'], ['drop it', 'drop'], ['let it go', 'drop'],
   ['today at 9', null], ['next friday', null], ['next week', null], ['banana', null], ['tomorrow at 25', null], ['', null], ['delete it', null], ['mark it done', null],
 ]) assert.equal(when(said), want, said);

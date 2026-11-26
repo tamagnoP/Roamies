@@ -11,7 +11,7 @@
 //     it is replaced by a code-worded line saying nothing was changed.
 //   - After a tool that changes something, what he is told is a code-worded line from its result.
 import { nextDays, dayChoice } from './calendar.mjs';
-import { clockSaid, parseWhen, ymd } from './daily.mjs';
+import { clockSaid, parseWhen, writtenTimes as written, ymd } from './daily.mjs';
 
 /** Words as they are compared: lower case, spacing and punctuation aside (a colon between digits stays: "16:30"). */
 export const normal = (t) => String(t ?? '').toLowerCase().replace(/[’‘`]/g, '\'').replace(/(\d):(\d)/g, '$1\u0000$2').replace(/[^\p{L}\p{N}'\u0000]+/gu, ' ').replace(/\u0000/g, ':').replace(/\s+/g, ' ').trim();
@@ -42,26 +42,6 @@ const isDayWord = (w) => DAY_VOCAB.has(w) || /^\d{1,2}(?:st|nd|rd|th)?$/.test(w)
 const BEFORE_A_TIME = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and', 'or']);
 // A span never starts with these: the words around a time are not part of it.
 const LEAD = new Set(['at', 'from', 'to', 'until', 'till', 'by', 'around', 'before', 'after', 'about', 'between', 'and', 'on', 'this', 'due', 'for', 'the', 'of', 'past', 'o', 'clock', 'am', 'pm']);
-// Written forms read as the parsers take them: "3pm" and "3 p.m." as "3 pm", "9.30" as "9:30", "ten past 3" as
-// "3:10", "at five to six" as "at 5:55" (only after "at", "by", "until" and the like: "from 2 to 4" is two times),
-// "half 3" as "3:30", "1.5 hours" as "90 minutes".
-const HOUR_N = Object.fromEntries(HOUR_NAMES.map((h, k) => [h, k + 1]));
-const MIN_N = { five: 5, ten: 10, twenty: 20, 'twenty five': 25, 'twenty-five': 25 };
-const hourOf = (x) => (/^\d+$/.test(x) ? +x : HOUR_N[x]);
-const HOUR_RE = '(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
-function written(said) {
-  return String(said ?? '')
-    .replace(/\b([ap])\.\s?m\b\.?/gi, '$1m').replace(/\b(\d{1,2}(?::\d{2})?)(am|pm)\b/gi, '$1 $2')
-    .replace(/\b(\d+)[.,](\d+)\s*(hours?|hrs?)\b/gi, (_, a, b, u) => `${Math.round(parseFloat(`${a}.${b}`) * 60)} minutes`)
-    .replace(/\b(\d{1,2})\.(\d{2})\b/g, '$1:$2')
-    .replace(new RegExp(`(\\w+ )?\\b(five|ten|twenty five|twenty-five|twenty|\\d{1,2})(?: minutes)? (past|to) ${HOUR_RE}\\b`, 'gi'), (all, lead = '', m, dir, h) => {
-      if (dir.toLowerCase() === 'to' && !/^(at|by|around|about|until|till|before|after) $/i.test(lead)) return all;
-      const mins = /^\d+$/.test(m) ? +m : MIN_N[m.toLowerCase()], hr = hourOf(h.toLowerCase());
-      if (!mins || mins >= 60 || !hr || hr > 12) return all;
-      return lead + (dir.toLowerCase() === 'past' ? `${hr}:${String(mins).padStart(2, '0')}` : `${hr === 1 ? 12 : hr - 1}:${String(60 - mins).padStart(2, '0')}`);
-    })
-    .replace(new RegExp(`\\bhalf ${HOUR_RE}\\b`, 'gi'), (all, h) => { const hr = hourOf(h.toLowerCase()); return hr && hr <= 12 ? `${hr}:30` : all; });
-}
 // Words that say something about time: one of them left over, not placed, means a time code couldn't read.
 const ALWAYS_TIME = new Set([...FULL_DAYS, ...MONTH_WORDS.filter((m) => m !== 'may'), 'today', 'tonight', 'tomorrow', 'yesterday', 'noon', 'midday', 'midnight', 'morning', 'afternoon', 'evening', 'night', 'tonight', 'weekend', 'week', 'weeks', 'fortnight', 'month', 'months', 'am', 'pm', 'oclock', 'o\'clock', 'lunchtime', 'eod', 'mon', 'tue', 'tues', 'wed', 'thu', 'thur', 'thurs', 'fri', 'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec']);
 const UNIT_WORDS = new Set(['minute', 'minutes', 'min', 'mins', 'hour', 'hours', 'hr', 'hrs', 'day', 'days']);
@@ -169,9 +149,9 @@ export function daySaid(text, { now = Date.now() } = {}) {
   if (w?.kind === 'day') return { date: ymd(w.day) };
   return null;
 }
-/** A clock time as said, as HH:MM. → string or null */
+/** A clock time as said, as HH:MM, from his sentence after writtenTimes (readTimes). → string or null */
 export function startSaid(text, opts = {}) {
-  const m = clockSaid(normal(text).replace(/^(?:at|from)\s+/, ''), opts);
+  const m = clockSaid(normal(text).replace(/^(?:at|from)\s+/, ''), { ...opts, asWritten: false });
   return m === null ? null : hhmm(m);
 }
 
