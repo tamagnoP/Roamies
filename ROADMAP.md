@@ -43,7 +43,7 @@ Last updated: 2026-11-25.
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
-| 23 | Offline mode with a local model | Agreed and measured, not designed; after 25 with 31, built with 32 | |
+| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); model and code check measured 2026-11-26; stopped at the owner's condition (set D 4 of 6), waiting for his choice | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
 | 25 | Check-ins on progress | Built with 31 on `check-ins` (2026-11-25, plan answered by the owner); waiting for review | `check-ins` |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
@@ -952,6 +952,44 @@ built later, after the new look (21).
 - **Decision (2026-11-19): one local model, Gemma 4 E2B, for everything offline.** Its reading of a screen is good
   enough for the gist and not for names or positions, which is the case for taking those from macOS's accessibility
   information and using the picture only as a fallback.
+- **Stage 0 (2026-11-25, `mlx_vlm.server` 0.8.0 in `localai`, 127.0.0.1 only).** Through the server, sets A, B and
+  C of 6 tasks (C written after A and B were tuned, and held out): E2B 4, 6 and 3 of 6; E4B 6, 6 and 5 of 6. The
+  opening is reused only with `APC_ENABLED=1` (in memory only, `APC_DISK_ENABLED=0`).
+- **Decision (2026-11-26, the owner): Gemma 4 E4B plus the code check**, replacing the E2B choice of 2026-11-19 on
+  stage 0's numbers: E4B 17 of 18 tool calls right against E2B's 13 of 18 (3 of 6 on the held-out set); first token
+  5.5 s against 1.5 to 1.9 s on a cold opening, 0.65 to 0.8 s against 0.5 to 0.7 s once it is reused; replies at 12
+  to 15 tokens a second against 26 to 30; peak 5.5 GB against 3.8 GB (the server's own figure), no swap with either.
+  `local.start.model` defaults to E4B; E2B stays usable by setting. The code check, on every local call (`lite.mjs`):
+  a time or day argument must be words he said in that request (case, spacing and punctuation aside), parsed by code;
+  a call with a time he didn't say is refused with a code-worded hint and may be made once more, and refused again a
+  code-worded line asks him for the time; "remind me" makes a reminder, decided in code; a reply may not say
+  something was done, moved, booked or saved without a tool result in that request confirming it, or it is replaced
+  by "Nothing was changed."; the state is labelled as the app's.
+- **Measured with the code check (2026-11-26, E4B, `bench/local/`).** A 6 and B 6 of 6 after tuning on them only; then
+  once each, untuned: **C (held out) 5 of 6, D (new, written after the check was in) 4 of 6**: below the owner's
+  condition (5 of 6 on each), so stages 1 to 6 were not built. All three misses are a time argument left out, which
+  the check doesn't see: "Book an hour … on Monday at 2" and "from 2 to half past three" without the length or end
+  (the calendar would ask for the length), and "Push the budget review to Thursday at 9" without the day (a wrong
+  save: moved to 09:00 today). No reply was replaced, no stream broke. Found in building it, and in it:
+  - The opening is reused from the first request when the request's own part goes in the server's
+    `transient_context` (first token 0.65 to 0.8 s, requests 1.4 to 3.5 s); and only with
+    `APC_CHECKPOINT_ENTRIES=6`: at the default 2, a request with a tool round pushed the opening's checkpoint out and
+    the next request read it again (5 to 6 s).
+  - After a refused call Gemma 4 opened its thinking channel by itself, thinking off or not, and spent the 200
+    tokens on it: its token is barred for Gemma 4 models (`logit_bias`).
+  - After a tool result Gemma 4 often ended its turn with nothing said: what he is told after a tool that changes
+    something is worded by code from the result, and the model is asked again only after a read.
+- **The MTP drafter (2026-11-26).** `mlx_vlm.server` 0.8.0 can use Gemma 4's drafter (`gemma4_assistant`, `--draft-kind
+  mtp`); `mlx-community/gemma-4-E4B-it-assistant-bf16` (152 MB) with the 4-bit E4B, block size 4. On C, twice each:
+  tool calls and replies identical (12 of 12); replies at 18 to 27 tokens a second against 12 to 17; whole requests
+  1.2 to 2.4 s against 1.8 to 3.3 s (median 1.8 against 2.5 s on the second run); first token unchanged (0.65 to 0.7
+  s); the server's peak footprint 6.8 GB against 6.6 GB. To be a setting of `local.start` when stage 6 is built.
+- **Memory with everything running (2026-11-26).** E4B with the drafter loaded, Kokoro speaking six replies through the
+  real sidecar and page (the bench harness, `bench/run.mjs kokoro`), and set C sent to the server without a break:
+  the server at most 5.57 GB resident (peak footprint 7.09 GB over its whole run); Kokoro 1,064 MB, the sidecar 128
+  MB, the page 103 MB and 109 MB on the GPU, the shell's stand-in 19 MB: 1,375 MB for the app's processes at most;
+  memory free 54 % before and 44 % at the lowest; swap 794 MB before and after, no growth. The voice helper was not
+  running (the harness has none).
 - **The size of the tool descriptions (2026-11-24, the owner, from feature 24's measurement).** The tool
   descriptions are 10,219 tokens of the first request (16,262 in all), the drawing tool's alone 4,383. Not to be
   trimmed now.
@@ -1129,7 +1167,7 @@ Every numbered feature still to build is in section 3. What is left here is park
 | Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
 | Never-look list by window title | Idea | Would cover a password manager or bank opened as a web page. Less reliable than app names. |
 | Write access to more than one project per task | Not needed | Writes stay in the current project and its subfolders. |
-| Local model for Roamies | Set aside as the everyday model; viable offline | The large model was too slow (decisions log, 2026-11-11), and Claude stays. A small model, Gemma 4 E2B, was measured from 2026-11-16 and is the choice for offline mode (23). |
+| Local model for Roamies | Set aside as the everyday model; viable offline | The large model was too slow (decisions log, 2026-11-11), and Claude stays. A small model was measured from 2026-11-16; Gemma 4 E4B with the code check is the choice for offline mode (23) since 2026-11-26 (E2B from 2026-11-19). |
 | Hard lock on `settings.json` (`chflags uchg`) | Known, not used | Optional extra; the code change and sandbox are the real protection. |
 | Hardening: pi's signals limited to what pi started | Not built; to be designed together (the owner, 2026-11-24) | The sandbox (`(allow default)`, no `signal` rule) doesn't stop pi's commands from signalling the owner's other processes, Roamies' included. A rule limiting signals to what pi started would fix that, but then the leftovers record (`leftovers.mjs`), which pi's commands can append to, would be a way round it, and the watcher's script (`WATCH_SCRIPT` in `pi.mjs`) would need the same exclusions as the sidecar (it does not leave Roamies' own groups alone). |
 
@@ -1632,6 +1670,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - **2026-11-25, evening (features 25 and 31, in building).** An exchange whose request met a problem (no model
   signed in) never started its quiet time, so it never ended; it now does (`flow.settle()` after the problem line),
   so the queue and the check-ins it holds back come after it.
+
+- **2026-11-26 (feature 23, the owner).** Gemma 4 E4B plus the code check, replacing E2B (2026-11-19), with stage 0's
+  numbers (section 3, feature 23); `local.start.model` defaults to E4B, E2B by setting. Also: the warm-up when the
+  server starts or private mode or offline begins; a stream broken by "Tool arguments changed after they were
+  streamed" asked again once without streaming, counted; `APC_ENABLED=1` in memory only, fixed arguments; set C kept
+  as the held-out set in the bench and a new set D; the six-process memory reading; the MTP drafter as a setting if
+  tool calls are unchanged and memory fits. Measured the same day: C 5 of 6, D 4 of 6, below his condition, so
+  stages 1 to 6 wait for his choice.
 
 ## 6. Still to test
 

@@ -135,6 +135,12 @@ function minutesOf({ h, m, mer }, pm, dayStart, dayEnd) {
   if (later >= dayStart && later < dayEnd) return later;
   return h < 7 ? later : am;
 }
+/** Feature 23: a clock time as said ("2", "16:30", "half past four", "at 9 am"), read as parseWhen reads one.
+ *  → minutes after midnight, or null when it is not a time alone. */
+export function clockSaid(text, { dayStart = 540, dayEnd = 1080 } = {}) {
+  const t = timePart(words(text));
+  return t ? minutesOf(t, false, dayStart, dayEnd) : null;
+}
 /** What was said, as the answer to "When will you do it?": { kind: 'at', start } (a day and a time; a time alone is
  *  the next one to come), { kind: 'day', day } (a day alone: 00:00), { kind: 'leave' }, { kind: 'drop' }, or null
  *  when it is none of them (a time that has passed, "next friday", anything else). */
