@@ -43,7 +43,7 @@ Last updated: 2026-11-25.
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
-| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); model and code check measured 2026-11-26; completeness check, pins and start-up check built the same day; times taken away from the model the same day; stopped at the owner's condition (a wrong save on set F: a wrong action), next: a yes before each change | |
+| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); measured and built 2026-11-26: times taken from code, ask before saving what the model decided (C to F: no wrong save), stages 1 to 6 built; waiting for the owner's tests (TESTS.md group 2) | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
 | 25 | Check-ins on progress | Built with 31 on `check-ins` (2026-11-25, plan answered by the owner); waiting for review | `check-ins` |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
@@ -52,7 +52,7 @@ Last updated: 2026-11-25.
 | 29 | Run watcher: one named log file, watched by code | Agreed 2026-11-24, not designed; needs 14; after 14 | |
 | 30 | Machine status: this Mac's memory, disk and battery, and whether the Mac mini answers | Agreed 2026-11-24, not designed; after 29 | |
 | 31 | Speaking budget and quiet queue | Built with 25 on `check-ins` (2026-11-25); waiting for review | `check-ins` |
-| 32 | Ledger: every request to the provider recorded locally, never its content | Agreed 2026-11-24, not designed; recorded with 23, shown in 21 | |
+| 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
@@ -1250,6 +1250,27 @@ server, the tunnel).
   The four reminders were made by code with no model call (10 to 12 ms). F's wrong save of the day before ("now due
   on Tuesday") is saved by code as a due time although the model again chose `move_block`. Model requests: first
   token 0.45 / 0.71 / 1.2 s, whole 0.97 / 1.6 / 2.6 s (min / median / max).
+
+- **Stages 1 to 6 built (2026-11-26), after the bench above; one commit each or more, all on `offline-ledger`.**
+  - Stage 1 (`98bf71c`): upstream's `lean.mjs` whole (plus zod's safe-integer bounds dropped) and our own 22 tools'
+    descriptions in shorter words, applied by name. First request about 16,706 → 14,994 tokens (characters / 3.6, the
+    stand-in model's measure, as in stage 0), tool part 10,663 → 8,951. Measured, not built: loading `draw` only when
+    needed would save its 14,429 characters (about 4,000 tokens) more; building it needs drawing tried on Claude.
+  - Stage 2 (`42e7de9`): the ledger, `ledger.jsonl` beside `usage.jsonl`; requests, briefings, pi's summaries,
+    folds, the memory pass, the handover's part two, warm-ups, hand-offs to pi (pi's own requests not counted).
+  - Stage 3 (`6249053`): settings `local` and `local.start`; `localroute.mjs` with the app's real tools, the yes/no
+    bubble, its own history, the live check as warm-up, ledger lines "this Mac".
+  - Stage 4 (`cc6c003`, `7937561`, `b92ebec`): network status from the shell (`presence.rs`,
+    SCNetworkReachability, no permission); the route by code (`route.mjs`); private mode with its mark, kept across
+    restarts; the "local" tag; "Claude is answering again."; refusals of pi, screen, drawing, clicking; the private
+    mark on items and the places that respect it (`privacy.mjs`); part two and briefings by the local model when
+    Claude can't be reached; private exchanges summarised by the local model only.
+  - Stage 5 (`36733eb`): `measureRequests` (off): `timing.mjs`, the page's first sound, `memory.rs` (proc_pid_rusage,
+    the WebKit processes by responsibility, memory pressure, swap).
+  - Stage 6 (`ec7f458`, `7f94b1f`): `modelserver.mjs`, the sandboxed server started on first need and asleep after
+    `local.start.sleepAfterMinutes`. Tried for real: started under the sandbox in about 10 s, the live check passed
+    (952 and 966 tokens reused), requests answered; under the same profile Python could neither connect out
+    (1.1.1.1:53, 127.0.0.1:22), bind another port, nor read or write in the home folder.
 
 ### 32. Ledger
 
