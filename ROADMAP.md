@@ -43,7 +43,7 @@ Last updated: 2026-11-25.
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
 | 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
-| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); model and code check measured 2026-11-26; stopped at the owner's condition (set D 4 of 6), waiting for his choice | |
+| 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); model and code check measured 2026-11-26; completeness check, pins and start-up check built the same day; stopped at the owner's condition (a wrong save on set E), waiting for his choice | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
 | 25 | Check-ins on progress | Built with 31 on `check-ins` (2026-11-25, plan answered by the owner); waiting for review | `check-ins` |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
@@ -990,6 +990,49 @@ built later, after the new look (21).
   MB, the page 103 MB and 109 MB on the GPU, the shell's stand-in 19 MB: 1,375 MB for the app's processes at most;
   memory free 54 % before and 44 % at the lowest; swap 794 MB before and after, no growth. The voice helper was not
   running (the harness has none).
+- **Plan of 2026-11-26, after C 5 and D 4 of 6 (the owner's answers, then the plan; also in
+  `~/Documents/roamies-reports/2026-11-26_1048_feature-23-plan-completeness-check.md`).**
+  - His answers: (1) a completeness check: code finds every time, day and length he said, with the parser the tools
+    use; a call that leaves one out is refused, retried once with a code-worded hint naming the missing words, and
+    refused again nothing is saved and a code-worded line asks him; with two times (a move from one to another) both
+    must be used. (2) The bar: zero wrong saves, and at least 5 of 6 done right or correctly asked; a new untuned set
+    E written after the check; E4B once on C, D and E, wrong saves reported apart from questions; any wrong save on E
+    stops the work, otherwise stages 1 to 6 go on. (3) The drafter as a setting, on by default, its revision pinned;
+    Roamies never downloads a model and says so when files are missing. (4) At start-up the server's version and the
+    settings it depends on (`transient_context`, `APC_CHECKPOINT_ENTRIES=6`) are checked; if they don't match what
+    was tested, a notice says so and the local model isn't used. Plans, his answers and bench sets are saved to the
+    reports folder and the repo before building; no download without asking.
+  - The plan: the check in `lite.mjs` (a new `lengthSaid`; a bare number is a time only after "at", "from", "to",
+    "until", "till", "by", "around", "before" or "after"; each tool must use what it can take; `from` on
+    `move_block` and `update_commitment`, used by code); the bench reports right, asked, wrong save and other misses;
+    pins and the start-up check in a new `localserver.mjs` (version read from the installed files; fixed arguments
+    and environment; a live check, as the warm-up, that the opening is reused after a tool round). The plan of stages
+    1 to 6 (accepted 2026-11-25) is not in the repo: to be asked for.
+- **Built and measured (2026-11-26, the plan above).** The completeness check in `lite.mjs` (`timesIn`, `lengthSaid`,
+  `missingTimes`, `from` on `move_block` and `update_commitment`, checked by code against the calendar or the due
+  time); `localserver.mjs`: the models and the drafter pinned (repository, revision, weights hash), files looked
+  for under that revision only, the server's version read from its installed files (`mlx_vlm` 0.8.0, `mlx` 0.32.4),
+  the start fixed (`serverCommand`), and the warm-up as a live check. The live check tells the two apart: at 6
+  checkpoints the opening is reused after a request with a tool round (1,190 of 1,205 tokens), at the default of 2
+  it is not (0); a tool round sent with `max_tokens` 1 did not show it (the opening survived at 2), so the check's
+  round generates a reply. Warm-up and check together 8.9 to 12 s at server start.
+  - The drafter: `mlx-community/gemma-4-E4B-it-assistant-bf16`, revision `844e008e06ef5562bdb89428d851d0634d119dcd`,
+    a conversion (by mlx-community, with mlx-vlm 0.4.5) of Google's `google/gemma-4-E4B-it-assistant`, per its model
+    card; its card recommends block size 6 for single requests, 4 is what was measured. The model:
+    `mlx-community/gemma-4-e4b-it-4bit`, revision `475b9088d29754a3379866cf5aeb6b41acd313c2` (no model card in the
+    cache); E2B: `mlx-community/gemma-4-e2b-it-4bit`, `238767527555cb75a05732a84dff5d6ba0dd6809`. No drafter for E2B.
+  - E4B with the drafter and both checks: A 6 right; B 5 right, 1 asked (which Monday); after one change of the
+    `from` descriptions (B: the model filled `from` from the state), frozen; then set E written and committed
+    (`5057a94`) before any run; once each: **C 6 right; D 4 right, 2 asked; E 2 right, 3 asked, 1 wrong save.** No
+    reply replaced, no stream broke. First token 0.42 to 1.3 s (median 0.68), requests 1.0 to 5.9 s (median 2.4).
+  - The wrong save (E): "Move the grant report draft from 3 to half past four": `from` "3", but "half past four" in
+    `end`, not `start`. Every word was in a time field, so both checks let it through, and the block's end was
+    changed. The completeness check asks for each time in some time field, not in the right one.
+  - The asks: D "from 2 to half past three" (end "3:30" twice), D "Push the budget review to Thursday at 9" (start
+    "9:00" twice), E "Change the budget review to tomorrow at 10" (start "10:00" twice), E "in half an hour" (when "in
+    30 minutes", then no second call), E "by the 4th of December" (when "December 4th", then no second call). Each
+    request held every time it needed; the model rewrote his words. The line asked was "What time do you mean?"
+    also where the words were a day or a time from now (`askTimeLine` treats only `day` as a day field).
 - **The size of the tool descriptions (2026-11-24, the owner, from feature 24's measurement).** The tool
   descriptions are 10,219 tokens of the first request (16,262 in all), the drawing tool's alone 4,383. Not to be
   trimmed now.
@@ -1678,6 +1721,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   as the held-out set in the bench and a new set D; the six-process memory reading; the MTP drafter as a setting if
   tool calls are unchanged and memory fits. Measured the same day: C 5 of 6, D 4 of 6, below his condition, so
   stages 1 to 6 wait for his choice.
+
+- **2026-11-26, later (feature 23, the owner).** A completeness check (every time, day and length he said, found by
+  the tools' parsers, in the call; refused once with the missing words named, then asked; a move uses both times);
+  the bar is zero wrong saves and at least 5 of 6 right or correctly asked; set E written after the check; any wrong
+  save on E stops the work; the drafter as a setting, on by default, its revision pinned, never downloaded; the
+  server's version and its settings checked at start-up, the local model not used when they differ. Plans, his
+  answers and bench sets saved to the reports folder and the repo before building; no download without asking;
+  `~/.pi` off limits. Measured the same day: C 6 right; D 4 right, 2 asked; E 2 right, 3 asked, 1 wrong save: stopped.
 
 ## 6. Still to test
 

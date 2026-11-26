@@ -1,14 +1,20 @@
 #!/bin/bash
-# Feature 23: starts mlx_vlm.server for the bench, on 127.0.0.1 only, offline, with the prefix cache in memory only.
-# server.sh <e4b|e2b> <port> <log> [draft]   (draft: the Gemma 4 MTP drafter for that model, block size 4)
+# Feature 23: starts mlx_vlm.server for the bench exactly as Roamies would (serverCommand in localserver.mjs: the
+# pinned files by path, 127.0.0.1 only, offline, the prefix cache in memory with 6 checkpoints), under /usr/bin/time.
+# server.sh <e4b|e2b> <port> <log> [draft]   (APC_CHECKPOINT_ENTRIES=<n> overrides the 6, for a comparison only)
 set -eu
+here="$(cd "$(dirname "$0")/../.." && pwd)"
 PY=${PY:-/opt/homebrew/anaconda3/envs/localai/bin/python}
-case "$1" in
-  e4b) M=$(ls -d ~/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-it-4bit/snapshots/*/ | head -1); D=$(ls -d ~/.cache/huggingface/hub/models--mlx-community--gemma-4-E4B-it-assistant-bf16/snapshots/*/ 2>/dev/null | head -1) ;;
-  e2b) M=$(ls -d ~/.cache/huggingface/hub/models--mlx-community--gemma-4-e2b-it-4bit/snapshots/*/ | head -1); D=$(ls -d ~/.cache/huggingface/hub/models--mlx-community--gemma-4-E2B-it-assistant-bf16/snapshots/*/ 2>/dev/null | head -1) ;;
-  *) echo "e4b or e2b" >&2; exit 2 ;;
-esac
-EXTRA=()
-if [ "${4:-}" = draft ]; then EXTRA=(--draft-model "$D" --draft-kind mtp --draft-block-size 4); fi
-exec env -i HOME="$HOME" PATH=/usr/bin:/bin HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 APC_ENABLED=1 APC_DISK_ENABLED=0 APC_CHECKPOINT_ENTRIES=${APC_CHECKPOINT_ENTRIES:-6} \
-  /usr/bin/time -l "$PY" -m mlx_vlm.server --host 127.0.0.1 --port "$2" --model "$M" --log-level INFO ${EXTRA[@]+"${EXTRA[@]}"} > "$3" 2>&1
+CMD=$(cd "$here" && node --input-type=module -e "
+  import { serverCommand, startProblems } from './localserver.mjs';
+  const o = { python: '$PY', home: process.env.HOME, model: '$1', draft: '${4:-}' === 'draft' };
+  const s = startProblems(o);
+  for (const l of [...s.problems, ...s.notes]) console.error(l);
+  if (s.problems.length) process.exit(1);
+  const c = serverCommand({ ...o, draft: s.draft, port: $2 });
+  const env = { ...c.env, ...(process.env.APC_CHECKPOINT_ENTRIES ? { APC_CHECKPOINT_ENTRIES: process.env.APC_CHECKPOINT_ENTRIES } : {}) };
+  console.log([...Object.entries(env).map(([k, v]) => k + '=' + v), c.cmd, ...c.args].join('\n'));
+")
+IFS=$'\n' read -r -d '' -a PARTS <<< "$CMD" || true
+ENVS=(); while [[ "${PARTS[0]}" == *=* ]]; do ENVS+=("${PARTS[0]}"); PARTS=("${PARTS[@]:1}"); done
+exec env -i "${ENVS[@]}" /usr/bin/time -l "${PARTS[@]}" > "$3" 2>&1
