@@ -1235,6 +1235,22 @@ server, the tunnel).
   by code, shown for a yes (right or wrong), asked, misses. Plan:
   `~/Documents/roamies-reports/2026-11-26_1206_feature-23-confirm-before-saving-plan.md`.
 
+- **Built and measured (2026-11-26, the plan above).** `DECIDED`, `decideAction`, `titleIn`, `reminderByCode`,
+  `changeQuestion`, `promised` in `checks.mjs`; `confirm` and `confirmChanges` in `liteRequest`; the written time forms
+  in `daily.mjs` (`writtenTimes`), read by `parseWhen` and `clockSaid`. A and B, then frozen at `0a1180c`; C to F once
+  each with E4B and the drafter (the stand-in answers no question):
+
+  | Set | Saved by code, right | Saved by code, wrong | Shown for a yes, right | Shown, wrong | Asked rightly | Asked although complete | Read or answered right | Misses |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | C | 2 | 0 | 2 | 0 | 0 | 0 | 2 | 0 |
+  | D | 2 | 0 | 2 | 0 | 0 | 0 | 2 | 0 |
+  | E | 2 | 0 | 3 | 0 | 0 | 0 | 1 | 0 |
+  | F | 2 | 0 | 2 | 0 | 2 | 0 | 0 | 0 |
+
+  The four reminders were made by code with no model call (10 to 12 ms). F's wrong save of the day before ("now due
+  on Tuesday") is saved by code as a due time although the model again chose `move_block`. Model requests: first
+  token 0.45 / 0.71 / 1.2 s, whole 0.97 / 1.6 / 2.6 s (min / median / max).
+
 ### 32. Ledger
 
 Agreed 2026-11-24 (the owner); recorded 2026-11-25. Recorded with 23, shown in 21.
