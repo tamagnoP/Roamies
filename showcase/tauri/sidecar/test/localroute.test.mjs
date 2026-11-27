@@ -36,12 +36,16 @@ out = await route.request('Move the budget review to tomorrow at 10.');
 assert.deepEqual(ran.pop(), ['move_block', { todo: 'k3f9', date: 'tomorrow', start: '10:00' }]); assert.equal(out.reply, 'done move_block');
 // a read: never asked; the model's answer after it
 asked.length = 0; fake.answers.push({ calls: [['show_day', {}]] }, { content: 'On Friday you have the lab meeting at nine.' });
-out = await route.request('What have I got on Friday?');
+out = await route.request('Anything on Friday I should know about?');
 assert.deepEqual([out.reply, asked.length], ['On Friday you have the lab meeting at nine.', 0]); assert.deepEqual(ran.pop(), ['show_day', { date: 'friday' }]);
+// a day decided by code: worded by code, the model not asked (the owner, 2026-11-27)
+const before = fake.requests.length;
+out = await route.request('What have I got on Friday?');
+assert.deepEqual([out.reply, out.by, fake.requests.length - before], ['friday: 09:00 to 10:00, Lab meeting.', 'code', 0]); assert.deepEqual(ran.pop(), ['show_day', { date: 'friday' }]);
 // its own history goes with the next request, as text after the fixed opening
 fake.answers.push({ content: 'Hello.' });
 await route.request('Hi.');
-assert.match(fake.requests.at(-1).transient_context, /^Earlier in this conversation:\nOffice: Remind me at half past four/); assert.equal(fake.requests.at(-1).transient_context.match(/^Office: /gm).length, 5, 'its last 4 exchanges (local.historyExchanges), then what he said');
+assert.match(fake.requests.at(-1).transient_context, /^Earlier in this conversation:\nOffice: Move the budget review to tomorrow at 10\.\nYou: Nothing was changed\./); assert.equal(fake.requests.at(-1).transient_context.match(/^Office: /gm).length, 5, 'its last 4 exchanges (local.historyExchanges), then what he said');
 assert.ok(!fake.requests.some((b) => JSON.stringify(b.messages[0]).includes('Earlier')), 'the opening never changes');
 // local.confirmChanges false: saved at once
 s = settings({ confirmChanges: false }); answer = null; asked.length = 0;

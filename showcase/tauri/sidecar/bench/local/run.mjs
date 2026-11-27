@@ -46,7 +46,7 @@ if (process.env.WARM !== '0') console.log(JSON.stringify({ liveCheck: await live
 const rows = [];
 for (let rep = 0; rep < Number(process.env.REPEAT || 1); rep++) {
   const count = { savedRight: 0, savedWrong: 0, shownRight: 0, shownWrong: 0, askedRight: 0, asked: 0, right: 0, miss: 0 };
-  let retries = 0, replaced = 0;
+  let retries = 0, replaced = 0, written = 0;
   for (const [k, [said, check]] of tasks.entries()) {
     seen.length = 0;
     const run = createLiteRunner({ tool, todos: async () => TODOS, readDaily: async () => { seen.push({ n: 'read_daily', a: {} }); return '## Plan\n- [ ] Budget review'; }, now: () => NOW, said: () => said, planOf: async (d) => (d === 'today' ? facts.plan : []), dueOf: async (id) => DUE[id] ?? null });
@@ -57,11 +57,11 @@ for (let rep = 0; rep < Number(process.env.REPEAT || 1); rep++) {
     const good = out.shown && !writes.length ? !!check({ n: out.shown.tool, a: out.shown.args }, out) : !!check(seen[0], out);
     const outcome = writes.length ? (good ? 'savedRight' : 'savedWrong') : out.shown ? (good ? 'shownRight' : 'shownWrong') : ['ask', 'one'].includes(out.by) ? (ASK[set]?.[k]?.test(out.reply) ? 'askedRight' : 'asked') : good ? 'right' : 'miss';
     count[outcome]++;
-    retries += out.noStreamRetries; replaced += out.by === 'replaced' ? 1 : 0;
+    retries += out.noStreamRetries; replaced += out.by === 'replaced' ? 1 : 0; written += out.by === 'written' ? 1 : 0;
     const u = out.usage.filter(Boolean);
     const row = { set, said, outcome, by: out.by, firstMs: Math.round(out.firstMs ?? 0), ms: Math.round(ms), calls: out.calls.map((c) => ({ n: c.name, a: c.args, by: c.by, ...(c.model ? { model: c.model } : {}), ...(c.asked ? { asked: true } : {}), ...(c.notRun ? { notRun: true } : {}) })), shown: out.shown?.question, ran: seen.map((s) => ({ n: s.n, a: s.a })), reply: out.reply.slice(0, 200), prompt: u[0]?.prompt_tokens, cached: u[0]?.prompt_tokens_details?.cached_tokens, outs: u.map((x) => x.completion_tokens), steps: out.usage.length };
     rows.push(row);
     console.log(JSON.stringify(row));
   }
-  console.log(`SET ${set}${rep ? ` run ${rep + 1}` : ''}: saved by code right ${count.savedRight} wrong ${count.savedWrong}, shown for a yes right ${count.shownRight} wrong ${count.shownWrong}, asked rightly ${count.askedRight}, asked although complete ${count.asked}, read or answered right ${count.right}, misses ${count.miss} (of ${tasks.length})  no-stream retries ${retries}  replies replaced ${replaced}`);
+  console.log(`SET ${set}${rep ? ` run ${rep + 1}` : ''}: saved by code right ${count.savedRight} wrong ${count.savedWrong}, shown for a yes right ${count.shownRight} wrong ${count.shownWrong}, asked rightly ${count.askedRight}, asked although complete ${count.asked}, read or answered right ${count.right}, misses ${count.miss} (of ${tasks.length})  no-stream retries ${retries}  replies replaced ${replaced}  calls written out as text ${written}`);
 }

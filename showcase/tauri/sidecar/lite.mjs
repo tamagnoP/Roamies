@@ -6,8 +6,11 @@
 // reads those from his sentence and places them by the action (checks.mjs), with the other checks: one change per
 // request, no unconfirmed claims, code-worded lines after a change. What code decided from his words (checks.mjs's
 // DECIDED) is saved at once; a change the model chose is shown first as a code-worded question for a yes
-// (`local.confirmChanges`); a reminder code can read whole is made with no model call. Here are the prompt, the
-// tools, the runner that turns a call and the placed times into the real tools' arguments, and the request loop.
+// (`local.confirmChanges`). An action code decided that needs nothing from the model (a reminder code can read whole,
+// off the calendar, mark done, a new due time, show a day, open an app) is done by code alone, with no model call; the
+// model is asked only for what it must supply (a to-do's or a note's free text). A reply that is a tool call written
+// out as text is never shown, spoken or run (writtenCall). Here are the prompt, the tools, the runner that turns a call
+// and the placed times into the real tools' arguments, and the request loop.
 import { NOT_SAVED, changeQuestion, createRequestCheck, kindFor, matchTitle, reminderByCode, reminderLine, updateLine } from './checks.mjs';
 import { ymd } from './daily.mjs';
 
@@ -162,6 +165,36 @@ export function liteMessage({ name, said, state, history = [] }) {
 }
 const plainResult = (t) => String(t ?? '').replace(/\s*\[[A-Za-z0-9_-]{2,}\]/g, '').trim();
 
+/** A day as show_day gives it, worded by code for him: "Friday 28 November: 09:00 to 10:00, Lab meeting; 15:00 to
+ *  16:00, Grant report draft." (ids and lengths aside); a line that isn't a block (the sync's notice) after it. */
+export function dayReply(text) {
+  const [head = '', ...rest] = String(text ?? '').split('\n');
+  const blocks = [], tail = [];
+  for (const l of rest) {
+    const m = /^(\d{2}:\d{2} to \d{2}:\d{2})(?: \(\d+ min\))?: (.+)$/.exec(plainResult(l));
+    if (m) blocks.push(`${m[1]}, ${m[2]}`); else if (l.trim()) tail.push(plainResult(l));
+  }
+  const first = blocks.length ? `${head.replace(/:\s*$/, '')}: ${blocks.join('; ')}.` : plainResult(head);
+  return [first, ...tail].filter(Boolean).join(' ');
+}
+
+/** Whether a reply is a tool call written out as text, by its shape, never by tool names: the model's own control
+ *  tokens (`<|"|>`, `<|tool_call>`), a name joined to braces with a field in them (`unschedule_block{todo:…}`), or to
+ *  brackets with a field set or nothing in them (`open(app="Zotero")`, `show_day()`), at the start of the reply (a
+ *  sentence about code further on stays), or JSON that opens with a call's fields (`{"name": …}`). */
+export function writtenCall(reply) {
+  const t = String(reply ?? '');
+  const lead = String.raw`^\s*(?:\`\`\`\w*\s*)?(?:call:\s*)?[A-Za-z_][\w.]*`;
+  return /<\|[^\s|>]{0,20}\|?>|<[^\s<>|]{1,20}\|>/.test(t)
+    || new RegExp(`${lead}\\s?\\{\\s*(?:"?[A-Za-z_]\\w*"?\\s*:|\\})`).test(t)
+    || new RegExp(`${lead}\\(\\s*(?:[A-Za-z_]\\w*\\s*=|\\))`).test(t)
+    || /^\s*(?:```\w*\s*)?[{[]\s*\{?\s*"(?:name|tool|tool_name|function|tool_calls?|arguments|parameters)"\s*:/.test(t);
+}
+export const WRITTEN_CALL = 'I couldn\'t do that here. Nothing was changed.';
+export const WRITTEN_CALL_AFTER = 'I couldn\'t do the rest of that here; nothing more was changed.';
+/** The actions code decided that need nothing from the model: done by code alone (show is a read and never asks). */
+export const BY_CODE_ALONE = ['unbook', 'mark', 'due', 'open', 'show'];
+
 /** What a call runs when code decided the action (checks.mjs's DECIDED): code's tool, with the to-do whose whole
  *  title is in his sentence (a change to a to-do is decided only then), the app as he named it, and the model's text
  *  (a reminder's, a new to-do's, a note's). */
@@ -203,16 +236,19 @@ export async function liteRequest({ chat, run, name, model, said, state, history
   }
   let lastRead = '', seeded = false;
   const done = (by, reply) => { out.by = by; out.reply = reply; return out; };
-  // Looking up a day, decided by code ("what's on Friday?"): code reads the day and runs show_day first; the model
-  // only words the answer from the result. A read never asks.
-  if (check.decided?.action === 'show') {
-    const res = await run('show_day', {}, place);
-    if (res.ask) { out.calls.push({ name: 'show_day', args: {}, ok: false, asked: true, by: 'code' }); return done('ask', res.ask); }
-    out.calls.push({ name: 'show_day', args: {}, ok: !!res.ok, by: 'code' });
-    check.result('show_day', res);
-    if (res.ok) lastRead = res.text;
-    messages.push({ role: 'assistant', content: null, tool_calls: [{ id: 'code_show_day', type: 'function', function: { name: 'show_day', arguments: '{}' } }] }, { role: 'tool', tool_call_id: 'code_show_day', content: res.text || (res.ok ? 'Nothing.' : 'Failed.') });
-    seeded = true;
+  // An action code decided that needs nothing from the model (the owner, 2026-11-27): code's tool with the to-do whose
+  // whole title is in his sentence, his times placed by code, the app as he named it; saved at once, its line worded
+  // by code, no model call. A day looked up ("what's on Friday?") is worded by code from show_day's result.
+  const d0 = check.decided;
+  if (d0 && BY_CODE_ALONE.includes(d0.action) && (d0.action === 'show' || d0.action === 'open' ? true : !!d0.title)) {
+    const callName = d0.tool, callArgs = d0.action === 'show' ? {} : decidedCall(d0, callName, {});
+    const res = await run(callName, callArgs, place);
+    out.calls.push({ name: callName, args: callArgs, ok: !!res.ok, by: 'code', ...(res.ask ? { asked: true } : {}) });
+    if (res.ask) return done('ask', res.ask);
+    if (!res.ok) return done('code', `That didn't work: ${String(res.text || 'it failed').replace(/[.\s]+$/, '')}. ${d0.action === 'show' ? '' : NOT_SAVED}`.trim());
+    if (d0.action === 'show') return done('code', dayReply(res.text) || 'Nothing is on the calendar that day.');
+    check.result(callName, res);
+    return done('code', check.lines.join(' ') || 'Done.');
   }
   // Feature 14: reading a file he named, decided by code ("read segment.py"): code reads it first (the file tool finds
   // it by name in his folders); the model only words the answer. What the tool refuses is said as it is.
@@ -268,6 +304,8 @@ export async function liteRequest({ chat, run, name, model, said, state, history
     if (stop) return done(stop.by, [...check.lines, stop.reply].join(' '));
     if (!again) return done('tools', check.lines.join(' '));
   }
+  // A tool call written out as text: never shown, spoken or run; a code-worded line instead.
+  if (writtenCall(out.reply)) { out.written = true; return done('written', check.lines.length ? [...check.lines, WRITTEN_CALL_AFTER].join(' ') : WRITTEN_CALL); }
   // An empty answer after a read: the result itself, without its ids.
   const empty = !out.reply && lastRead;
   const f = check.finish(empty ? plainResult(lastRead) : out.reply);
