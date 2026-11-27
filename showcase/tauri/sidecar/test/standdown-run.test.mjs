@@ -147,6 +147,28 @@ try {
   assert.ok(said.indexOf('While I stood down: 2 calendar lines went by, their blocks over.') > 0, `after the reply (${said.join(' | ')})`);
   assert.match(logText().split('\n').filter((l) => / stand_down_said /.test(l)).at(-1), / stand_down_said \{"chars":64,"caught":0,"said":(true|false),"review":false\}$/);
   await waitFor(() => state().quiet.stood === null, 10_000, 'given: forgotten');
+
+  // the owner, 2026-11-26: the phrase and "thanks" typed alone are taken as said, and the ask field he opens while
+  // stood down is no leak
+  const askField = async (text) => {
+    const f = out.length;
+    tell({ type: 'menu', id: 'ask' });
+    await waitFor(() => page(f).some((m) => m.kind === 'ask' && m.bar), 3000, 'the ask field');
+    tell({ type: 'answer', id: page(f).find((m) => m.kind === 'ask' && m.bar).id, text });
+  };
+  const requests = () => (logText().match(/ request \{/g) ?? []).length, before = requests();
+  from = out.length;
+  await askField('Jarvis, stand down, please');
+  await waitFor(() => / stand_down \{"by":"typed",/.test(logText()), 5000, 'the typed phrase stands it down');
+  assert.ok(page(from).some((m) => m.kind === 'stand' && m.on === true), 'the page is told');
+  from = out.length;
+  await askField('thanks');
+  await waitFor(() => / stand_down_end \{"by":"typed",/.test(logText()), 5000, 'a typed "thanks" ends it, as a spoken one does');
+  await waitFor(() => page(from).some((m) => m.kind === 'say' && /^Any time/.test(m.text)), 5000, 'the closing line');
+  await sleep(1500);
+  assert.equal(requests(), before, 'neither went to the model');
+  assert.doesNotMatch(logText(), / stand_down_leak /, 'the ask field opened while stood down is not a leak');
+  assert.doesNotMatch(logText(), /thanks|Jarvis, stand down/i, 'no words in the log');
 } finally {
   await stop();
   fs.rmSync(home, { recursive: true, force: true });

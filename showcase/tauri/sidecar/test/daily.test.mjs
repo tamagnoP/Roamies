@@ -102,9 +102,9 @@ assert.ok(note().endsWith(`- 11:59 Done: Someday
 - Send slides (due 17:00)
 `));
 assert.equal(daily.reviewDue(), false, 'once a day by the clock');
-// A Log line after the review starts a Log of its own.
+// A Log line after the review starts a Log of its own, titled so (the owner, 2026-11-26).
 clock = at(26, 19); finish('c', at(26, 19)); daily.tick();
-assert.ok(note().endsWith('- Send slides (due 17:00)\n\n## Log\n- 19:00 Done: Call Ana\n'));
+assert.ok(note().endsWith('- Send slides (due 17:00)\n\n## Log (after the review)\n- 19:00 Done: Call Ana\n'));
 // A second review adds only what changed.
 clock = at(26, 21, 10);
 assert.equal(daily.review({ by: 'asked' }).line, 'Day review: 2 of 3 planned to-dos done, 1 missed. It\'s in today\'s note.');
@@ -179,7 +179,7 @@ for (const [said, want] of [
   ['half 3 tomorrow', 'Fri Nov 27 2026 15:30'], ['tomorrow at 9.30', 'Fri Nov 27 2026 09:30'], ["friday's", 'day Fri Nov 27 2026'], ['at 3 p.m. on friday', 'Fri Nov 27 2026 15:00'],
   ['from 10 to 11', null],
   ['leave it', 'leave'], ['Not now.', 'leave'], ['drop it', 'drop'], ['let it go', 'drop'],
-  ['today at 9', null], ['next friday', null], ['next week', null], ['banana', null], ['tomorrow at 25', null], ['', null], ['delete it', null], ['mark it done', null],
+  ['today at 9', null], ['next friday', 'next'], ['next week', null], ['banana', null], ['tomorrow at 25', null], ['', null], ['delete it', null], ['mark it done', null],
 ]) assert.equal(when(said), want, said);
 
 // ---- the bubble: a click answers by position, what is said by parse()
@@ -216,7 +216,7 @@ for (const [said, want] of [
   const d2 = createDaily({ home: home2, todos: () => T2.map((t) => ({ ...t })), blocks: () => ({ ...B2 }), now: () => now2, log: (k, d) => logs2.push([k, d]) });
   const asked = [], said = [], moved = []; let script = [];
   const io = {
-    ask: async (o) => { asked.push(o); const a = script.shift(); if (a === 'nobody') throw Object.assign(new Error('no answer'), { name: 'Unanswered' }); return typeof a === 'string' ? o.parse(a) : a ?? null; },
+    ask: async (o) => { asked.push(o); const a = script.shift(); if (a === 'nobody') throw Object.assign(new Error('no answer'), { name: 'Unanswered' }); return typeof a === 'string' && o.parse ? o.parse(a) : a ?? null; },
     reschedule: async (id, w) => { moved.push([id, w]); const t = T2.find((x) => x.id === id); if (B2[id] && w.start) B2[id] = { ...B2[id], start: w.start }; else t.due = w.start ?? w.day.getTime() + 18 * 3600_000; return { ok: true, line: `Moved ${id}.` }; },
     say: async (t) => { said.push(t); },
   };
@@ -231,7 +231,7 @@ for (const [said, want] of [
   assert.deepEqual(asked[0].choices, ['Leave it', 'Drop it']); assert.equal(asked[0].spoken, asked[0].placeholder);
   assert.deepEqual(moved, [['m1', { start: at(27, 10) }]], 'only an answer with a time moves anything; Roamies never picks one');
   assert.deepEqual(said, ['Moved m1.', 'I\'ll stop asking about Email Bo.', '1 more needs a new time: it\'s in today\'s note under Needs a new time.']);
-  assert.ok(note2().endsWith('## Log\n- 18:30 Rescheduled: Draft abstract → Friday 27 November, 10:00\n- 18:30 Let go: Email Bo\n'));
+  assert.ok(note2().endsWith('## Log (after the review)\n- 18:30 Rescheduled: Draft abstract → Friday 27 November, 10:00\n- 18:30 Let go: Email Bo\n'));
   assert.deepEqual(T2.find((t) => t.id === 'm2'), { id: 'm2', text: 'Email Bo', kind: 'commitment', status: 'open', due: at(26, 11), doneAt: null }, 'let go: the to-do itself is left exactly as it is');
   assert.equal(T2.find((t) => t.id === 'm3').due, at(26, 12), '"leave it" changes nothing');
   // Asked again the same evening: only what wasn't answered. No answer ends the round and changes nothing.
@@ -268,11 +268,26 @@ for (const [said, want] of [
   assert.deepEqual(said, ['3 more need a new time: they\'re in today\'s note under Needs a new time.']);
   for (const [k, d] of logs2) assert.ok(!/Draft|Email|Order|Bench|Old thing|Ana/i.test(JSON.stringify(d)), `${k}: counts only`);
   assert.deepEqual(logs2.filter(([k]) => k === 'daily_questions').map(([, d]) => d), [
-    { kind: 'review', total: 4, asked: 3, left: 1, moved: 1, leave: 1, dropped: 1, failed: 0 },
-    { kind: 'review', total: 2, asked: 1, left: 1, moved: 0, leave: 0, dropped: 0, failed: 0, ended: 'unanswered' },
-    { kind: 'morning', total: 4, asked: 3, left: 1, moved: 1, leave: 1, dropped: 0, failed: 0, ended: 'closed' },
-    { kind: 'morning', total: 4, asked: 1, left: 3, moved: 0, leave: 1, dropped: 0, failed: 0 },
+    { kind: 'review', total: 4, asked: 3, left: 1, moved: 1, leave: 1, dropped: 1, failed: 0, none: 0 },
+    { kind: 'review', total: 2, asked: 1, left: 1, moved: 0, leave: 0, dropped: 0, failed: 0, none: 0, ended: 'unanswered' },
+    { kind: 'morning', total: 4, asked: 3, left: 1, moved: 1, leave: 1, dropped: 0, failed: 0, none: 0, ended: 'closed' },
+    { kind: 'morning', total: 4, asked: 1, left: 3, moved: 0, leave: 1, dropped: 0, failed: 0, none: 0 },
   ]);
+  // "next monday" (the owner, 2026-11-26): the calendar's question between the two days, then the answer taken
+  now2 = at(28, 15); asked.length = 0; said.length = 0; moved.length = 0; script = ['yes'];
+  const nm = parseWhen('next monday', { now: now2 });
+  assert.deepEqual(nm, { kind: 'next', name: 'Monday', first: new Date(2026, 10, 30), second: new Date(2026, 11, 7), mins: null });
+  assert.equal(await d2.answerWhen({ id: 'o1', title: 'Call Ana' }, nm, io), 'moved');
+  assert.equal(asked[0].placeholder, 'Call Ana: Monday the 30th or Monday the 7th?'); assert.deepEqual(asked[0].choices, ['Monday the 30th', 'Monday the 7th']);
+  assert.deepEqual(moved, [['o1', { day: new Date(2026, 10, 30) }]]);
+  assert.ok(note2('2026-11-28').endsWith('- 15:00 Rescheduled: Call Ana → due Monday 30 November\n'));
+  script = [SECOND];
+  assert.equal(await d2.answerWhen({ id: 'o1', title: 'Call Ana' }, parseWhen('next monday at 4', { now: now2 }), io), 'moved');
+  assert.deepEqual(moved.at(-1), ['o1', { start: new Date(2026, 11, 7, 16).getTime() }], 'the second, with the time said');
+  script = ['nobody']; moved.length = 0;
+  assert.equal(await d2.answerWhen({ id: 'o1', title: 'Call Ana' }, nm, io), 'none', 'no pick: nothing changes');
+  assert.deepEqual(moved, []);
+  assert.deepEqual(logs2.filter(([k]) => k === 'daily_next_day').map(([, d]) => d.answered), [true, true, false]);
   fs.rmSync(home2, { recursive: true, force: true });
 }
 

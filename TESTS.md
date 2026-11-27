@@ -6,10 +6,22 @@ says a session has passed, `next` is merged into `local-only` (see "Git" in `CLA
 
 Before a session: build the app from `next` and install it as `CLAUDE.md` says ("To install a build").
 
+## What the owner still has to test
+
+Kept current: a check leaves this table when the owner says it passed. Claude ran groups 1 and 2 in throwaway homes
+on 2026-11-26 (`~/Documents/roamies-reports/2026-11-26_1747_TESTS-RUN.md`); what it could run passed, but for four
+checks, fixed since. Everything else is below.
+
+| Group | Checks still to do | Why these |
+|---|---|---|
+| Feature 18 | 3, 9, 11 (typed), 15, 16, 17 | 3 and 15 failed and were fixed; 9 changed ("Next Friday", the Log heading after the review); 11 typed was answered by the AI and is fixed; 16 needs a real night; 17 changed (the tool lines) |
+| Feature 33 | 1 to 7, 9, 13, 14 | the screen, voice and a real pi task; 13 changed (`typed`); 14 is new |
+| Features 25 and 31 | 8, 15, 16 | 8 needs a real call; 15 and 16 are new |
+| Features 23 and 32 | 1, 5, 6, 7, 8, 9, 10 | 1 and 5 failed and were fixed; 6 and 7 changed; 8 needs your tunnel; 9 needs the shell; 10 is new |
+
 ## Group 1: features 18, 33, 25 and 31
 
-Features 18 and 33 are on `next`. Features 25 and 31 are built together on `check-ins`, waiting for the owner's
-review.
+All four are on `next` (25 and 31 since `ca766c8`).
 
 ### Feature 18: the daily note, task pages, the handover
 
@@ -56,8 +68,12 @@ over (to be missed), one still ahead, and one with nothing planned.
    - "Drop it": Roamies says "I'll stop asking about <title>."; the Log gets `Let go: <title>`; the task in Super
      Productivity is unchanged (not deleted, not done).
    - Say nothing: the bubble closes when its answer window ends, nothing changes, and no further question comes.
-   - "Next Friday" or "banana": the bubble shows `Heard "…"` and stays open.
+   - "Next Friday": a second bubble, "<title>: Friday the Nth or Friday the Mth?", with a button for each, said with
+     its answer window. Click one, or say "the first one" or "the 4th": it moves to that Friday. No answer changes
+     nothing.
+   - "banana": the bubble shows `Heard "…"` and stays open.
    With more than three missed: one line, "N more need a new time: …in today's note under Needs a new time."
+   These Log lines come under `## Log (after the review)`, not a second `## Log`.
 10. **Hold the talk keys and say "review my day".**
     You should see and hear: the counts again; the note gets `## Review update (HH:MM)` with only what changed
     since; the questions not answered yet come again.
@@ -88,6 +104,8 @@ over (to be missed), one still ahead, and one with nothing planned.
     comes first, said by the app, then the summary of pi's work.
 17. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
     You should see: `daily_*`, `handover`, `handover_items` and `open_item_*` lines with counts only, and no titles.
+    The `tool` lines have the tool's name and each argument's length only (`"args":{"title":19}`); `tool_done` and
+    `tool_error` the name, the time and the result's length (`chars`).
 
 ### Feature 33: stand down
 
@@ -133,13 +151,17 @@ what it holds waits in the quiet queue: the steps below are written for that.
     You should see: colour comes back by itself, with nothing said or shown. Then type a request: after its reply,
     the "While I stood down…" line, if anything happened meanwhile.
 13. **The activity log**, `~/.gg/sidekick/logs/<today>.log`.
-    You should see: one `stand_down` line each time it began (by `key` or `phrase`, then true/false only) and one
-    `stand_down_end` line each time it ended (`by`, `minutes`, `held`); `quiet_queued` lines with `"why":"stood"`
-    for what it held; no words you said, no titles.
+    You should see: one `stand_down` line each time it began (by `key`, `phrase` or `typed`, then true/false only)
+    and one `stand_down_end` line each time it ended (`by`, `minutes`, `held`); `quiet_queued` lines with
+    `"why":"stood"` for what it held; no `stand_down_leak` for the ask field you opened; no words you said, no titles.
+14. **Typed, as said.** Open the ask field and type "Jarvis, stand down, please".
+    You should see: it stands down as in 2; nothing goes to the AI. Open the ask field again (it opens while stood
+    down) and type "thanks".
+    You should see: colour comes back, "Any time." (said too when spoken replies are on), and no reply from the AI.
 
 ### Features 25 and 31: check-ins, the speaking budget and the quiet queue
 
-Built together on `check-ins`; on `next` once the review is accepted. Two numbers matter here: at most 3 things said
+On `next` since `ca766c8`. Two numbers matter here: at most 3 things said
 unasked an hour, and a check-in at most 6 times a day.
 
 **Before.** Add to `~/Documents/roamies-pi/settings.json`:
@@ -194,10 +216,18 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
     You should see: `checkin_due`, `checkin {how, answer}`, `deadline_at_risk`, `quiet_queued {kind, why}` (why one of
     `stood`, `off`, `away`, `call`, `budget`), `quiet_given`, `quiet_stale`, `presence {away, call}`, `plan_ticked`;
     counts and those words only, no titles.
+15. **Started late.** Quit Roamies; have a to-do whose block ended more than an hour ago and one whose block ended
+    20 minutes ago; start Roamies.
+    You should see: a check-in for the second only. At `calendar.reviewAt`, the first is listed as Missed and asked
+    about like any missed to-do.
+16. **"Next Friday" in a check-in.** When a check-in comes, say **"not yet, next Friday at 10"**.
+    You should see: a second bubble, "<title>: Friday the Nth or Friday the Mth?", said with its answer window.
+    Click the second: the to-do moves to 10:00 on the later Friday, and the Log says so. No answer changes nothing,
+    and the Log gets `Check-in: <title>: not yet`.
 
 ## Group 2: features 23, 32, 14, 29 and 30
 
-### Features 23 and 32: the local model, private mode, the ledger (branch `offline-ledger`; 14, 29 and 30 not built)
+### Features 23 and 32: the local model, private mode, the ledger (on `next` since `1854529`; 14, 29 and 30 not built)
 
 **Before.** In `~/Documents/roamies-pi/settings.json`: `"local": { "address": "http://127.0.0.1:8080/v1", "model": "",
 "whenOffline": true, "historyExchanges": 4, "maxSteps": 4, "confirmChanges": true, "start": { "python":
@@ -231,11 +261,19 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
    start, so nothing was sent.", never that it is answering.
 7. **Say "What left the Mac today?", then type it.** You should see, both times: the provider's requests, tokens,
    screen captures and window texts, how many stayed on this Mac (the warm-ups named apart), and the hand-offs to pi;
-   no model is asked.
+   no model is asked. A request that failed at sign-in, if there was one today, has a sentence of its own ("… failed
+   at sign-in and got no answer …") and is not counted among those sent. In `~/.gg/sidekick/ledger.jsonl` the local
+   lines have `"model":"e4b"`, no folder.
 8. **The tunnel** (your own, to the Mac mini, on another port in `local.address`): the same answers; Roamies starts
-   and stops no server.
+   and stops no server, and gives no notice about the port.
 9. **The activity log**: `timing {route, hearing, ready, reading, voice, …}`, `memory {mb: {shell, sidecar, voice,
    kokoro, modelServer, webkit}, pressure, swapMB}`, `local_request`, `private_mode`; numbers and names only.
+10. **Something else at the port.** With `local.start` set and Roamies' server stopped (`sleepAfterMinutes` passed,
+    or Roamies quit and opened again), start another program on port 8080 (`python3 -m http.server 8080`), turn
+    Wi-Fi off and ask anything.
+    You should see: a notice, "Something else is answering at 127.0.0.1:8080, where Roamies starts its own local
+    model …", and "The local model could not start, so nothing was sent."; no answer from it. Stop that program: the
+    next request starts Roamies' own server as usual.
 
 ## Group 3: features 19 and 21
 

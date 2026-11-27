@@ -5,7 +5,8 @@
 //     they had has passed), and the deadlines coming up in the next COMING_DAYS days. Written by the morning
 //     briefing, or by the first thing written in the note that day.
 //   - Log: a line when a to-do is finished (seen at each check, whether it was ticked in Roamies or in Super
-//     Productivity) and when a note is taken. A Log line that comes after another section starts a new "## Log".
+//     Productivity) and when a note is taken. A Log line that comes after another section starts a new "## Log"; one
+//     after the review starts "## Log (after the review)" (the owner, 2026-11-26).
 //   - Review: each planned to-do as done, missed or still open today, the missed ones again under "Needs a new
 //     time", and two sentences worded here. Written at "calendar.reviewAt", by the evening briefing when that comes
 //     first, or when the owner asks for it. A second review adds "## Review update (HH:MM)" with only what changed.
@@ -37,7 +38,8 @@
 // to the model, and nothing of the note goes to it.
 // A day starts at "calendar.dayTurnsAt": before that time, it is still the day before.
 import os from 'node:os';
-import { only, unfilled } from './answers.mjs';
+import { FIRST, SECOND, only, unfilled, whichButton } from './answers.mjs';
+import { dayChoice, nextDays } from './calendar.mjs';
 import { createVault } from './notes.mjs';
 import { loadSettings, readState, writeState } from './pi.mjs';
 
@@ -51,6 +53,7 @@ export const isReviewAsk = (text) => REVIEW.test(unfilled(text));
 // The answers to "When will you do it?" that aren't a time, said alone. The buttons are the same two.
 export const LEAVE_WORDS = ['leave it', 'leave it for now', 'leave it there', 'leave', 'skip it', 'skip', 'not now', 'ask me later', 'ask me tomorrow'];
 export const DROP_WORDS = ['drop it', 'drop', 'let it go', 'let go', 'forget it', 'forget about it', 'stop asking', 'stop asking about it'];
+export const LOG_AFTER_REVIEW = '## Log (after the review)';
 export const WHEN_HINT = 'a day and a time, a day, "leave it" or "drop it"';
 const LEAVE = only(LEAVE_WORDS), DROP = only(DROP_WORDS);
 
@@ -167,8 +170,10 @@ export function clockSaid(text, { dayStart = 540, dayEnd = 1080, asWritten = tru
   return t ? minutesOf(t, false, dayStart, dayEnd) : null;
 }
 /** What was said, as the answer to "When will you do it?": { kind: 'at', start } (a day and a time; a time alone is
- *  the next one to come), { kind: 'day', day } (a day alone: 00:00), { kind: 'leave' }, { kind: 'drop' }, or null
- *  when it is none of them (a time that has passed, "next friday", anything else). */
+ *  the next one to come), { kind: 'day', day } (a day alone: 00:00), { kind: 'leave' }, { kind: 'drop' },
+ *  { kind: 'next', name, first, second, mins } ("next friday", with a time or not, mins null: which of the two days is
+ *  asked, calendar.mjs nextDays and dayChoice; the owner, 2026-11-26), or null when it is none of them (a time that
+ *  has passed, anything else). */
 export function parseWhen(text, { now = Date.now(), dayStart = 540, dayEnd = 1080 } = {}) {
   const p = unfilled(text, words), raw = words(text);
   if (!p) return null;
@@ -179,7 +184,14 @@ export function parseWhen(text, { now = Date.now(), dayStart = 540, dayEnd = 108
   for (let k = 0; k <= tokens.length; k++) {
     const left = tokens.slice(0, k).join(' '), right = tokens.slice(k).join(' ');
     for (const [ds, ts] of [[left, right], [right, left]]) {
-      const d = ds ? dayPart(ds, today) : null, t = ts ? timePart(ts) : null;
+      const t = ts ? timePart(ts) : null;
+      if (ds && /^(?:on )?next [a-z]+$/.test(ds) && (!ts || t)) {
+        const mins = t ? minutesOf(t, false, dayStart, dayEnd) : null;
+        if (t && mins === null) return null;
+        const two = nextDays(ds, now, (day) => day.getTime() + (mins ?? dayEnd) * 60_000 <= now);
+        if (two) return { kind: 'next', name: two.name, first: two.first, second: two.second, mins };
+      }
+      const d = ds ? dayPart(ds, today) : null;
       if ((ds && !d) || (ts && !t) || (!d && !t)) continue;
       if (d && !t) {
         const due = d.day.getTime() + dayEnd * 60_000;
@@ -321,12 +333,14 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   }
   const remember = (d, planned) => { d.planned = d.planned && typeof d.planned === 'object' ? d.planned : {}; for (const { t, x } of planned) d.planned[t.id] = { title: oneLine(t.text), at: x.at, end: x.end, block: !!x.block }; };
 
-  /** Lines under the Log: a new "## Log" when the note's last heading is another one. */
+  /** Lines under the Log: a new Log heading when the note's last heading is another one, "## Log (after the review)"
+   *  once a review is in the note. */
   function logLines(t0, lines) {
     if (!lines.length) return;
     ensure(t0);
-    const heads = (vault.read(t0.rel) ?? '').split('\n').filter((l) => /^#{1,6} /.test(l));
-    vault.append(t0.rel, `${heads.at(-1)?.trim() === '## Log' ? '' : '\n## Log\n'}${lines.join('\n')}\n`);
+    const heads = (vault.read(t0.rel) ?? '').split('\n').filter((l) => /^#{1,6} /.test(l)).map((l) => l.trim());
+    const head = heads.some((h) => /^## Review/.test(h)) ? LOG_AFTER_REVIEW : '## Log';
+    vault.append(t0.rel, `${heads.at(-1) === '## Log' || heads.at(-1) === LOG_AFTER_REVIEW ? '' : `\n${head}\n`}${lines.join('\n')}\n`);
   }
 
   /** What happened to the to-dos and reminders since the last check, kept for the handover: made (that day),
@@ -455,9 +469,19 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     return { placeholder: question, spoken: question, choices: ['Leave it', 'Drop it'], clicks: [{ kind: 'leave' }, { kind: 'drop' }], hint: WHEN_HINT, parse: (text) => parseWhen(text, { now: now(), dayStart: s.calendar.dayStart, dayEnd: s.calendar.dayEnd }) };
   }
   /** What an answer to "When will you do it?" does (q: { id, title }; a: parseWhen's answer), with its Log line, and
-   *  marked as answered today. Feature 25: a check-in's "not yet" ends here too. → 'left' | 'dropped' | 'moved' | 'failed'. */
+   *  marked as answered today. Feature 25: a check-in's "not yet" ends here too. "Next friday": which of the two days
+   *  is asked first; no pick changes nothing. → 'left' | 'dropped' | 'moved' | 'failed' | 'none'. */
   async function answerWhen(q, a, io) {
     const mark = (how) => editDay(today().key, (d) => { d.answered = { ...(d.answered ?? {}), [q.id]: how }; });
+    if (a.kind === 'next') {
+      const c = dayChoice(a);
+      let w = null;
+      try { w = whichButton(await io.ask({ placeholder: `${q.title}: ${c.question}`, spoken: c.question, choices: c.choices, which: c.which }), c.choices); } catch (e) { if (e?.name !== 'Unanswered') throw e; }
+      log('daily_next_day', { answered: w === FIRST || w === SECOND });
+      if (w !== FIRST && w !== SECOND) return 'none';
+      const day = w === FIRST ? a.first : a.second;
+      a = a.mins === null ? { kind: 'day', day } : { kind: 'at', start: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, a.mins).getTime() };
+    }
     if (a.kind === 'leave') { mark('left'); return 'left'; }
     if (a.kind === 'drop') {
       const t = list().find((x) => x.id === q.id), b = blocks()[q.id];
@@ -480,7 +504,7 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
   async function ask(kind, io) {
     const t0 = ensure(today()), most = t0.s.limits.reviewQuestions, all = questions(kind, t0);
     if (kind === 'morning') editDay(t0.key, (d) => { d.morning = hm(now()); });
-    const counts = { moved: 0, leave: 0, dropped: 0, failed: 0 };
+    const counts = { moved: 0, leave: 0, dropped: 0, failed: 0, none: 0 };
     let asked = 0, ended = '';
     for (const q of all.slice(0, most)) {
       let a;
@@ -488,7 +512,7 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
       asked++;
       if (!a) { ended = 'closed'; break; }
       const how = await answerWhen(q, a, io);
-      counts[{ left: 'leave', dropped: 'dropped', moved: 'moved', failed: 'failed' }[how]]++;
+      counts[{ left: 'leave', dropped: 'dropped', moved: 'moved', failed: 'failed', none: 'none' }[how]]++;
     }
     const left = all.length - asked;
     if (left > 0) await io.say(`${left} more ${left === 1 ? 'needs' : 'need'} a new time: ${left === 1 ? 'it\'s' : 'they\'re'} in today's note under Needs a new time.`);

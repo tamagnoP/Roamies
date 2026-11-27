@@ -45,15 +45,16 @@ Last updated: 2026-11-25.
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); measured and built 2026-11-26: times taken from code, ask before saving what the model decided (C to F: no wrong save), stages 1 to 6 built; waiting for the owner's tests (TESTS.md group 2) | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
-| 25 | Check-ins on progress | Built with 31 on `check-ins` (2026-11-25, plan answered by the owner); waiting for review | `check-ins` |
+| 25 | Check-ins on progress | In `next` with 31 (`ca766c8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 26 | Roamies sees every open task in Super Productivity; the model gets the to-do list in outline | Done | `f30ab8a`, `8b33fc5`, `c69e902`, `2603453` (plan: `3dc88df`) |
 | 27 | Better hearing: fewer mistakes when speech is turned into text | Agreed 2026-11-20, not designed; last | |
 | 28 | Interrupting: only "wait" stops Roamies while it speaks | Agreed 2026-11-24, not designed; needs echo cancelling; after 17 | |
 | 29 | Run watcher: one named log file, watched by code | Agreed 2026-11-24, not designed; needs 14; after 14 | |
 | 30 | Machine status: this Mac's memory, disk and battery, and whether the Mac mini answers | Agreed 2026-11-24, not designed; after 29 | |
-| 31 | Speaking budget and quiet queue | Built with 25 on `check-ins` (2026-11-25); waiting for review | `check-ins` |
+| 31 | Speaking budget and quiet queue | In `next` with 25 (`ca766c8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
+| 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
@@ -1142,6 +1143,8 @@ server, the tunnel).
   tool calls and replies identical (12 of 12); replies at 18 to 27 tokens a second against 12 to 17; whole requests
   1.2 to 2.4 s against 1.8 to 3.3 s (median 1.8 against 2.5 s on the second run); first token unchanged (0.65 to 0.7
   s); the server's peak footprint 6.8 GB against 6.6 GB. To be a setting of `local.start` when stage 6 is built.
+  Block size 6 (the drafter card's advice for single requests) against 4, on C to F (2026-11-26, the owner asked):
+  the same outcomes in all 48 requests, 1 to 2 % slower, memory the same within 0.3 %: 4 kept.
 - **Memory with everything running (2026-11-26).** E4B with the drafter loaded, Kokoro speaking six replies through the
   real sidecar and page (the bench harness, `bench/run.mjs kokoro`), and set C sent to the server without a break:
   the server at most 5.57 GB resident (peak footprint 7.09 GB over its whole run); Kokoro 1,064 MB, the sidecar 128
@@ -2016,6 +2019,27 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 
   Typed but not spoken: the stand-down phrase and "thanks" alone still go to the model. The smaller items not fixed
   are with the owner, each with a proposed fix.
+- **2026-11-26, night (the owner; his answers in
+  `~/Documents/roamies-reports/2026-11-26_2119_owner-answers-small-fixes-and-feature-14.md`).** The smaller items,
+  on `small-fixes`, merged into `next`:
+  - check-ins skip a block or due time that ended more than 60 minutes before start-up; the review lists it as missed;
+  - the ledger keeps the model's name, never a folder; a request that failed at sign-in is its own kind
+    (`signInFailed`), named apart in "what left the Mac today?", not hidden;
+  - the activity log's tool lines carry tool names and lengths only;
+  - Log lines after the review go under `## Log (after the review)`;
+  - the ask field he opens while stood down is no `stand_down_leak`;
+  - the stand-down phrase and "thanks" typed alone behave as spoken;
+  - with `local.start` set, only Roamies' own server is used: anything else at the port gives a notice and nothing is
+    sent; without it, whatever answers at `local.address` is used;
+  - "next Friday" in a missed-task or check-in answer asks the calendar's question between the two days;
+  - the drafter's block size measured, 6 against 4, on C to F (twice each, 48 requests a size, the bench server
+    started as Roamies starts it): the same tool calls, questions, saves and replies in all 48; median request 1.20 s
+    with 4 against 1.22 s with 6, median first token 0.65 against 0.67 s, all requests 59.5 against 60.3 s; the
+    server's peak footprint 7.06 against 7.04 GB (largest resident 5.55 against 5.25 GB). Kept at 4;
+  - `LESSONS.md` started (feature 37), the rule in CLAUDE.md, with three lessons.
+
+  Then: his live run (Claude, Wi-Fi off, private mode, "what left the Mac today?") with nothing changed meanwhile, its
+  report, then feature 14 built on `roamies-read` from his answers to the plan's eleven questions.
 
 ## 6. Still to test
 

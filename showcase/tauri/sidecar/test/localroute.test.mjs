@@ -70,4 +70,16 @@ s = settings({ address: bad.address });
 out = await createLocalRoute({ settings: () => s, tool, todos: () => TODOS, now: () => NOW }).request('Hi.');
 assert.match(out.problem, /transient_context/); assert.equal(bad.requests.length, 0, 'no request of his was sent');
 await bad.close();
+// the ledger's name for the model (the owner, 2026-11-26): the one local.start names when Roamies starts the server,
+// else what the server lists, which ledgerLine shortens to the model's own name (test/ledger.test.mjs)
+{
+  const pathy = await startFakeLocal({ model: '/Users/office/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-it-4bit/snapshots/475b' });
+  const got = [];
+  s = settings({ address: pathy.address });
+  await createLocalRoute({ settings: () => s, tool, todos: () => TODOS, record: (l) => got.push(l), now: () => NOW }).request('Remind me at half past four to pick up the parcel.');
+  s = settings({ address: pathy.address, start: { ...settings().local.start, python: '/opt/x/bin/python', model: 'e4b' } });
+  await createLocalRoute({ settings: () => s, tool, todos: () => TODOS, record: (l) => got.push(l), now: () => NOW }).request('Remind me at half past four to pick up the parcel.');
+  assert.deepEqual(got.map((l) => [l.kind, l.model]), [['warmup', '/Users/office/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-it-4bit/snapshots/475b'], ['warmup', 'e4b']]);
+  await pathy.close();
+}
 console.log('local route tests passed');
