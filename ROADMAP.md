@@ -1317,6 +1317,9 @@ search text. Includes reading a project's `TODO.md`; only pi writes that file.
   in private mode sent only to the local model; the sandbox's blocked folders and files apply; a note changed only on
   his request, shown before it is saved, the previous version kept; notes never deleted. Eleven questions are with
   the owner; nothing is built.
+- **Answers 2026-11-26 night** (`2026-11-26_2119_owner-answers-small-fixes-and-feature-14.md`); **building from
+  2026-11-27** on `roamies-read`, the live run postponed by the owner. How the answers are read where they leave a
+  detail open: `~/Documents/roamies-reports/2026-11-27_0950_feature-14-build-notes.md`.
 
 ### 29. Run watcher
 
