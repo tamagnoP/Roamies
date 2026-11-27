@@ -21,6 +21,7 @@ checks, fixed since. Everything else is below.
 | Feature 14 | 1 to 14 | new; review accepted 2026-11-27 with three changes (13 and 14) |
 | Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 34 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
+| Feature 41 | 1 to 12 | new, on `pi-updates` (waiting for your review) |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -228,7 +229,7 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
     Click the second: the to-do moves to 10:00 on the later Friday, and the Log says so. No answer changes nothing,
     and the Log gets `Check-in: <title>: not yet`.
 
-## Group 2: features 23, 32, 14, 40, 34, 29 and 30
+## Group 2: features 23, 32, 14, 40, 34, 41, 29 and 30
 
 ### Features 23 and 32: the local model, private mode, the ledger (on `next` since `1854529`; 29 and 30 not built)
 
@@ -408,6 +409,69 @@ each request, the start-up bubble only at start).
     nothing.
 12. **Off.** Set `"masking": false` and type "Who is Zorbina Quell?": an answer as before masking (the name goes as it
     is). Set it back to `true`, and when done, empty the list and delete the throwaway notes.
+
+### Feature 41: pi's updates in plain words (on `pi-updates`)
+
+**Before.** Build from `pi-updates`. Spoken replies on. A throwaway git project and a local "remote" (nothing is
+pushed online). In Terminal:
+
+```sh
+mkdir -p ~/Documents/roamies-pi/f41 && cd ~/Documents/roamies-pi/f41
+printf 'a,b\n1,2\n3,4\n' > data.csv; printf 'x\n' > old.csv; printf 'x\n' > notes.txt; printf 'debug: false\n' > config.yaml
+git init -q && git add . && git commit -qm start
+git init -q --bare ~/Documents/roamies-pi/f41-remote.git && git remote add origin ~/Documents/roamies-pi/f41-remote.git && git push -q origin HEAD:main
+```
+
+Add `"~/Documents/roamies-pi/f41"` to `"projects"` in `settings.json`, and say "Switch project to f41". Step 1 installs
+the small Python package `six` from PyPI into a throwaway virtual environment, `.venv` in that folder: a download from
+pypi.org.
+
+1. **Say "Ask pi, with editing allowed, to write summary.md about data.csv, delete old.csv, check example.com is up
+   with curl, install the Python package six in a new virtual environment called .venv, turn debugging on in the
+   settings file, commit everything and push it."** Click Send.
+   You should see: the step bubbles with the commands, as before.
+   You should hear: within about 20 seconds of the install, the deletion, the curl or the push, one or two plain
+   sentences in Jarvis's manner (for example "The summary is taking shape, sir, and I've had to install one
+   package."). There is no command, option, path or web address, and no "12 steps in". Packages, deleted files, the
+   website's name and the push are each said once, by the sentence or by a plain line after it.
+2. **When pi finishes.**
+   You should hear and see, in this order:
+   - the closing summary, up to three short sentences: the outcome, then any decisions pi stated, then what you have
+     to do, if anything;
+   - lines for what it left out: "I've installed 1 package: six.", "I've deleted old.csv.", "I've also changed
+     config.yaml, which you didn't name.", "One command went online, to example.com.", "I've pushed … to origin."
+     (or the sentence said them);
+   - then pi's full reply on screen, word for word.
+3. **Quiet stretches.** While pi only reads or thinks, nothing is said. At most one update every 90 seconds, sooner
+   only after an install, a deletion or move, a network command or a push.
+4. **Say "What did pi decide?"**
+   You should hear: an answer that matches the closing summary.
+5. **Type "What left the Mac today?"**
+   You should see: "N updates on pi's work" and "1 summary of pi's reply" among the lines.
+6. **The log.** `grep -E "pi_update|pi_summary" ~/.gg/sidekick/logs/$(date +%F).log`
+   You should see: lines with ms, how (`worded`, `fallback` or `plain`), kinds of events and counts only; no sentence,
+   file, package or host name.
+7. **A deletion by a script.** Say "Ask pi, with editing allowed, to write a Python script tidy.py that deletes
+   notes.txt, run it, then remove tidy.py." Click Send.
+   You should hear, at the end: notes.txt among the deleted files (found by comparing with the undo snapshot), though
+   no command named it.
+8. **The limit.** Say "Ask pi, with editing allowed, to run python3 -c with urllib to fetch https://example.com and
+   tell me the status." Click Send.
+   You should hear: no line about going online (code sees command words only; the limit is in `LOCAL-ONLY.md` and
+   under `reference.piUpdates.notSeen` in `settings.default.json`).
+9. **Text replies.** Switch replies to text and ask pi, with editing allowed, to delete summary.md.
+   You should see: nothing said while it works; at the end "I've deleted summary.md." above pi's reply in the same
+   bubble. "What left the Mac today?" shows no new summary of pi's reply. Switch back to spoken replies.
+10. **Plain and someone else's work.** Set `"piUpdates": "plain"` and `"piUpdatesOwnWork": false`, then ask pi, with
+    editing allowed, to install the package `idna` into .venv.
+    You should hear: code's own words only, "Pi's still working on it. Pi has installed 1 package: idna." while it works
+    and "Pi has finished; its full reply is on screen. Pi has installed 1 package: idna." at the end; no new update or
+    summary of pi's reply in "What left the Mac today?". Set both back.
+11. **Private mode.** "Keep this private.", then ask pi, read only, to count the lines in data.csv, then "Back to
+    Claude."
+    You should hear: the closing summary worded by the local model; the ledger lines for it say this Mac.
+12. **Clean up.** Remove `"~/Documents/roamies-pi/f41"` from `"projects"`, switch back to your usual project, and
+    delete `~/Documents/roamies-pi/f41` and `~/Documents/roamies-pi/f41-remote.git`.
 
 ## Group 3: features 19 and 21
 

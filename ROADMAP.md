@@ -55,7 +55,7 @@ Last updated: 2026-11-25.
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 34 | Masking: private words swapped for stand-ins before anything goes to the provider | In `next` (review accepted 2026-11-27 with one change: the shell clears the test-only switches); `TESTS.md` group 2, checks 1 to 12 | `next` |
-| 41 | pi's updates in plain words: a code digest, one or two sentences worded by the model, events always mentioned | Planned 2026-11-27 (seven questions); nothing built | |
+| 41 | pi's updates in plain words: a code digest, one or two sentences worded by the model, events always mentioned | Built 2026-11-27 on `pi-updates`, `test:all` passed; waiting for his review; `TESTS.md` group 2, checks 1 to 12 | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 | 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
@@ -1415,6 +1415,11 @@ what he has to do next; commands stay on screen; each update one small request, 
   within 20 seconds; the shell clears more variables (done first, `57f94b1`); yes to git in guarantee 2 (full path,
   fixed arguments, the snapshot and the comparison) and to guarantee 10 (naming what code cannot see). Built on
   `pi-updates`.
+- **Built 2026-11-27** on `pi-updates`: `piwatch.mjs` (commands read as the shell reads them, the five events, the
+  digest, the checks, code's lines, the update ticks with the 20-second urgent path); `pi.mjs` (events fed to it, the
+  updates in place of the progress lines, `GIT` by full path, `compareSnapshot`, settings and limits, the reference);
+  `sidekick.mjs` (`piWords`, `piUpdate`, the closing summary as one small request, the summary in the live state);
+  ledger kind `piUpdate`; guarantee 2 names git, guarantee 10 added. Tests: `piwatch`, `piupdates-run` (both routes).
 
 ### 29. Run watcher
 
@@ -2175,6 +2180,7 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
 - [ ] Feature 40 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
 - [ ] Feature 34 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
+- [ ] Feature 41 on `pi-updates`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone

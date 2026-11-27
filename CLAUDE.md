@@ -49,7 +49,11 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    pid=,pgid=,etime=` when pi stops, the process list only (never `-E`, the environment), read in memory to find the
    recorded groups still there and dropped, never logged, kept or sent; the watcher beside a hand-off runs the same
    `ps` in its fixed script. Only recorded groups are ended, and none whose number now belongs to a process started
-   at another time. The only files it
+   at another time. For the undo snapshot before a hand-off that can edit, and to compare the project with it when pi
+   stops (feature 41), it starts git by its full path, `/usr/bin/git` (on Windows, `git` from the PATH), with fixed
+   arguments, never through a shell, in the project folder only: only the snapshot's name and time vary, file names go
+   in on stdin, and the comparison writes no branch, index or file of the project (a temporary index, removed after).
+   The only files it
    writes are notes inside the Obsidian vault (`notes.mjs`; the daily note too, `daily.mjs`, written by code alone), where it can create and append, and change a note the owner names, once he has seen the change and said save; it never deletes one.
    Roamies keeps the previous version of each note it changes in its own folder, `~/Documents/roamies-pi/note-versions`,
    outside the vault, and never deletes it. It also writes its own files in `~/Documents/roamies-pi` (`state.json`, the
@@ -76,6 +80,17 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    spoken, written or passed to a tool (`mask.mjs`). Not covered, and said so: pictures, what pi sends, words not on
    the list, words misheard, what was sent before a word was on the list, and the local model, which gets his words
    as they are, wherever `local.address` leads.
+10. **What Roamies says about pi's work never repeats a command, and five events are always said, as far as code can
+   see them** (`piwatch.mjs`, feature 41): a package installed, a file deleted or moved, a file changed that the task
+   didn't name, a command that reaches the network, and anything pushed. The updates and the closing summary are worded
+   from code's digest, which never holds a command, its output or a file's text; code checks each sentence and uses
+   its own instead when it holds a symbol, option, path, web address or two words in a row from a command pi ran, or
+   claims one of these events that didn't happen, and adds its own plain line for each event the sentence leaves out
+   or mentions only negated. The step bubbles on screen still show the commands. Code sees only the words of pi's
+   commands and, after a hand-off that can edit in a git project, what changed since the snapshot. Not seen, and said
+   so: what a program or script does by itself (a script that downloads, deletes or uploads, a make target, an alias
+   or a shell function, `python -c`), what runs inside a container, and, in a project that isn't a git repository or
+   in a read-only hand-off, deletions and changes made other than by the commands code recognises.
 
 Limits enforced in code stay in code. Do not replace one with an instruction in the model's prompt.
 
