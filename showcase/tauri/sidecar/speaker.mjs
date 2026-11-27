@@ -48,6 +48,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
   // Local-only build (feature 16): which voice a reply uses is asked when it is made (pickVoice: the natural voice
   // while its helper is up, else nothing, which means the macOS voice), and the audio's rate comes from the voice.
   const voiceImpl = () => pickVoice?.() ?? FixedVoice;
+  const voiceName = (I) => (I === FixedVoice ? 'mac' : 'natural'); // for the log: which of this build's voices
   const beatRate = new Map(); // phrase → the rate its kept audio was made at
   const beatVoice = new Map(); // Local-only build (feature 24): phrase → the voice its kept audio was made in
   let key = null, voice = DEFAULT_VOICE, pref = FISH_MODELS[0], model = pref, seq = 0, current = null, checking = null;
@@ -91,7 +92,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     checking ??= account(key).then((a) => {
       // No credit: the free tier. Credit again: back to the best model, else keep the paid one that worked.
       if (a.ok) model = a.credit != null && a.credit <= 0.01 ? FREE_MODEL : model === FREE_MODEL ? pref : model;
-      log('fish_account', { ok: a.ok, reason: a.reason, model });
+      log('speech_ready', { ok: a.ok, reason: a.reason }); // local-only build: a local answer, no request (localAccount)
       if (a.ok) warm();
       return a;
     }).finally(() => { checking = null; });
@@ -157,13 +158,13 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         key, voice, model: m,
         onAudio: (pcm) => {
           if (done) return;
-          if (!heard) { heard = true; if (m !== model) model = m; log('speech_first_audio', { id, model: m, ms: Date.now() - t0 }); }
+          if (!heard) { heard = true; if (m !== model) model = m; log('speech_first_audio', { id, voice: voiceName(Impl), ms: Date.now() - t0 }); }
           emit({ kind: 'speech', id, rate: v.rate ?? RATE, pcm: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64') });
         },
         onEnd: () => finish(true),
         onError: async (err) => {
           if (done) return;
-          log('speech_error', { id, model: m, heard: err.heard, message: err.message });
+          log('speech_error', { id, voice: voiceName(Impl), heard: err.heard, message: err.message });
           if (!err.heard && !heard && tries < chain().length) {
             const a = await check();
             if (done) return;
@@ -181,7 +182,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         },
       }).open();
     };
-    log('speech_start', { id, model });
+    log('speech_start', { id, voice: voiceName(voiceImpl()) });
     connect(model);
     current = me;
     return me;

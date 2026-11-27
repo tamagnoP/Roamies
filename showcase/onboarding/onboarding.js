@@ -486,7 +486,7 @@
       const mode = replies.mode(), on = state?.replies === 'voice' && state?.fishKey;
       const CARDS = [
         ['text', 'Text only', 'Answers in my bubbles'],
-        ['voice', 'Voice + text', on ? 'Voice is on' : mode === 'voice' ? 'Needs a Fish Audio key' : 'Said out loud too'],
+        ['voice', 'Voice + text', on ? 'Voice is on' : mode === 'voice' ? "Needs a Mac's own voice" : 'Said out loud too'],
       ];
       $('replies').replaceChildren(...CARDS.map(([id, name, sub]) => {
         const checked = mode === id;
@@ -498,7 +498,7 @@
       }));
       const saved = !!state?.fishKey;
       if (!saved || mode !== 'voice') replies.changing = false;
-      $('fish-form').hidden = mode !== 'voice' || (saved && !replies.changing);
+      $('fish-form').hidden = true; // local-only build: no key to paste (the form, its link and its note name Fish Audio)
       $('fish-change').hidden = true; // local-only build: the Mac's own voice, no key to change
       $('fish-change').textContent = replies.changing ? 'Keep my current key' : 'Change key';
       $('fish-label').textContent = replies.changing ? 'New Fish Audio API key' : 'Fish Audio API key';
@@ -515,7 +515,7 @@
         send({ type: 'ob_replies', mode: id });
       }
       replies.render();
-      if (id === 'voice' && !state?.fishKey) { $('fish-input').focus(); quip('Got a Fish Audio key?', 3); }
+      if (id === 'voice' && !state?.fishKey) { $('fish-input').focus(); quip('Voice needs a Mac', 3); }
     },
     onFish(msg) {
       replies.saving = false;

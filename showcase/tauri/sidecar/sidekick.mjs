@@ -229,7 +229,7 @@ const speech = createSpeaker({
   onProblem: (what) => {
     if (Date.now() - voiceProblemAt < 10 * 60_000) return;
     voiceProblemAt = Date.now();
-    say(what === 'key' ? 'My Fish Audio key isn\'t working, so replies are text for now.' : 'My voice isn\'t working right now, so replies are text for now.', 'concerned');
+    say('My voice isn\'t working right now, so replies are text for now.', 'concerned');
   },
 });
 speech.setVoice(lookVoice());
@@ -2057,7 +2057,7 @@ async function removeFishKey() {
 // note(text, bad): typed into the panel or the setup guide, so how it went shows there too, next to the field.
 async function fishKeyLogin({ thenVoice = false, given = null, note = null } = {}) {
   const say = note ? (text, mood) => { sayOut(text, mood); note(text, mood === 'concerned'); } : sayOut;
-  return say("This build speaks with your Mac's own voice. No Fish Audio key is needed.", 'happy'); // local-only build
+  return say(MAC ? "This build speaks with your Mac's own voice, so no key is needed." : "This build speaks only with a Mac's own voice, so replies are text on this computer.", 'happy'); // local-only build
   const key = (given ?? (await ask({ prompt: 'Paste your Fish Audio API key', placeholder: 'Fish Audio API key', mask: true })))?.trim();
   if (!key) return note?.('Paste your Fish Audio key first.', true);
   if (!/^[\x21-\x7e]{8,512}$/.test(key)) return say("That doesn't look like a Fish Audio key. Copy it again from fish.audio.", 'concerned');

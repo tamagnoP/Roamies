@@ -1546,6 +1546,12 @@ The logs record what kind of change a sync made (which fields), never a title.
 
 Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition.
 
+The speaker's start-up check, `speech_ready` in the activity log (`fish_account` before 2026-11-27), is answered on the
+computer and makes no request (`localAccount` in `speaker.mjs`; Fish Audio's account check isn't in the app). The
+speech log lines name the voice (`mac` or `natural`), not a Fish Audio model. No log kind, and nothing this build shows
+or says, names Fish Audio: on Windows and Linux, where it has no voice for replies, the setup guide and the panel say
+replies use a Mac's own voice instead of asking for a key (tested in `test/localvoice.test.mjs`).
+
 ## The local model and the ledger (features 23 and 32)
 
 Off until `local.address` is set in `settings.json`. Then a Gemma 4 model served on this Mac answers in two cases,

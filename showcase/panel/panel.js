@@ -468,7 +468,7 @@
     return [
       group('Spoken replies', 'Hear me as well as read me.', null,
         picks('Replies', [['text', 'Text only'], ['voice', 'Voice and text']], state.replies, (x) => {
-          if (x === 'voice' && !state.fishKey) { ui.key = 'fish'; render('key-fish'); note('Add a Fish Audio key to hear me talk.'); return; }
+          if (x === 'voice' && !state.fishKey) { ui.key = 'fish'; render('key-fish'); note("Spoken replies use a Mac's own voice, so replies are text on this computer."); return; }
           act(`replies:${x}`);
         }, 'replies'),
         state.replies === 'voice' && state.fishModels?.length ? [
