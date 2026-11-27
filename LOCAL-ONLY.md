@@ -1096,7 +1096,7 @@ memory. The local model is not masked: it gets your words as they are, wherever 
   your masking list are in this prompt.", a count only), and the hand-off never goes on the read-only countdown: it
   waits for Send.
 - **Everyday words.** At start-up, an entry that is also an everyday word in macOS's word list
-  (`/usr/share/dict/words`; single words without `exactCase`) is named once, until the list changes: such a word is
+  (`/usr/share/dict/words`; single words without `exactCase`) is named, once for each set of such words: such a word is
   swapped in any case wherever it appears ("Mark it as done" with "Mark" on the list). Give it `"exactCase": true`
   to match it only as written; at the start of a sentence it is still as written. Windows and Linux without that
   file get no warning.
