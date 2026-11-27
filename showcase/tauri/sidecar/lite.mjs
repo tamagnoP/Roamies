@@ -175,7 +175,8 @@ export function dayReply(text) {
     if (m) blocks.push(`${m[1]}, ${m[2]}`); else if (l.trim()) tail.push(plainResult(l));
   }
   const first = blocks.length ? `${head.replace(/:\s*$/, '')}: ${blocks.join('; ')}.` : plainResult(head);
-  return [first, ...tail].filter(Boolean).join(' ');
+  const line = [first, ...tail].filter(Boolean).join(' ');
+  return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
 /** Whether a reply is a tool call written out as text, by its shape, never by tool names: the model's own control

@@ -41,7 +41,7 @@ assert.deepEqual([out.reply, asked.length], ['On Friday you have the lab meeting
 // a day decided by code: worded by code, the model not asked (the owner, 2026-11-27)
 const before = fake.requests.length;
 out = await route.request('What have I got on Friday?');
-assert.deepEqual([out.reply, out.by, fake.requests.length - before], ['friday: 09:00 to 10:00, Lab meeting.', 'code', 0]); assert.deepEqual(ran.pop(), ['show_day', { date: 'friday' }]);
+assert.deepEqual([out.reply, out.by, fake.requests.length - before], ['Friday: 09:00 to 10:00, Lab meeting.', 'code', 0]); assert.deepEqual(ran.pop(), ['show_day', { date: 'friday' }]);
 // its own history goes with the next request, as text after the fixed opening
 fake.answers.push({ content: 'Hello.' });
 await route.request('Hi.');

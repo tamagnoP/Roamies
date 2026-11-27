@@ -245,7 +245,7 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   assert.deepEqual([out.by, asked.length, seen.length], ['ask', 0, 0]);
   // reads never ask
   ({ out, f } = await req('What have I got on Friday?', [{ content: 'Nothing on Friday.' }], { confirm: answer(null) }));
-  assert.deepEqual([out.reply, asked.length, out.calls[0].by, f.bodies.length], ['ok show_day', 0, 'code', 0]); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
+  assert.deepEqual([out.reply, asked.length, out.calls[0].by, f.bodies.length], ['Ok show_day', 0, 'code', 0]); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
   // a change decided by code for an open to-do needs its whole title: part of it goes to the model and is shown
   ({ out } = await req('I\'ve finished the thesis chapter.', [{ calls: [['update_commitment', { todo: 'Thesis chapter 2', status: 'done' }]] }], { confirm: answer(null) }));
   assert.deepEqual([out.by, seen.length, asked.pop()], ['unanswered', 0, 'Mark "Thesis chapter 2" as done?']);
