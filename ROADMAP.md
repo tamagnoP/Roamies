@@ -34,7 +34,7 @@ Last updated: 2026-11-25.
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
-| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note | Queued (Prompt B), after 23 with 32 | |
+| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note | Built on `roamies-read` (2026-11-27), `test:all` passed; waiting for the owner's review, then `TESTS.md` group 2 | `a3aefa6`, `eea32e3`, `de51de5` |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 28 | |
 | 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 21 | |
@@ -1320,6 +1320,12 @@ search text. Includes reading a project's `TODO.md`; only pi writes that file.
 - **Answers 2026-11-26 night** (`2026-11-26_2119_owner-answers-small-fixes-and-feature-14.md`); **building from
   2026-11-27** on `roamies-read`, the live run postponed by the owner. How the answers are read where they leave a
   detail open: `~/Documents/roamies-reports/2026-11-27_0950_feature-14-build-notes.md`.
+- **Built 2026-11-27** (`a3aefa6` the tools, the note edits, the settings, the ledger, the sidecar; `eea32e3` the local
+  route; `de51de5` guarantee 2 and the docs). Bench with the local route's new prompt and tools (twice each): A and B
+  unchanged (6 of 6); D, E and F unchanged; C 5 of 6 (was 6): "Take the grant report draft off the calendar." now
+  comes back as the tool call written out as text, which reaches him as the reply; G (new, untuned, committed before
+  its first run) 5 of 6: "Where is the config file for the pipeline?" asked his file's name instead of finding it.
+  Neither was tuned against (`LESSONS.md`); with the owner.
 
 ### 29. Run watcher
 
@@ -2044,8 +2050,17 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   Then: his live run (Claude, Wi-Fi off, private mode, "what left the Mac today?") with nothing changed meanwhile, its
   report, then feature 14 built on `roamies-read` from his answers to the plan's eleven questions.
 
+- **2026-11-27 (feature 14, the owner).** The live run postponed by the owner; feature 14 built on `roamies-read`
+  from his answers of 2026-11-26, as `2026-11-27_0950_feature-14-build-notes.md` reads them: a search under "ask"
+  sends nothing from files his words don't name without his yes, not even their names; "names the file" is the whole
+  name or every word of it in his words; each further part of a file allowed by a yes asks again; "save" with the
+  filler words and the persona's name; versions in `~/Documents/roamies-pi/note-versions`; the undo a tool, on his
+  words "undo", "revert", "restore" or "put back"; the local route reads but doesn't edit notes; the note edits work
+  while pi works, the file tools don't. Guarantee 2 in its new wording (CLAUDE.md), as answer 8 asked.
+
 ## 6. Still to test
 
+- [ ] Feature 14 on `roamies-read`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone
