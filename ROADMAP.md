@@ -1348,6 +1348,12 @@ Finder, selected, nothing opened. Names and places only; counts in the log.
 - **Plan 2026-11-27** (`~/Documents/roamies-reports/2026-11-27_1106_feature-40-plan.md`): the hands helper started per
   command (no new program; the voice helper the alternative), the ranking, the exclusions, five settings, a sentence
   each in guarantees 2 and 6 (his yes needed), nine questions. Nothing built.
+- **Answers 2026-11-27 11:25** (`~/Documents/roamies-reports/2026-11-27_1125_owner-answers-feature-40.md`): plan accepted;
+  yes to both guarantee changes; the hands helper started per command; "where is <name>?" a search only when the name
+  looks like a file or a folder, "find the file …" and "which folder is … in?" always; folders too, marked; iCloud and
+  the cloud folders, the vault, apps and network drives left out; picks as proposed; macOS only. What he said is never
+  logged; the card shows at most `limits.findMatches`; only the count and the first one or two names are said. Build on
+  a branch off `next`.
 
 ### 34. Masking
 
