@@ -56,7 +56,7 @@ Last updated: 2026-11-25.
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Agreed 2026-11-27; planned only after 40 is built and merged (the owner) | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
-| 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | Built on `find-anywhere` (2026-11-27), `test:all` passed; waiting for the owner's review, then `TESTS.md` group 2 | `47335b9`, `bc7e500`, `fee1f7a` |
+| 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
@@ -2107,11 +2107,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 
 - **2026-11-27 11:25 (the owner).** Feature 40's plan accepted with yes to guarantees 2 and 6; built on a branch off
   `next`; feature 34 planned only after 40 is accepted and merged.
+- **2026-11-27 12:28 (the owner).** Feature 40's review accepted with the report's choices; AGENTS.md notes `find` and
+  `reveal` are in the macOS helper only; merged into `next`. Then plan 34 (masking), build nothing. His words:
+  `2026-11-27_1228_owner-accepts-feature-40-and-plan-34.md`.
 
 ## 6. Still to test
 
 - [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
-- [ ] Feature 40 on `find-anywhere`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
+- [ ] Feature 40 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone

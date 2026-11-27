@@ -19,7 +19,7 @@ checks, fixed since. Everything else is below.
 | Features 25 and 31 | 8, 15, 16 | 8 needs a real call; 15 and 16 are new |
 | Features 23 and 32 | 1, 5, 6, 7, 8, 9, 10 | 1 and 5 failed and were fixed; 1, 6 and 7 changed; 8 needs your tunnel; 9 needs the shell; 10 is new |
 | Feature 14 | 1 to 14 | new; review accepted 2026-11-27 with three changes (13 and 14) |
-| Feature 40 | 1 to 12 | new, on `find-anywhere` (waiting for your review) |
+| Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -323,9 +323,9 @@ with `TOKEN=x`. In the vault, a note "Test plan" with a line `threshold 0.6`. No
     calendar's own line, at once, tagged "local"; in the activity log the `local_request` line has `"by":"code"` and
     `"steps":0` (no model call). The same with "Take <its title> off the calendar." once it has a block.
 
-### Feature 40: find a file anywhere and show its folder (on `find-anywhere`)
+### Feature 40: find a file anywhere and show its folder (in `next` since the review of 2026-11-27)
 
-**Before.** Build from `find-anywhere`, with the hands helper built by `build.rs` (the `find` and `reveal` commands
+**Before.** Build from `next`, with the hands helper built by `build.rs` (the `find` and `reveal` commands
 are new). Make two throwaway files with a name nothing of yours has: `~/Desktop/roamies-findtest.txt` and
 `~/Documents/roamies-findtest-2026.txt`, and a folder `~/Desktop/Roamies Findtest`. If you have an external drive,
 `roamies-findtest-drive.txt` on it. Wait a minute so Spotlight has them. The defaults: `"findAnywhere": true`,
