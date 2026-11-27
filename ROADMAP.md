@@ -1326,6 +1326,14 @@ search text. Includes reading a project's `TODO.md`; only pi writes that file.
   comes back as the tool call written out as text, which reaches him as the reply; G (new, untuned, committed before
   its first run) 5 of 6: "Where is the config file for the pipeline?" asked his file's name instead of finding it.
   Neither was tuned against (`LESSONS.md`); with the owner.
+- **Review accepted 2026-11-27 with three changes** (his words: `2026-11-27_1057_owner-review-feature-14-and-features-40-34.md`):
+  (1) a name of one word counts without its extension only in a sentence plainly about a file ("file", "read",
+  "open", "show", "look at", "look in", "check") or with the extension said; the same for a note's title, where
+  "note" counts too; (2) on the local route an action code decided that needs nothing from the model is done by code
+  alone, with no model call (off the calendar, mark done, a new due time, show a day, open an app); (3) a local reply
+  that is a tool call written out as text is never shown, spoken or run, found by its shape.
+- **Follow-up (the owner, 2026-11-27): note edits are not on the local route**, so a private note can't be edited
+  by either model (Claude can't see it; the local model has no `edit_note`). Not built; to be designed with him.
 
 ### 29. Run watcher
 
@@ -1466,7 +1474,8 @@ Every numbered feature still to build is in section 3. What is left here is park
 | Idea | State | Notes |
 | --- | --- | --- |
 | Native macOS Calendar | Parked | Needs a Swift helper and a Calendar permission. Revisit only if Super Productivity's calendar view isn't enough. |
-| Open files and folders by name | Parked | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
+| Open files and folders by name | Parked; showing a file's folder in Finder is feature 40 | Roamies opens apps by name only. Kept as is by decision on 2026-11-11. |
+| Note edits on the local route | Follow-up of feature 14 (the owner, 2026-11-27) | Without it a private note can't be edited by either model. |
 | Tool to change voice settings by voice | Idea | A narrow tool with a confirmation, so pi never needs to touch `settings.json`. |
 | Never-look list by window title | Idea | Would cover a password manager or bank opened as a web page. Less reliable than app names. |
 | Write access to more than one project per task | Not needed | Writes stay in the current project and its subfolders. |

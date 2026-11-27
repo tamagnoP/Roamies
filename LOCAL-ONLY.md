@@ -877,8 +877,9 @@ for Roamies to use it.
 
 These are the only files Roamies writes itself, besides its own folder. In code, a title is only ever a file name
 inside the vault, and nothing is deleted or renamed. A note is changed only as below ("Changing a note"). What it
-reads from your notes to answer you becomes part of the conversation with your AI provider, and is counted in the
-ledger (note texts).
+reads from your notes to answer you becomes part of the conversation with your AI provider, stays in that day's
+conversation and is sent again with each later request until the conversation is folded, and is counted in the
+ledger (note texts), once.
 
 Everything Roamies writes in the vault goes through one writer in `notes.mjs` (`createVault`, feature 18). It can
 make a file that isn't there, add to the end of one that is, on a line of its own, and (feature 14) put a note's new
@@ -971,8 +972,8 @@ started (no `rg` or `grep`).
 - **Logged** by tool, characters and whether it was refused; never a path, a file name or any text.
 - **The ledger** counts the file texts each request carried and their characters; "What left the Mac today?" says
   them ("File texts: 2 (1,240 characters).").
-- **What to know.** A file's text, once read, is part of the conversation, so it goes again with the later requests
-  of the day until the conversation is folded; the ledger counts it once, when it is read. A secret in a file that
+- **What to know.** A file's or a note's text, once read, stays in that day's conversation and is sent again with
+  each later request to the same model until the conversation is folded; the ledger counts it once, when it is read. A secret in a file that
   doesn't look like one (a token inside a YAML file) can reach the model when you ask for that file. A folder in
   Desktop, Documents, Downloads or iCloud Drive can bring up macOS's one-time "Roamies would like to access" prompt.
 
@@ -1357,9 +1358,20 @@ request fails with a network error before any reply; and in private mode. A slow
   (`local.confirmChanges`); what code decides from your words is saved at once: only when your whole sentence fits one
   of its frames ("remind me …", "… is due on …", "add a to-do: …", "I'm done with <title>", "open <app>"; the
   persona's name, "please", "can you" or "could you" may come first), and for a
-  change to a to-do only with its whole title. "What's on Friday?" and "show me <day>" are looked up by code.
-  Times, days and lengths are read by code from what you said, never taken from the model. A hand-off to pi, the
-  screen, drawing and clicking are refused by a line.
+  change to a to-do only with its whole title. An action code decided that needs nothing from the model is done by
+  code alone, with no model call (the owner, 2026-11-27): a reminder code reads whole, taking a to-do off the
+  calendar, marking one done, a new due time, opening an app, and a day looked up ("What's on Friday?", "show me
+  <day>"), whose blocks code says ("Friday 28 November: 09:00 to 10:00, Lab meeting."). The model is asked only for
+  what it must supply: a new to-do's or a note's own text, or the answer about a file it read. Times, days and
+  lengths are read by code from what you said, never taken from the model. A hand-off to pi, the screen, drawing and
+  clicking are refused by a line.
+- **A tool call written out as text** (the owner, 2026-11-27). When the local model's reply is a tool call written as
+  text instead of made (`unschedule_block{todo:…}`), it is never shown, spoken or run: the reply is "I couldn't do
+  that here. Nothing was changed." (after a change that did run, its line, then "I couldn't do the rest of that here;
+  nothing more was changed."). It is found by its shape, not by tool names: the model's own control tokens (`<|…|>`),
+  or the reply opening with a name joined to braces with a field (`name{field:`), to brackets with a field set or
+  nothing (`name(field=`, `name()`), or JSON with a call's fields (`{"name":`). A sentence about code further on in
+  a reply ("it defines split(threshold=0.6)") is not taken for one.
 - **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the
   kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
   carried, the file texts and note texts it carried with their characters (feature 14), whether it was private.
