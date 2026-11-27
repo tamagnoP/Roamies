@@ -16,6 +16,7 @@ agent) after you approve it. Roamies reads files in your project folders itself,
 | Read, list, find and search files in your project folders | Only in a request you type or speak; a file's text goes to the model only when your words name the file or you say yes to a bubble naming it (feature 14) |
 | Find a file or folder anywhere by name, and show the one you pick in Finder | Only when you ask where it is; answered by code from Spotlight, nothing sent to any model, nothing opened (feature 40) |
 | Hand a task to pi | Read-only tasks after a short countdown you can stop; tasks that can edit only after you say send |
+| Swap the words on your masking list for stand-ins before anything goes to the provider, and back before anything is shown, spoken, written or run | Whenever the list has words; the local model gets your words as they are (feature 34) |
 
 Upstream's file and command tools (`read_file`, `list_files`, `search_files`, `write_file`, `run_command`) and
 `fetch_url` are removed. Roamies' own read-only file tools (`files.mjs`, feature 14) take the place of the first three,
@@ -360,6 +361,12 @@ setup guide is open, the bubble waits until it closes.
 - `findDrives`: `true` or `false` (`true` unless you set it). `false` searches the home folder only, not the local
   external drives.
 - `findLeaveOut`: a list of folders (`~` allowed) never searched for a file anywhere, besides those always left out.
+- `masking`: `true` or `false` (`true` unless you set it). `false` masks nothing, as if the list were empty, without
+  deleting it (see "Masking").
+- `mask`: your masking list, in four groups: `{"people": [], "organisations": [], "projects": [], "other": []}`. An
+  entry is text (`"Maria Silva"`) or `{"name": "João Costa", "also": ["João"], "exactCase": true}`: `also` lists other
+  spellings that share its stand-in, and `exactCase` matches it only as written. What can't be used is named in the
+  start-up bubble and left out.
 - `measurePageRebuild`: `true` or `false` (`false` unless you set it). With `true`, each fresh page after a quiet
   stretch (see "Where the character sits") is measured, numbers only, into the activity log
   (`~/.gg/sidekick/logs`) as `rebuild_measure` lines: from the moment it is asked for until 6 seconds after the old
@@ -439,6 +446,7 @@ setup guide is open, the bubble waits until it closes.
   | `noteEditLines` | 40 | 5 to 200, whole | Changed lines a note edit's bubble shows before "and N more lines". |
   | `findMatches` | 8 | 1 to 20, whole | Matches on the card of a search for a file anywhere (feature 40). |
   | `findSeconds` | 3 | 1 to 15 | How long Spotlight is waited for in that search. |
+  | `maskEntries` | 500 | 1 to 5000, whole | Entries on the masking list that are used; the rest are named in the start-up bubble (feature 34). |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
   missing setting.
@@ -1038,6 +1046,93 @@ conversation, the activity record, the handover or the daily note.
   the wrong words; the card's header shows what was searched for. "Where is the presentation for the grant?" counts
   as a search (a type word and a name), even if you meant a calendar event.
 
+## Masking
+
+Feature 34 (the owner's plan and answers of 2026-11-27). The words on your list (`mask` in `settings.json`: people,
+organisations, projects and other) are swapped by code for stand-ins in everything sent to the provider, and
+swapped back in everything that comes back before it is shown, spoken, written or passed to a tool (`mask.mjs`).
+Everything Roamies keeps on the Mac stays in your words: the conversation, notes, the daily note, the handover and
+memory. The local model is not masked: it gets your words as they are, wherever `local.address` leads.
+
+- **Stand-ins.** "Person 1", "Organisation 2", "Project 3", "Term 4": one numbering per group. A word gets the next
+  free number the first time it is on the list and keeps it for good, even when you move it, remove it or put it
+  back; a number is never given to another word. Correcting a spelling makes a new word; moving an entry to another
+  group gives it that group's stand-in. The numbers are kept in `~/Documents/roamies-pi/state.json` under `masks`
+  (on pi's blocked list and Roamies' own; never sent or logged).
+- **Matching.** Case is not told apart ("acme", "Acme", "ACME"), unless the entry has `"exactCase": true`; nor are
+  accents ("José", "Jose") or the kinds of apostrophe. A word inside another never matches ("Ana" isn't in "banana"
+  or "analysis"), but `_`, `-`, `.`, `/`, a digit or a change from lower to upper case is an edge: "AnaNotes",
+  "ana_notes", "ana2026" and "acme.com" match; "acmethesis" doesn't. "'s", "s" and "es" after a word stay outside its
+  stand-in ("Maria's" becomes "Person 1's"; "the Atlases" "the Project 3es", which comes back as "the Atlases"). The
+  words of a longer entry may be split by spaces, a line break or a hyphen, and the longest entry wins ("Max Planck
+  Institute" before "Max"). An entry needs 2 characters and a letter, no quotation mark or backslash, and can't be a
+  stand-in's own word ("Project", "Term").
+- **Case, both ways.** A stand-in keeps the case of what it replaced: "acme" goes as "organisation 2" and "ACME" as
+  "ORGANISATION 2", so a folder name round-trips as written. Coming back, a stand-in becomes the form last sent for
+  it ("Person 2" after "João" comes back as "João"), else the main form in its case. "Person 12" is never
+  "Person 1"; "Person #1" and "Organization 1" are taken too. A digit straight after a word is kept apart with "#"
+  ("ana2026" goes as "person 4#2026"), and the "#" goes again on the way back.
+- **What is masked.** Your requests, typed or spoken; requests the app makes (briefings, pi's gist, check-ins); the
+  instructions and the tool descriptions (your name is in them); the live state (the front window's title, memory
+  facts, the to-do outline); the earlier conversation; tool results (note and file texts, searches, the calendar,
+  `read_window` text); and the side calls: the fold, the memory pass and the handover's part two. Their answers come
+  back unmasked before anything is kept. While the list has words, the instructions also say that stand-ins stand for
+  real names, to be written exactly and never guessed at.
+- **What comes back.** The reply as it streams (a stand-in split between two pieces is held until it is whole), the
+  thinking shown in the bubble, tool arguments before the tool runs (a note the model writes is saved with the real
+  name), the activity panel and the tag, the side calls' answers, and the conversation as saved.
+- **When the list changes.** It is read at each request. The agent is made again from your conversation, masked with
+  the new list. On Claude's route the claude program starts a fresh session, given the conversation again, and the
+  transcript of the session it replaces is deleted. On the API route the conversation is sent again in full; the
+  provider's cache keeps the part before the first message that changed, so a word that isn't in the conversation
+  yet costs almost nothing, and one that is costs a full read from there. Reasoning the model wrote under the old list
+  is dropped (it is signed). The fold's summary, memory and the handover are kept in your words, so each is masked
+  with the list as it is when it is next sent. What was sent before a word was on the list stays sent.
+- **Web search** (the API route only) is off while the list has words. "Search the web for …", "look it up online"
+  or "google …" gets the app's line, "Web search is off while your masking list has words in it, so nothing was
+  searched or sent.", and nothing goes to the provider. (Claude's route never had web search.)
+- **pi is not masked.** A hand-off is passed to pi in your words, and pi sends them, and your files, to its own
+  provider. When the prompt holds words on your list, the Send bubble says how many ("⚠ pi isn't masked: 2 words on
+  your masking list are in this prompt.", a count only), and the hand-off never goes on the read-only countdown: it
+  waits for Send.
+- **Everyday words.** At start-up, an entry that is also an everyday word in macOS's word list
+  (`/usr/share/dict/words`; single words without `exactCase`) is named once, until the list changes: such a word is
+  swapped in any case wherever it appears ("Mark it as done" with "Mark" on the list). Give it `"exactCase": true`
+  to match it only as written; at the start of a sentence it is still as written. Windows and Linux without that
+  file get no warning.
+- **What the claude program keeps.** Roamies starts it with `CLAUDE_CONFIG_DIR` set to `~/.gg/claude-code/config`.
+  As Roamies continues its sessions, it writes each session's transcript there (`projects/<the home folder as a
+  name>/<session id>.jsonl`): every message sent and received, and every call to Roamies' tools with its result. With
+  masking these hold stand-ins, not your words, except for words sent before they were on the list. Side calls are
+  sessions of their own and are kept the same way. The program deletes transcripts after 30 days (its own
+  `cleanupPeriodDays`). Roamies gives it no tools of its own, so nothing else of yours is kept there.
+- **The ledger** counts, per request, `swaps` (words swapped out in what it newly sent: your words, the parts of the
+  live state sent, tool results, a side call's input; the earlier conversation sent again isn't counted again) and
+  `swapsBack` (stand-ins swapped back in what came back). "What left the Mac today?" adds "Private words swapped for
+  stand-ins: 23 times in 5 requests (19 swapped back)." Nothing about masking when none were made.
+- **Logged**: `mask_list` (how many entries, how many left out) when the list changes, `mask_changed` when that makes
+  the agent again (and whether a transcript was deleted), `mask_leftover` (a count, below), `web_off`. Never a word, a
+  stand-in or a group.
+- **The limits, plainly.**
+  - Only what is on the list. A name you didn't list, a nickname, an email address spelled differently, a grant
+    number or a city go as they are.
+  - Speech misheard: "Siobhan" written as "Shivon" isn't on the list and is sent. The "Heard" line shows what was
+    heard; add the misheard form under `also`.
+  - The model loses context: it doesn't know who Person 1 is (a supervisor, a student, a woman or a man), may guess
+    pronouns, can't use what it knows about a real organisation, and can mix up two stand-ins in a long
+    conversation. Answers about them can be worse.
+  - Context can give a word away: details left around a stand-in (a job title, a town, a project's topic) can still
+    point to who or what it is.
+  - Pictures are not masked: screen captures, a marked area and photos go as images, and a name in them is sent as
+    seen. Only text (a window's text, as `read_window` gives it) is masked.
+  - pi is not masked (above).
+  - What the model writes its own way ("Person One", "P1", "Persons 1 and 2") can't be swapped back and is shown as
+    written; the log counts it (`mask_leftover`).
+  - Your own text that looks like a stand-in in use ("Term 2" for a school term, "Project 3") is sent spelled out
+    ("Term two"), so it can't come back as a listed word; it comes back spelled out.
+  - What was sent before a word was on the list stays with the provider and in the claude program's transcripts.
+  - The local model gets your words as they are, wherever `local.address` leads.
+
 ## The daily note
 
 Feature 18. Roamies keeps one note per day in the vault: `Daily/YYYY-MM-DD.md` (the `dailyFolder` setting). Code
@@ -1435,7 +1530,8 @@ request fails with a network error before any reply; and in private mode. A slow
   a reply ("it defines split(threshold=0.6)") is not taken for one.
 - **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the
   kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
-  carried, the file texts and note texts it carried with their characters (feature 14), whether it was private.
+  carried, the file texts and note texts it carried with their characters (feature 14), the masking list's swaps
+  (feature 34, counts only), whether it was private.
   Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
   is answered from it by code and sent to no model, typed or spoken, like "review my day" and "anything waiting?";
   the local model's warm-ups are named apart from the requests that stayed on this Mac. A request that failed at
@@ -1455,7 +1551,7 @@ request fails with a network error before any reply; and in private mode. A slow
 - Requests to the local model at `local.address` (`127.0.0.1` only; where that port leads is your set-up).
 - Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, an outline
   of your to-do list (numbers, and today's planned blocks), the to-dos you ask about, and screenshots or window
-  text when you ask about your screen.
+  text when you ask about your screen. The words on your masking list go as stand-ins (see "Masking").
 - pi's own conversation with its provider, using pi's sign-in. Which files pi and the commands it runs can
   touch is limited by the sandbox; what they send over the network is not.
 - Signing in to Anthropic the first time: a browser sign-in, and a one-time download of the Claude Code program.
@@ -1473,6 +1569,13 @@ request fails with a network error before any reply; and in private mode. A slow
   40). `safety.mjs`: `checkReveal`. `tools.mjs`: `handsWithInput`, a hands command with its request on stdin.
   `src-tauri/hands/main.swift`: the `find` (Spotlight, `NSMetadataQuery`) and `reveal` (Finder) commands, macOS only.
   `roamies/ink.js` and `host.js`: the card of found files.
+- `showcase/tauri/sidecar/mask.mjs` (new): masking (feature 34). `sidekick.mjs`: the doors out and in (the agent's
+  instructions, tools and conversation, the request, the live state, tool calls, the reply as it streams, the side
+  calls, the saved conversation), web search off, a fresh claude session on a list change. `pi.mjs`: `masking`,
+  `mask`, `limits.maskEntries`, the Send bubble's count and no countdown. `reference.mjs`: the start-up lines.
+  `ledger.mjs`: `swaps`, `swapsBack`. `brain.mjs`: the test seam passed on. Tests: `mask`, `mask-run` (the API route),
+  `mask-cc-run` (Claude's route, through `ROAMIES_FAKE_CLAUDE`, a module standing in for the claude program; tests
+  only).
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler

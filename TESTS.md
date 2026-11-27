@@ -20,6 +20,7 @@ checks, fixed since. Everything else is below.
 | Features 23 and 32 | 1, 5, 6, 7, 8, 9, 10 | 1 and 5 failed and were fixed; 1, 6 and 7 changed; 8 needs your tunnel; 9 needs the shell; 10 is new |
 | Feature 14 | 1 to 14 | new; review accepted 2026-11-27 with three changes (13 and 14) |
 | Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
+| Feature 34 | 1 to 12 | new, on `masking` (waiting for your review) |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -227,7 +228,7 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
     Click the second: the to-do moves to 10:00 on the later Friday, and the Log says so. No answer changes nothing,
     and the Log gets `Check-in: <title>: not yet`.
 
-## Group 2: features 23, 32, 14, 40, 29 and 30
+## Group 2: features 23, 32, 14, 40, 34, 29 and 30
 
 ### Features 23 and 32: the local model, private mode, the ledger (on `next` since `1854529`; 29 and 30 not built)
 
@@ -365,6 +366,48 @@ are new). Make two throwaway files with a name nothing of yours has: `~/Desktop/
     left out, milliseconds; the row and voice or click): no "findtest", no name and no folder. "What left the Mac
     today?" shows no request for any of the searches. If macOS asked "Roamies would like to access files in your
     Documents folder" (or Desktop, or a removable volume) at any point, note which and when.
+
+### Feature 34: masking (on `masking`)
+
+**Before.** Build from `masking`. Use throwaway words only, never real names: in `settings.json` set
+`"mask": {"people": ["Zorbina Quell", "Mark"], "organisations": ["Fennick Labs"], "projects": ["Halyard"], "other": ["Quellium"]}`
+and leave `"masking": true`. Then start Roamies (quit and open it again if it was running; the list itself is read at
+each request, the start-up bubble only at start).
+
+1. **The start-up bubble.**
+   You should see: a line naming "Mark" as an everyday word, swapped in any case, with the `exactCase` hint. Quit and
+   open Roamies again: the line doesn't come back (the list hasn't changed). Change `"Mark"` to
+   `{"name": "Mark", "exactCase": true}`.
+2. **Type "Note that Zorbina Quell from Fennick Labs wants the Halyard quellium figures by Friday."**
+   You should see: Claude's reply with the real names, no "Person 1", "Organisation 1", "Project 1" or "Term 1"
+   anywhere on screen; a note in the vault whose title and text have the real names.
+3. **Say "What did I just note about Zorbina Quell?"**
+   You should see and hear: the reply with the real names, said with them.
+4. **Type "mark the figures as urgent, Mark said so."**
+   You should see: an ordinary answer; nothing odd about "mark" (only "Mark" as written is on the list now).
+5. **Ask for a hand-off that names a listed word, read only: "Ask pi to list the files in the Halyard folder."**
+   You should see: "Send to pi?" (not "Asking pi in 5 s"), with "⚠ pi isn't masked: 1 word on your masking list is in
+   this prompt." (a count, no word); it waits for you. Click Don't send.
+6. **Web search.** On Claude's route (signed in with Claude) there is no web search: "Search the web for Fennick
+   Labs." gets Claude's usual answer. Only with an API key: the line "Web search is off while your masking list has
+   words in it, so nothing was searched or sent." and nothing more.
+7. **Private mode:** "Keep this private.", then "What does Zorbina Quell want?", then "Back to Claude."
+   You should see: the local reply (tagged) with the real name; the local model gets your words as they are.
+8. **Change the list:** add `"Gorvane"` to `"other"`, save, and type "Gorvane is a new idea for Halyard; note it."
+   You should see: the note and the reply with "Gorvane". This first request after a change starts Claude afresh with
+   the conversation again: note roughly how long it takes compared with the request before.
+9. **Type "What left the Mac today?"**
+   You should see: "Private words swapped for stand-ins: N times in M requests (K swapped back)." among the lines.
+10. **The claude program's transcripts.** In Terminal:
+    `grep -rli -e zorbina -e fennick -e halyard -e quellium -e gorvane ~/.gg/claude-code/config/projects/`
+    You should see: nothing from today after step 1 (a transcript from before the list was set may still name them;
+    note its date). Then `grep -c mask_changed ~/.gg/sidekick/logs/*`: at least 1.
+11. **What stays on the Mac.** `grep -li "zorbina quell" ~/.gg/sidekick/sessions/*.json` lists today's conversation
+    (it is kept in your words), and `grep -l "Person 1" ~/.gg/sidekick/sessions/*.json` lists none of today's.
+    `grep -i -e zorbina -e fennick -e halyard -e quellium ~/.gg/sidekick/logs/* ~/.gg/sidekick/ledger.jsonl` prints
+    nothing.
+12. **Off.** Set `"masking": false` and type "Who is Zorbina Quell?": an answer as before masking (the name goes as it
+    is). Set it back to `true`, and when done, empty the list and delete the throwaway notes.
 
 ## Group 3: features 19 and 21
 

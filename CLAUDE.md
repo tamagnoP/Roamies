@@ -59,7 +59,8 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first. Heard hands-free (in
    an answer window) only "send" or "send it" sends one that can edit. A pending hand-off is only ever asked again:
    it is never sent because it was pending, and has no countdown. A countdown stopped by stand down (feature 33) is
-   never resumed: the hand-off is kept and only asked again.
+   never resumed: the hand-off is kept and only asked again. A read-only hand-off whose prompt holds words on the
+   masking list (feature 34) has no countdown either: the Send bubble gives their count, and it waits for Send.
 4. **An undo snapshot is taken before any hand-off that can edit** (git ref under `refs/roamies/`).
 5. **Apps on the never-look list are never captured, read or worked in** (`guard.mjs`), and the check fails closed.
 6. **`open` takes an app name only; `act_in_app` works the front app only.** Both limits live in `gateTools`.
@@ -70,6 +71,11 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    Roamies has finished speaking, for `limits.answerWindowSeconds`, closed by the voice helper's own stop, the
    sidecar's timer, and the discarding of late phrases. Nothing heard in a question's answer window reaches the model
    unless it is an answer; it is logged by shape only. (After the model's own question, what is said is the answer.)
+9. **With words on the masking list, none of them goes to the provider** (Claude's route, its side calls, the claude
+   program): each is swapped by code for its stand-in before sending, and swapped back before anything is shown,
+   spoken, written or passed to a tool (`mask.mjs`). Not covered, and said so: pictures, what pi sends, words not on
+   the list, words misheard, what was sent before a word was on the list, and the local model, which gets his words
+   as they are, wherever `local.address` leads.
 
 Limits enforced in code stay in code. Do not replace one with an instruction in the model's prompt.
 
@@ -86,6 +92,7 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/daily.mjs` | Ours. Feature 18: the daily note (Plan, Log, Review, the handover's two parts), built by code; nothing of it goes to the model. |
 | `showcase/tauri/sidecar/handover.mjs` | Ours. Feature 18: the handover's part two (one model request), the open items, the fresh conversation each day. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |
+| `showcase/tauri/sidecar/mask.mjs` | Ours. Feature 34: masking: the list's checks, the stand-ins and their numbers, the matching, words out and back (whole texts, messages, a reply as it streams). |
 | `showcase/tauri/sidecar/calendar.mjs` | Ours. The to-do list and Super Productivity's open tasks kept as one: the requests, the sync, adoption, its tools, and the outline the model is given. |
 | `showcase/tauri/sidecar/answers.mjs` | Ours. Yes/no bubbles that take a spoken answer, and the words that count. |
 | `showcase/tauri/sidecar/flow.mjs` | Ours. Conversation flow: the exchange, the answer window, pending questions. |
