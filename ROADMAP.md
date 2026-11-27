@@ -55,10 +55,11 @@ Last updated: 2026-11-25.
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 34 | Masking: private words swapped for stand-ins before anything goes to the provider | In `next` (review accepted 2026-11-27 with one change: the shell clears the test-only switches); `TESTS.md` group 2, checks 1 to 12 | `next` |
+| 41 | pi's updates in plain words: a code digest, one or two sentences worded by the model, events always mentioned | Planned 2026-11-27 (seven questions); nothing built | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 | 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
-Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 29, 30, 19, 21, 17, 28, 15, 20, 27.
+Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 41, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
 ## 1. Done
 
@@ -902,7 +903,7 @@ As built:
 
 ## 3. Queued, in this order
 
-Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 29, 30, 19, 21, 17, 28, 15, 20, 27. 40 and 34 put after 14
+Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 41, 29, 30, 19, 21, 17, 28, 15, 20, 27. 40 and 34 put after 14
 by the owner on 2026-11-27 (40 "before 34"; their place against 29 and 30 as he says). The owner's order of
 2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24, 18, 33, 25 and 31 are in
 section 2; the subsections below follow the rest, in order.
@@ -1389,6 +1390,24 @@ masked; the ledger counts swaps. **Planned only after 40 is built and merged** (
   on a list change; pi's Send bubble count and no countdown; `swaps`/`swapsBack` in the ledger; guarantee 9 (8 was
   taken) and one sentence in 3. Tests: `mask`, `mask-run` (API route), `mask-cc-run` (Claude's route, through
   `ROAMIES_FAKE_CLAUDE`). Report: `~/Documents/roamies-reports/2026-11-27_1724_feature-34-report.md`.
+- **Review accepted 2026-11-27 18:15** with one change: the shell clears the switches that exist only for tests
+  (`d204fd9`; the list of every environment variable read, and what the shell does with each:
+  `~/Documents/roamies-reports/2026-11-27_1831_environment-variables.md`). Fast-forwarded into `next` at `e44a109`.
+
+### 41. pi's updates in plain words
+
+Agreed 2026-11-27 (the owner): while pi works and when it finishes, Roamies says brief, plain, non-technical English
+and never repeats a command; code prepares a digest (the task in his words, kinds of steps and counts, pi's own
+statements, the events that must be mentioned; never a command, its output or a file's text); the model words one
+sentence, two at most, in the persona's manner; a package installed, a file deleted or moved, a file changed that the
+task didn't name, a command that reaches the network and anything pushed are always mentioned, by code if the
+sentence leaves one out; an update only when something changed; the closing summary in the order outcome, decisions,
+what he has to do next; commands stay on screen; each update one small request, in the ledger and masked.
+- **Plan 2026-11-27** (`~/Documents/roamies-reports/2026-11-27_1838_feature-41-plan.md`): new `piwatch.mjs` (commands
+  read by code, the five events, the digest, the checks, code's lines); the 90-second progress lines become updates;
+  the closing summary becomes one small side request instead of a full chat turn; settings `piUpdates`,
+  `piUpdatesOwnWork`, `piWatch` and six limits; ledger kind `piUpdate`. Seven questions, including git in guarantee 2
+  and an optional guarantee 10. Nothing built.
 
 ### 29. Run watcher
 
@@ -2139,6 +2158,7 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   "no test-only switch may be reachable in the installed app" goes in `CLAUDE.md`; then `test:all`, merge into
   `next`, push. Then plan feature 41 (pi's updates in plain words), building nothing. His words:
   `2026-11-27_1815_owner-accepts-feature-34-env-rule-and-plan-41.md`.
+- **2026-11-27 18:38.** Feature 41 placed after 34 in the build order (the owner asked for its plan next).
 
 ## 6. Still to test
 
