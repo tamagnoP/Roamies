@@ -887,8 +887,9 @@ renames anything. It refuses a path with an empty part, a part that starts with 
 refuses a folder or file that is a link, and anything that would land outside the vault.
 
 **Changing a note** (feature 14, the owner's answers of 2026-11-26).
-- Only a note you name in that request, typed or spoken: its title, or all its words ("change my lab plan: the
-  threshold is 0.7" names "Lab plan"). Otherwise nothing is shown and nothing changes.
+- Only a note you name in that request, typed or spoken, judged as for a file (see "Reading your files"): its
+  title, or all its words ("change my lab plan: the threshold is 0.7" names "Lab plan"). Otherwise nothing is shown
+  and nothing changes.
 - The change is exact pieces of the note's text, each found once, and what replaces them. A whole new text only when
   your words in that request say rewrite.
 - A bubble shows it first: "Change Lab plan?", the removed lines (`- `) and the added ones (`+ `), at most
@@ -957,7 +958,11 @@ started (no `rg` or `grep`).
 - **How "names the file" is judged**, by code: the whole file name, with or without its extension, is in your words
   ("segment.py", "segment dot py", "segment"), or every word of the name is, the name split at `_`, `-`, `.`,
   spaces, capitals and digits, and "the", "a", "my", "of" and the like aside. "The data loader" names `dataLoader.py`;
-  "the final report" names `final_report.md`; "the report" or "the loader" names neither.
+  "the final report" names `final_report.md`; "the report" or "the loader" names neither. A name of one word
+  counts without its extension only when your sentence is plainly about a file: it also has "file", "read", "open",
+  "show", "look at", "look in" or "check" (the owner, 2026-11-27). "What's the plan for today?" doesn't name
+  `plan.md`; "read the plan" and "plan dot md" do. The same for a note's title when changing a note, where "note"
+  counts too ("add milk to my groceries note" names "Groceries"; "add milk to groceries" doesn't).
 - **Shown.** The bubble's tag names the file being read ("reading segment.py"), the folder listed, or the words
   searched for; the activity list says the same.
 - **The local model** (private mode, or no network) reads and finds files the same way, with parts of

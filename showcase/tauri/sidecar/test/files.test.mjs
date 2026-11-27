@@ -49,8 +49,15 @@ assert.deepEqual(files.tools.map((t) => t.name), FILE_TOOLS);
 assert.deepEqual(FILE_TOOLS, ['read_file', 'list_files', 'find_files', 'search_files']);
 
 // ---- "names the file": his words, judged by code
-assert.ok(namedIn('Read segment.py', 'segment.py') && namedIn('read segment dot py', 'segment.py') && namedIn('what does segment do', 'segment.py'));
-assert.ok(namedIn('look at the data loader', 'dataLoader.py') && namedIn('the final report please', 'final_report.md') && namedIn('the README', 'README.md'));
+assert.ok(namedIn('Read segment.py', 'segment.py') && namedIn('read segment dot py', 'segment.py') && namedIn('what does the segment file do', 'segment.py'));
+assert.ok(namedIn('look at the data loader', 'dataLoader.py') && namedIn('the final report please', 'final_report.md') && namedIn('read the README', 'README.md'));
+// A name of one word, without its extension, only in a sentence plainly about a file (the owner, 2026-11-27).
+assert.ok(!namedIn("what's the plan for today?", 'plan.md') && namedIn('read the plan', 'plan.md') && namedIn('plan dot md', 'plan.md') && namedIn('what is in plan.md', 'plan.md'));
+assert.ok(!namedIn('what does segment do', 'segment.py') && !namedIn('the README', 'README.md') && namedIn('what does segment.py do', 'segment.py'));
+for (const w of ['file', 'read', 'open', 'show', 'look at', 'look in', 'check']) assert.ok(namedIn(`${w} the plan`, 'plan.md'), w);
+assert.ok(!namedIn('look the plan over', 'plan.md') && !namedIn('the plan reads well', 'plan.md'), 'whole words and phrases only');
+assert.ok(namedIn('what does the final report say', 'final_report.md'), 'two words stay as they were');
+assert.ok(!namedIn('add milk to groceries', 'Groceries', { ext: false }) && namedIn('add milk to my groceries note', 'Groceries', { ext: false }) && namedIn('add milk to groceries dot md', 'Groceries', { ext: false }));
 assert.ok(!namedIn('the report', 'final_report.md') && !namedIn('what does the loader do', 'dataLoader.py') && !namedIn('', 'segment.py'));
 assert.ok(namedIn('open the 2026 budget', 'budget-2026.xlsx') && !namedIn('the budget', 'budget-2026.xlsx'));
 assert.ok(namedIn('change Lab plan', 'Lab plan', { ext: false }) && namedIn('fix the plan for the lab', 'Lab plan', { ext: false }) && !namedIn('change the plan', 'Lab plan', { ext: false }));
@@ -88,7 +95,7 @@ turn('what does the loader do?'); answer = 'yes';
 assert.match(await run('read_file', { path: 'src/dataLoader.py' }), /^~\/Projects\/thesis\/src\/dataLoader\.py/);
 assert.equal(asked.length, 1);
 // a file's text never widens it: the README names segment.py, but only his words count
-turn('what does the readme say?'); answer = null;
+turn('read the readme'); answer = null;
 assert.match(await run('read_file', { path: 'README.md' }), /^~\/Projects\/thesis\/README\.md/); assert.equal(asked.length, 0);
 assert.match(await run('read_file', { path: 'segment.py' }), /didn't say yes/); assert.equal(asked.length, 1, 'segment.py, named only in the README, needs a yes');
 // "free": no bubble

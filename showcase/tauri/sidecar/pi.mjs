@@ -21,7 +21,7 @@ import { MEASURE_SECONDS, SETTLE_HOLD_SECONDS } from './rebuild.mjs'; // feature
 import { CHFLAGS, EXTENSION, PS, PS_ARGS, RECORD, START_SLACK, endedNotice, offNotice, prepareLeftovers } from './leftovers.mjs'; // feature 24
 import { COMING_DAYS, DROP_WORDS, KEEP_DAYS, LEAVE_WORDS, REVIEW_PHRASES } from './daily.mjs';
 import { KEEP_EDITS, KEEP_NOTE_WORDS, KEEP_PAGES, SAVE_WORDS, TASKS_FOLDER, VERSIONS_FOLDER } from './notes.mjs';
-import { FILE_TOOLS, NAME_SMALL_WORDS, SKIPPED_FOLDERS } from './files.mjs'; // feature 14: shown in settings.default.json
+import { ABOUT_FILE_WORDS, FILE_TOOLS, NAME_SMALL_WORDS, SKIPPED_FOLDERS } from './files.mjs'; // feature 14: shown in settings.default.json
 import { DONE_WORDS, GO_WORDS, HANDOVER_WORDS, HEADINGS, KEEP_WORDS, LINE_CHARS, PART_TWO_LINES, PART_TWO_SECONDS, TICKS_MINUTES } from './handover.mjs'; // feature 18: shown in settings.default.json
 import { STAND_CAUGHT, STAND_FILL } from './standdown.mjs'; // feature 33: shown in settings.default.json
 import { QUEUE_ORDER, WAITING_PHRASES, WHY } from './quiet.mjs'; // feature 31: shown in settings.default.json
@@ -1213,7 +1213,7 @@ export function codeReference() {
       when: 'only in a request the owner typed or spoke; never in one the app makes (a briefing, pi\'s summary, a system note), never on Roamies\' own initiative; refused while pi works',
       names: 'list_files and find_files give names and paths only, in any request he typed or spoke',
       contents: { ask: 'the default: a file\'s text (a read, or a search\'s matching lines) goes to a model only when his own words in that request name the file, or he said yes to a bubble naming exactly the files; no answer reads nothing; each further read (a further part too) needs his words or his yes again; a file\'s text never counts as his words; after a no, that file is not asked about again in that request', free: 'any read in a request he typed or spoke', search: 'with "ask", the files with matches that his words don\'t name are listed in one bubble; with no yes, nothing from them is sent, not even their names' },
-      namedBy: 'his words name a file when the whole file name, with or without its extension, is in them as words ("segment.py", "segment dot py", "segment"), or every word of the name is (split at _ - . spaces, capitals and digits), these small words aside', smallWords: [...NAME_SMALL_WORDS],
+      namedBy: 'his words name a file when the whole file name, with or without its extension, is in them as words ("segment.py", "segment dot py", "segment"), or every word of the name is (split at _ - . spaces, capitals and digits), these small words aside; a name of one word counts without its extension only when the sentence also has one of aboutFileWords (a note\'s title: "note" too)', smallWords: [...NAME_SMALL_WORDS], aboutFileWords: [...ABOUT_FILE_WORDS],
       privateMode: 'a private request goes to the local model only, so a file\'s text read in it never reaches the provider',
       localRoute: 'read_file and find_files, with limits.localFileChars a part; "read <file name>" as the whole sentence is read by code first and the local model words the answer',
       shown: 'the bubble\'s tool tag and the activity list name the file read, the folder listed, the name found or the words searched for',

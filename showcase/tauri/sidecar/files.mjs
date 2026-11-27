@@ -43,18 +43,28 @@ function nameWords(s) {
   const split = String(s ?? '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/(\d)([A-Za-z])/g, '$1 $2');
   return normal(split).split(' ').filter((w) => w && !SMALL.has(w));
 }
-/** Whether his words name a file (or, with ext false, a note's title): the whole name, with or without its
- *  extension, is in them as words ("segment.py", "segment dot py", "segment"), or every word of the name is (split at
- *  separators, capitals and digits; the small words aside). Only his words count: never a file's text or a result. */
+// The words that make a sentence plainly about a file (the owner, 2026-11-27); a note's title takes "note" too.
+export const ABOUT_FILE_WORDS = ['file', 'read', 'open', 'show', 'look at', 'look in', 'check'];
+const aboutFile = new RegExp(`(^| )(${ABOUT_FILE_WORDS.join('|')})( |$)`);
+const aboutNote = new RegExp(`(^| )(note|${ABOUT_FILE_WORDS.join('|')})( |$)`);
+
+/** Whether his words name a file (or, with ext false, a note's title, whose extension is .md): the whole name with
+ *  its extension is in them as words ("segment.py", "segment dot py"); or the name without it is ("segment"), or
+ *  every word of it is (split at separators, capitals and digits; the small words aside). A name of one word counts
+ *  without its extension only when the sentence is plainly about a file (ABOUT_FILE_WORDS; "note" too for a title):
+ *  "what's the plan for today?" doesn't name plan.md, "read the plan" does. Only his words count: never a file's
+ *  text or a result. */
 export function namedIn(said, name, { ext = true } = {}) {
   const heard = normal(said).replace(/ dot (?=\S)/g, ' ');
   if (!heard) return false;
   const t = ` ${heard} `, base = String(name ?? '').split(/[\\/]/).pop().trim();
   const stem = ext ? base.replace(/(.)\.[^.\s]{1,10}$/, '$1') : base;
-  const forms = [...new Set([normal(base), normal(stem)])].filter(Boolean);
-  if (forms.some((f) => t.includes(` ${f} `))) return true;
+  const full = normal(ext ? base : `${base}.md`);
+  if (full !== normal(stem) && t.includes(` ${full} `)) return true;
   const words = nameWords(stem);
   if (!words.length) return false;
+  if (words.length === 1 && !(ext ? aboutFile : aboutNote).test(heard)) return false;
+  if (normal(stem) && t.includes(` ${normal(stem)} `)) return true;
   const have = new Set(heard.split(' '));
   return words.every((w) => have.has(w));
 }
