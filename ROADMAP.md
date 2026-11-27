@@ -1388,7 +1388,7 @@ masked; the ledger counts swaps. **Planned only after 40 is built and merged** (
   the saved conversation), web search off with the app's line, a fresh claude session and the old transcript deleted
   on a list change; pi's Send bubble count and no countdown; `swaps`/`swapsBack` in the ledger; guarantee 9 (8 was
   taken) and one sentence in 3. Tests: `mask`, `mask-run` (API route), `mask-cc-run` (Claude's route, through
-  `ROAMIES_FAKE_CLAUDE`). Report: `~/Documents/roamies-reports/2026-11-27_1726_feature-34-report.md`.
+  `ROAMIES_FAKE_CLAUDE`). Report: `~/Documents/roamies-reports/2026-11-27_1724_feature-34-report.md`.
 
 ### 29. Run watcher
 
