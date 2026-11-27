@@ -2184,6 +2184,10 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   broken; every place that reads the settings handled; a run test. What Roamies does meanwhile (refuse requests, or run
   on defaults) waits for his answer. The log kind `fish_account` to be renamed, with no Fish Audio name left in a log
   kind or a message he can see.
+- **2026-11-27 20:34.** Settings fault: proposal written (`~/Documents/roamies-reports/2026-11-27_2034_settings-fault-proposal.md`):
+  refuse requests while the file can't be read (the defaults would empty the masking list, drop his never-look apps
+  and folders, and turn back on what he turned off). Waiting for his answer. Point 3 done on `settings-fault`
+  (`fish_account` → `speech_ready`; no request is made by that check). Both added to `LESSONS.md`.
 
 ## 6. Still to test
 

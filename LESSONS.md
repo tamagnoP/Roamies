@@ -52,3 +52,27 @@ differently. Read this file at the start of each feature (CLAUDE.md, "How to wor
   everyday sentences also fit them.
 - **Do differently:** for every rule that lets something through without a yes, write the everyday sentences that
   must not pass (a one-word name, a common word) as tests next to the ones that must.
+
+## A settings file with a stray comma hung a request and showed nothing (2026-11-27)
+
+- **What went wrong:** on the owner's Mac, a stray comma made `settings.json` invalid. Roamies heard his request,
+  showed the loading icon and never replied. It threw out of the shell's message handler and a start-up step
+  (uncaught), skipped the daily note and the calendar, and showed him nothing.
+- **Why:** `loadSettings` throws by design. About 70 places read the settings, most outside a `try`, including the
+  first line of `prompt()`, whose promise chain only logged the error and never told the overlay the request had
+  ended. Every test ran with a valid file, so no test ever read a broken one.
+- **Do differently:** for anything the owner edits by hand (settings, the vault, lists), test the broken file with
+  the real sidecar: a typed and a spoken request, the timers, the start-up. Every entry point (a request, a timer, an
+  event handler) must end a request with a line he sees, and never throw out. Ask him what Roamies should do while it
+  is broken; never choose defaults that could loosen what he set.
+
+## An upstream service's name left in a log kind (2026-11-27)
+
+- **What went wrong:** after Fish Audio was taken out of this build, the activity log still wrote `fish_account`, with
+  a Fish Audio model name, at every start-up. The owner had to ask whether a request was made: none was, because
+  `localAccount` answers on the computer.
+- **Why:** when the voice was replaced, the code paths were changed but the names in log kinds, log fields and
+  never-reached messages were kept "so the rest reads the same", and nothing checked them.
+- **Do differently:** when a service is removed, rename every log kind and field that names it to what the build
+  really does, reword what can still be shown on any platform, and add a test that scans the log kinds and checks
+  that no request is made.
