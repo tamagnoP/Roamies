@@ -1373,6 +1373,14 @@ masked; the ledger counts swaps. **Planned only after 40 is built and merged** (
   matching rules; stand-ins numbered per group, kept in `state.json`, never reused; a list change rebuilds the
   model's copy and starts a fresh claude session; `swaps`/`swapsBack` in the ledger; settings `masking`, `mask`,
   `limits.maskEntries`; a proposed guarantee 8; seven questions. Nothing built.
+- **Answers 2026-11-27 16:15** (`2026-11-27_1615_owner-answers-feature-34.md`): plan accepted. (1) pi gets his words;
+  the Send bubble gives a count of listed words in the prompt; such a hand-off never goes on the countdown. (2)
+  Pictures as now, the limit stated. (3) Web search off while the list has words, with a code-worded line when a
+  search is asked for. (4) Keep resuming; delete the replaced session's transcript on a list change. (5) `exactCase`
+  per entry and the start-up warning from macOS's word list. (6) Person, Organisation, Project, Term. (7) Yes to
+  guarantee 8, adding: what was sent before a word was listed, and the local model gets his words wherever
+  `local.address` leads. Hand checks in TESTS.md group 2. Built on a branch off `next`, `test:all`, one report with
+  the masking time and the first request after a list change on each route.
 
 ### 29. Run watcher
 
@@ -2116,6 +2124,8 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - **2026-11-27 12:28 (the owner).** Feature 40's review accepted with the report's choices; AGENTS.md notes `find` and
   `reveal` are in the macOS helper only; merged into `next`. Then plan 34 (masking), build nothing. His words:
   `2026-11-27_1228_owner-accepts-feature-40-and-plan-34.md`.
+- **2026-11-27 16:15 (the owner).** Feature 34's plan accepted with answers to its seven questions and yes to
+  guarantee 8 with two additions; build on a branch off `next`. His words: `2026-11-27_1615_owner-answers-feature-34.md`.
 
 ## 6. Still to test
 
