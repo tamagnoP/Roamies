@@ -319,6 +319,8 @@ export const LIMITS = {
   filesPerRequest: { default: 10, min: 1, max: 50, whole: true }, // feature 14: reads (a part of a file, or a search's lines) in one request
   localFileChars: { default: 6000, min: 1000, max: 20_000, whole: true }, // feature 14: characters of a file in one read on the local route
   noteEditLines: { default: 40, min: 5, max: 200, whole: true }, // feature 14: changed lines shown in a note edit's bubble before "and N more lines"
+  findMatches: { default: 8, min: 1, max: 20, whole: true }, // feature 40: matches on the card of a search for a file anywhere
+  findSeconds: { default: 3, min: 1, max: 15 }, // feature 40: how long Spotlight is waited for
 };
 // Feature 14: what may send a file's contents to a model ("fileContents"). ask: his own words in that request name
 // the file, or he said yes to a bubble naming exactly the files; free: any read at his request in that turn.
@@ -406,7 +408,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -460,6 +462,9 @@ const CLEAN = {
   speakNotices: when((v) => typeof v === 'boolean'),
   files: when((v) => typeof v === 'boolean'), // feature 14: Roamies' own file reading, on or off
   fileContents: when((v) => FILE_CONTENTS.includes(v)), // feature 14: see FILE_CONTENTS
+  findAnywhere: when((v) => typeof v === 'boolean'), // feature 40: "where is <file>?" answered by code from Spotlight, on or off
+  findDrives: when((v) => typeof v === 'boolean'), // feature 40: the local external drives searched too
+  findLeaveOut: list, // feature 40: his own folders never searched
   measurePageRebuild: when((v) => typeof v === 'boolean'),
   measureRequests: when((v) => typeof v === 'boolean'), // feature 23: timings and memory per request, numbers only, in the activity log
   voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
@@ -596,7 +601,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -1230,6 +1235,18 @@ export function codeReference() {
       versions: `${dir}/${VERSIONS_FOLDER}/, with the vault's folders below it, "<title> <YYYY-MM-DD HHMM>.md", outside the vault, never deleted`,
       undo: `undo_note_edit, only when his words in that request say undo, revert, restore or put back: the last edit (or the named note's) is put back, shown and saved like an edit, and the version it replaces is kept too; the last ${KEEP_EDITS} edits are remembered in state.json "noteEdits"`,
       log: 'a line "Edited: [[<title>]]" in the daily note\'s Log', ledger: 'a note\'s text sent to the provider (read_note, search_notes) is counted as noteTexts and noteChars',
+    },
+    findAnywhere: {
+      what: '"where is <name>?", "find the file <name>", "which folder is <name> in?": decided and answered by code alone on either route (findany.mjs); no model is asked and no file name or path goes to any model',
+      when: '"where is …" only when the name looks like a file or a folder (an extension, or a type word: file, folder, document, PDF and the like); "find the file …" and "which folder is … in?" always; anything else goes the usual way',
+      how: 'Spotlight, by name only, through the hands helper (roamies-hands find and reveal, started per command like every hands command); contents are never read; macOS only',
+      where: 'the home folder, and the local external drives when "findDrives" is true (network drives never)',
+      leftOut: ['~/Library (iCloud Drive and the cloud folders with it)', 'hidden files and folders (the Trash with them)', 'the sandbox\'s blocked list', 'Roamies\' own folders (~/Documents/roamies-pi, ~/.gg)', 'the notes vault', 'what safety.mjs never reads (keys, passwords, .env files, other apps\' data)', 'apps, and the insides of packages', 'Time Machine backups', 'node_modules, .git and virtual environments', 'the folders in "findLeaveOut"'],
+      ranked: 'the name is his words, then starts with them, then holds each as a whole word, then as part of a word; within each: the last opened, the last changed, the fewest folders deep, a project folder first',
+      shown: 'a card of limits.findMatches matches at most, each with its name and folder, folders marked; what is said is the count and the first one or two names only',
+      picked: 'by voice in the answer window ("the second one", "number two", its name) or by a click on the card until it closes or the next request; the picked file is shown in Finder, selected, never opened; nothing happens without a pick',
+      logged: 'counts only (find_file, find_pick): never what he said, a name or a folder',
+      off: '"findAnywhere": false sends these sentences the usual way',
     },
     sendWords: [...SEND_WORDS],
     handsFreeSendWords: { edit: [...HANDS_FREE_SEND], optional: 'please', readOnly: 'the send words', rule: 'heard in an answer window, a hand-off that can edit is sent only on one of these, said alone' },
