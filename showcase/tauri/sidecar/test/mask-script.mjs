@@ -9,6 +9,13 @@ export function answerFor({ system = '', last = '', afterTool = null }) {
   if (/You compress the older part/.test(system)) return { text: JSON.stringify(FOLD) };
   if (/pick out what to remember/.test(system)) return { text: '{"facts": []}' };
   if (/end-of-day handover/.test(system)) return { text: HANDOVER };
+  // feature 41 (test/piupdates-run.test.mjs): an update (one with a command in it once something was deleted, so code's
+  // own sentence is used), the closing summary, and the hand-off itself
+  if (/coding agent, is working on a task/.test(system)) return { text: /\n- deleted /.test(last) ? 'I ran curl -sI against the site.' : 'The Project 1 report is taking shape.' };
+  if (/coding agent, has stopped working on a task/.test(system)) return { text: 'The Project 1 report is finished, with a bar chart rather than a table. Do you want the raw numbers added too?' };
+  if (afterTool === 'ask_pi') return { text: 'Pi is on it.' };
+  if (/Write the Project 1 report/.test(last)) return { tool: ['ask_pi', { prompt: 'Write report.md for Project 1 from results.csv, using pandas.', mode: 'edit' }] };
+  if (/What did pi decide/.test(last)) return { text: 'A bar chart.' };
   if (afterTool === 'write_note') return { text: 'Noted: Person 2 wants the Project 1 figures from Organisation 1.' };
   if (afterTool === 'read_note') return { text: 'It says Person 2 leads Project 1 at Organisation 1.' };
   if (afterTool === 'read_file') return { text: 'The file says Organisation 1 owns the Project 1 data.' };

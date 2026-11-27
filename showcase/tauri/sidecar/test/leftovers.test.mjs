@@ -140,7 +140,7 @@ async function run(prompt, { mode = 'edit', maxMinutes = 60, act = async () => {
   // notice nor the text on screen.
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   const gist = side.slice(side.indexOf('summarise: async () => {'), side.indexOf('show: (text) => sayAsIs('));
-  assert.ok(gist.includes('enqueue(') && !/notice|shown/.test(gist), 'the model is not given the notice');
+  assert.ok(gist.includes('piWords(') && !/notice|shown/.test(gist), 'the model is not given the notice (feature 41: code\'s digest, one small request)');
   assert.ok(/speak: \(text\) => voiceLine\(text\)/.test(side) && /played: quietAgain/.test(side), 'said by code, after the gist');
 }
 

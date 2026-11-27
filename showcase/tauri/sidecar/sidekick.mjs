@@ -44,6 +44,7 @@ import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
+import { OUT_TOKENS, codeLines, compose, digestText, updatePrompt } from './piwatch.mjs'; // Local-only build (feature 41)
 import { SHORT, leanTools } from './lean.mjs';
 import { createFind, foundLine, nothingLine, pickRow, WHICH_FILE } from './findany.mjs'; // Local-only build (feature 40): find a file anywhere, by code alone
 import { countTools, createLedger, isLeftAsk, signInFailed } from './ledger.mjs'; // Local-only build (feature 32): the ledger
@@ -387,6 +388,8 @@ const pi = createPi({
   askYesNo: (opts, signal) => answers.ask(opts, signal), question: (q) => flow.question(q), retext: (text) => ui({ kind: 'ask_text', text: sir(text, { again: true }) }),
   say: (text) => say(text),
   tell: (text, spoken) => { if (text) say(text, 'happy'); voiceLine(spoken); },
+  taskWords: () => ownWords, // feature 41: the task in his own words, for the digest of pi's work
+  update: (watch) => { piUpdate(watch).catch((e) => console.error('pi update', e)); }, // feature 41
   // pi has finished. With spoken replies on, Roamies first says the gist in its own voice (a short turn of its own);
   // then pi's full reply goes on screen, word for word, and stays there. In text mode the full reply is the answer.
   onDone: async (r) => {
@@ -397,11 +400,17 @@ const pi = createPi({
     await tellResult(r, {
       voiceOn: VOICE_ON(),
       summarise: async () => {
-        const what = r.status === 'error' ? `pi ran into a problem (${r.problem}).` : 'pi has finished.';
-        // If pi asked something, this counts as a spoken turn, so with Auto Listen on the microphone opens for the answer.
+        // Feature 41: one small request from code's digest of the whole task (piwatch.mjs), checked by code, with code's
+        // own line for any event it leaves out: said, put on screen and kept for the live state. If pi asked something, the
+        // microphone then opens for the answer (Auto Listen).
         const asks = /\?\s*$/.test(r.reply ?? '');
-        await enqueue(`(System, not ${userName}: ${what} Its full reply is in the <live-state> block, and the app puts it on screen for ${userName} right after you speak. Tell them the gist now in your own voice and manner: one to three short spoken sentences, as you'd report what a colleague found. Don't read it out, don't list file names or code, don't add advice or next steps of your own, and don't call any tool. ${asks ? 'pi asked them a question: finish by putting that question to them plainly, as the last thing you say.' : 'If pi asked them a question, put that question to them plainly.'})`, { byVoice: asks, kind: 'piSummary' });
+        const out = await piWords(r.watch, { status: r.status, problem: r.problem, reply: r.reply });
+        pi.told(out.text);
+        say(out.text, r.status === 'error' ? 'concerned' : 'happy');
+        const done = lineDone(out.text);
+        if (asks && autoListenOn() && flow.replyWindow(done)) logLine('auto_listen', { turn: 'pi' });
       },
+      plainLines: (res) => (res.watch ? codeLines(res.watch.digest({ status: res.status, problem: res.problem, reply: res.reply }).toTell, '', { own: settingsNow().piUpdatesOwnWork, max: settingsNow().limits.piNamesSaid }).join(' ') : ''), // feature 41: spoken replies off
       show: (text) => sayAsIs(text, r.status === 'error' ? 'concerned' : 'happy'), // pi's own words: no form of address
       speak: (text) => voiceLine(text), // feature 24: the leftovers notice, after the gist
       played: quietAgain,
@@ -1374,6 +1383,49 @@ async function sideShot(o) {
     const last = lines.findLastIndex((u) => !u.own);
     lines.forEach((u, i) => o.onUsage?.(u.own ? u : { ...u, swaps: use.swaps, swapsBack: i === last ? use.swapsBack : 0 }));
   }
+}
+// Local-only build (feature 41): pi's updates in plain words. The digest is code's (piwatch.mjs): never a command, its
+// output or a file's text. One small request words it (the provider's summary model through sideShot, masked and in
+// the ledger; the local model in private mode or offline; none when that is off, or with "piUpdates" "plain"); code
+// checks the answer, uses its own sentence when it can't be used, and adds a plain line for each event left out.
+let piUpdating = false;
+async function piWords(watch, final = null) {
+  const s = settingsNow(), t0 = Date.now(), kind = final ? 'piSummary' : 'piUpdate', own = s.piUpdatesOwnWork, limits = s.limits;
+  const d = watch.digest(final);
+  const route = privateMode() ? (s.local.address ? 'local' : 'none') : offlineNow() ? (s.local.address && s.local.whenOffline ? 'local' : 'none') : config.model ? 'provider' : 'none';
+  const plain = s.piUpdates === 'plain' || route === 'none';
+  let raw = null, why = '';
+  if (!plain) {
+    const system = updatePrompt({ persona: personaNow(), userName, own, final: !!final });
+    const text = digestText(d, { userName, limits });
+    const signal = AbortSignal.timeout(limits.piUpdateSeconds * 1000), maxTokens = OUT_TOKENS[final ? 'summary' : 'update'];
+    try {
+      raw = route === 'local'
+        ? await localRoute.oneShot({ kind, private: privateMode(), system, text, maxTokens, signal })
+        : (await sideShot({ ...(await sideRoute()), onUsage: sideUse(kind), system, text: forClaude(text), signal, maxTokens })).text;
+    } catch { why = signal.aborted ? 'slow' : 'failed'; }
+  }
+  const out = compose(d, raw, { own, pairs: watch.words().pairs, limits, plain });
+  logLine(final ? 'pi_summary' : 'pi_update', { ms: Date.now() - t0, how: out.how, ...(out.why || why ? { why: why || out.why } : {}), chars: out.text.length, events: d.toTell.map((e) => e.kind), added: out.added, cut: out.cut, route: plain ? 'none' : route });
+  return { ...out, d };
+}
+/** An update while pi works: only with spoken replies on and "piUpdates" not "off", one at a time, and never over a
+ *  reply, an open answer window, a running request or stand down. One that can't be given now isn't marked given, so
+ *  what it would have said rolls into the next. */
+async function piUpdate(watch) {
+  const s = settingsNow();
+  if (!VOICE_ON() || s.piUpdates === 'off' || piUpdating) return;
+  // Nothing playing: the overlay reports a mark handed over now as played (feature 22), within a moment.
+  const silent = () => Promise.race([whenPlayed(speech.mark()).then(() => true), new Promise((r) => setTimeout(() => r(false), 400))]);
+  const quietNow = async () => !busy && !turnVoice && !flow.window() && !stood?.on() && !onboarding && await silent();
+  piUpdating = true;
+  try {
+    if (!await quietNow()) { logLine('pi_update', { held: true }); return; }
+    const out = await piWords(watch);
+    if (pi.watching() !== watch || !await quietNow() || !VOICE_ON()) { logLine('pi_update', { dropped: true }); return; }
+    watch.given(out.d, out.text);
+    voiceLine(out.text);
+  } finally { piUpdating = false; }
 }
 // Feature 32: what the claude program reports it requested by itself, beyond the request's own turns.
 const ownUse = (e) => { if (e.type === 'own_usage') for (const [model, tokens] of Object.entries(e.byModel)) ledger.record({ kind: 'own', where: 'provider', provider: 'claude-code', model, tokens }); else logLine('own_usage_unseen', {}); };

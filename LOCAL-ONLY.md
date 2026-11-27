@@ -50,10 +50,12 @@ or named an app) is a rule in its instructions, which the model follows but the 
    ("Send" or "Send now"). The same holds for the folder-change question and the Super Productivity bubbles. Both lists are under `reference`
    in `settings.default.json` (`sendWords`, `dontSendWords`).
 4. pi starts in the background, in the project folder, as `pi --mode json`. What it's doing ("Pi's reading
-   segment.py…") shows in a bubble, at most one every few seconds.
-5. When pi finishes, Roamies tells you the gist in its own voice (with spoken replies on), and then pi's full reply,
-   or its question back to you, goes on screen word for word. With text replies, the full reply is shown straight
-   away. Your answer to a question goes back to the same pi session, after another Send.
+   segment.py…") shows in a bubble, at most one every few seconds. With spoken replies on, Roamies says now and then
+   how the work stands, in plain words and never a command (feature 41, see "pi's updates in plain words").
+5. When pi finishes, Roamies says a short closing summary (with spoken replies on): the outcome, the decisions made,
+   and what you have to do next; then pi's full reply, or its question back to you, goes on screen word for word.
+   With text replies, no request is made: code's lines for the events that must be said (feature 41) go above pi's
+   reply. Your answer to a question goes back to the same pi session, after another Send.
 6. While pi is working, Roamies can only talk, keep the to-do list and notes, or stop pi (say "stop pi", or Stop in
    the menu).
 7. What is ended with pi. pi runs as the leader of its own process group. When pi finishes, when it is
@@ -239,6 +241,9 @@ setup guide is open, the bubble waits until it closes.
   "keepLogsDays": 30,
   "autoSendReadOnly": 5,
   "progressSeconds": 90,
+  "piUpdates": "worded",
+  "piUpdatesOwnWork": true,
+  "piWatch": { "installs": [], "network": [], "pushes": [] },
   "routines": { "start a research session": ["open Zotero", "switch project to cell-segmentation", "ask pi to read TODO.md and tell me where I left off"] },
   "briefings": { "morning": "09:00", "evening": "18:30" },
   "neverLook": ["1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Passwords", "Messages"],
@@ -313,7 +318,12 @@ setup guide is open, the bubble waits until it closes.
 - `maxMinutes`: a task running longer than this is stopped.
 - `keepLogsDays`: hand-off records older than this are deleted when a new hand-off starts. `0` keeps them all.
 - `autoSendReadOnly`: seconds before a read-only hand-off sends itself. `0` makes every hand-off wait for Send.
-- `progressSeconds`: on a long task, how often Roamies says pi is still working (spoken replies only). `0` is never.
+- `progressSeconds`: the least time between updates on pi's work (spoken replies only; feature 41). `0` is never.
+- `piUpdates`: `"worded"` (an update is one small request, then checked by code), `"plain"` (code's own sentence and
+  lines only, no request) or `"off"` (nothing said while pi works; the closing summary is still given).
+- `piUpdatesOwnWork`: `true`, Roamies speaks of pi's work as its own ("I've installed…"); `false`, "pi has…".
+- `piWatch`: programs you add to what code recognises as an install, a network command or a push, each written
+  `"program"` or `"program subcommand"` (`"pdm add"`).
 - `routines`: phrases that run a list of steps. Say the phrase and Roamies does each step in order with its usual
   tools, rules and confirmations, stopping at the first one that fails or is refused.
 - `briefings`: times, as `"HH:MM"`, for a morning rundown (your to-dos, and what pi was asked yesterday) and an
@@ -419,6 +429,12 @@ setup guide is open, the bubble waits until it closes.
   | `snapshotMaxFileMB` | 2 | 0.1 to 100 | A new file bigger than this is left out of an undo snapshot. |
   | `snapshotMaxFiles` | 5000 | 1 to 100000, whole | New files in one undo snapshot. |
   | `routinesShown` | 12 | 1 to 100, whole | Routines the model is told about. |
+  | `piUpdateChars` | 220 | 80 to 600, whole | The longest update on pi's work accepted from the model (feature 41). |
+  | `piSummaryChars` | 400 | 120 to 1200, whole | The longest closing summary accepted from the model (feature 41). |
+  | `piStatements` | 3 | 0 to 10, whole | pi's own statements in one digest; `0` leaves them out (feature 41). |
+  | `piStatementChars` | 300 | 50 to 2000, whole | The length of each (feature 41). |
+  | `piNamesSaid` | 3 | 1 to 20, whole | File or package names said in one line before "and N more" (feature 41). |
+  | `piUpdateSeconds` | 15 | 3 to 60 | Seconds an update's request may take before code's own sentence is used (feature 41). |
   | `noteMaxChars` | 20000 | 1000 to 1000000, whole | Characters of a note written or read in one go. |
   | `notesSearched` | 5000 | 10 to 100000, whole | Notes looked through in a search. |
   | `noteTitleOnlyBytes` | 300000 | 1000 to 10000000, whole | A note bigger than this is searched by its title only. |
@@ -1133,6 +1149,64 @@ memory. The local model is not masked: it gets your words as they are, wherever 
   - What was sent before a word was on the list stays with the provider and in the claude program's transcripts.
   - The local model gets your words as they are, wherever `local.address` leads.
 
+## pi's updates in plain words
+
+Feature 41 (the owner's plan and answers of 2026-11-27). While pi works and when it finishes, Roamies says brief,
+plain English about how the work stands, and never repeats a command. The step bubbles still show the commands, and
+pi's full reply still goes on screen word for word.
+
+- **The digest, made by code** (`piwatch.mjs`):
+  - the task in your words (the prompt's first sentence when the app made the request);
+  - the kinds of steps and their counts since the last update and in all (files read, searches, files changed or
+    created, installs, test runs and how many failed, builds, commits, other commands, errors, retries);
+  - pi's own statements since the last update, cleaned by code (code, commands, web addresses, paths, long tokens and
+    any three words in a row from a command it ran taken out);
+  - the events that must be said.
+
+  It never holds a command, a command's output or a file's text.
+- **The events always said:** a package installed, a file deleted or moved, a file changed that the task didn't name,
+  a command that reaches the network, and anything pushed. Each is said with its names (packages, files, the host, the
+  branch and remote), done, still running or failed. A file is named when your words or the prompt you approved name
+  it by feature 14's rule, or name a folder it is inside as a folder ("the tests folder", "tests/").
+- **How code recognises them: command words only.** Code reads each command pi runs as the shell would (`&&`, `;`,
+  `|`, subshells, `bash -c`, `sudo`, `env`, variables in front, `python -m pip`, `git -C`; quoted text, comments and
+  here-documents are text, not commands). The programs it knows are listed under `reference.piUpdates.recognisedBy`
+  in `settings.default.json`, and `piWatch` adds yours. After a hand-off that can edit in a git project, the project is
+  also compared with its undo snapshot (`/usr/bin/git`, a temporary index), which catches files deleted, moved,
+  changed or added in any other way.
+- **The limit.** Code does not see what a program or script does by itself: a script that downloads, deletes or
+  uploads, a `make` target, an alias or a shell function, `python -c`. Nor does it see what runs inside a container,
+  or, in a project that isn't a git repository or in a read-only hand-off, deletions and changes made other than by
+  the commands it recognises. Those are not said.
+- **The sentence.** One small request words it: the provider's summary model (masked like any other request), or the
+  local model in private mode or offline; none when that is off or with `"piUpdates": "plain"`. It is in the persona's
+  manner, one sentence and two at most for an update, three for the closing summary, which goes in the order outcome,
+  decisions, what you have to do next. With `piUpdatesOwnWork` Roamies speaks of the work as its own.
+- **Code's checks.**
+  - The sentence is cut to its sentence limit.
+  - Code's own sentence is used instead ("I'm still working on it.", or for the summary "That's done; the full reply
+    is on screen.") when the sentence is still longer than the limit, or holds a backquote, `$`, an option, `|`, `&&`,
+    `<`, `>`, a path, a web address or two words in a row from a command pi ran, or claims an install, deletion, move,
+    network use or push that didn't happen.
+  - For each event the sentence leaves out, or mentions only negated ("I didn't need to install anything"), code adds
+    its own plain line: "I've installed 2 packages: pandas and numpy.", "I tried to push the main branch to origin; it
+    failed.", "I've also changed config.yaml, which you didn't name.", "One command went online, to github.com."
+- **When.**
+  - At most one update every `progressSeconds` (90), and only when something changed since the last one.
+  - An install, a deletion or move, a network command or a push brings the next update forward, to within 20 seconds
+    (two seconds after the commands behind it end).
+  - Nothing is said over a reply, an open answer window, a running request or stand down, or while something is still
+    playing. Such an update is not given, and what it would have said rolls into the next.
+  - With spoken replies off there are no updates, and the closing summary is not requested: code's lines go above pi's
+    reply.
+- **Each update is one request**, counted in the ledger as `piUpdate` (the closing summary as `piSummary`).
+  - The closing summary replaces the chat turn that used to say pi's gist, so it no longer sends the whole
+    conversation.
+  - The summary said is kept in the live state, so "what did pi decide?" can be answered.
+  - The activity log has `pi_update` and `pi_summary` lines with numbers and kinds only: never the sentence, a name or
+    the digest.
+- **New to leave the Mac while pi works** (masked): file, package and host names, and pi's cleaned statements.
+
 ## The daily note
 
 Feature 18. Roamies keeps one note per day in the vault: `Daily/YYYY-MM-DD.md` (the `dailyFolder` setting). Code
@@ -1552,6 +1626,9 @@ request fails with a network error before any reply; and in private mode. A slow
 - Roamies' conversation with your AI provider: messages, the front app and window title, saved memory, an outline
   of your to-do list (numbers, and today's planned blocks), the to-dos you ask about, and screenshots or window
   text when you ask about your screen. The words on your masking list go as stand-ins (see "Masking").
+- While pi works, the updates on its work (feature 41): the task in your words, counts of its steps, file, package and
+  host names and pi's cleaned statements, masked; none in private mode or offline (the local model), none with
+  `"piUpdates": "plain"` or `"off"`.
 - pi's own conversation with its provider, using pi's sign-in. Which files pi and the commands it runs can
   touch is limited by the sandbox; what they send over the network is not.
 - Signing in to Anthropic the first time: a browser sign-in, and a one-time download of the Claude Code program.
@@ -1569,6 +1646,13 @@ request fails with a network error before any reply; and in private mode. A slow
   40). `safety.mjs`: `checkReveal`. `tools.mjs`: `handsWithInput`, a hands command with its request on stdin.
   `src-tauri/hands/main.swift`: the `find` (Spotlight, `NSMetadataQuery`) and `reveal` (Finder) commands, macOS only.
   `roamies/ink.js` and `host.js`: the card of found files.
+- `showcase/tauri/sidecar/piwatch.mjs` (new): pi's updates in plain words (feature 41): commands read by code, the
+  five events, the digest, the checks, code's lines, the update ticks. `pi.mjs`: events fed to it, the updates in
+  place of the code-worded progress lines, `GIT` by its full path, `compareSnapshot`, the settings `piUpdates`,
+  `piUpdatesOwnWork`, `piWatch` and six limits, `reference.piUpdates`. `sidekick.mjs`: `piWords` and `piUpdate`, the
+  closing summary as one small request (no chat turn), his words kept with the hand-off. `brain.mjs`: `maxTokens` on
+  the API route. `ledger.mjs`: `piUpdate`. Tests: `piwatch`, `piupdates-run` (both routes); `pi`, `leftovers`,
+  `ledger` and `reference` brought up to date. `mask-script.mjs`: the stand-in's answers for them.
 - `showcase/tauri/sidecar/mask.mjs` (new): masking (feature 34). `sidekick.mjs`: the doors out and in (the agent's
   instructions, tools and conversation, the request, the live state, tool calls, the reply as it streams, the side
   calls, the saved conversation), web search off, a fresh claude session on a list change. `pi.mjs`: `masking`,

@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import { only, plainNum, unfilled } from './answers.mjs';
 
-export const KINDS = ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed'];
+export const KINDS = ['request', 'briefing', 'piSummary', 'piUpdate', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed'];
 /** Whether a request's error is a failed sign-in (the provider or the claude program refused the login). Such a
  *  request is kept as its own kind and named apart in the answer (the owner, 2026-11-26). */
 export const signInFailed = (err) => /not logged in|NotLoggedIn|\b401\b|unauthori|invalid api key|please run \/login|authentication[_ ]?(?:error|failed)/i.test(String(err?.message ?? err ?? ''));
@@ -46,7 +46,7 @@ export function countTools(names = []) {
 
 const fmt = (x) => x.toLocaleString('en-GB');
 const plural = (k, one, many = `${one}s`) => `${fmt(k)} ${k === 1 ? one : many}`;
-const KIND_WORDS = { request: ['request', 'requests'], briefing: ['briefing', 'briefings'], piSummary: ['summary of pi\'s reply', 'summaries of pi\'s replies'], fold: ['fold of the conversation', 'folds of the conversation'], memory: ['memory update', 'memory updates'], handover: ['handover part two', 'handover parts two'], warmup: ['warm-up', 'warm-ups'] };
+const KIND_WORDS = { request: ['request', 'requests'], briefing: ['briefing', 'briefings'], piSummary: ['summary of pi\'s reply', 'summaries of pi\'s replies'], piUpdate: ['update on pi\'s work', 'updates on pi\'s work'], fold: ['fold of the conversation', 'folds of the conversation'], memory: ['memory update', 'memory updates'], handover: ['handover part two', 'handover parts two'], warmup: ['warm-up', 'warm-ups'] };
 const sumOf = (lines, f) => lines.reduce((a, l) => a + (Number(l[f]) || 0), 0);
 /** Feature 14: "File texts: 2 (1,234 characters)." from the lines' counts, or the line for none. */
 const texts = (lines, k, words, none) => { const c = sumOf(lines, `${k}Texts`); return c ? `${words}: ${fmt(c)} (${plural(sumOf(lines, `${k}Chars`), 'character')}).` : none; };

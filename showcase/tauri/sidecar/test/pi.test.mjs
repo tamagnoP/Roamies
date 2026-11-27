@@ -23,6 +23,7 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'session', version: 3, id: 'sess-1', cwd: process.cwd() });
 out({ type: 'agent_start' });
 if (prompt.includes('HANG')) { setInterval(() => {}, 1000); return; }
+if (prompt.includes('SLOW')) { out({ type: 'tool_execution_start', toolCallId: 's1', toolName: 'bash', args: { command: 'pip install pandas' } }); out({ type: 'tool_execution_end', toolCallId: 's1', toolName: 'bash', result: {}, isError: false }); setInterval(() => {}, 1000); return; }
 if (prompt.includes('BOOM')) { process.stderr.write('auth: token expired\\n'); process.exit(3); }
 out({ type: 'tool_execution_start', toolCallId: 'c1', toolName: 'read', args: { path: 'src/segment.py' } });
 out({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'x' } });
@@ -74,9 +75,11 @@ fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/D
 const said = [], told = [], asked = [];
 let lastResolve = null; // the open Send bubble's own answer, as the overlay would give it
 let answer = 'yes'; // what the Send bubble gets: 'yes' (Send), null (Don't send), or a function for by-voice
+const updates = []; let taskSaid = ''; // feature 41: the updates asked for, and his words for the task
 const pi = createPi({
   home, userName: 'Tiago', shell: '/bin/sh',
   say: (t) => said.push(t), tell: (t, v) => told.push({ t, v }),
+  update: (w) => { const d = w.digest(); updates.push(d); w.given(d, 'said'); }, taskWords: () => taskSaid,
   ask: (q, signal) => new Promise((resolve) => {
     asked.push(q); lastResolve = resolve;
     if (typeof answer === 'function') { signal?.addEventListener('abort', () => resolve(null)); setTimeout(answer, 10); } else setTimeout(() => resolve(answer), 5);
@@ -399,13 +402,22 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await tool('ask_pi').execute({ prompt: 'auto six for Zorbina Quell', mode: 'read' }, {}); await settled();
   assert.match(asked.at(-1).placeholder, /^Asking pi in 0\.05 s/); assert.ok(!/isn't masked/.test(asked.at(-1).placeholder));
   fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(base));
-  // a long task says so now and then (spoken only)
-  answer = 'yes'; told.length = 0;
+  // feature 41: no code-worded progress line repeats a command any more; an update is asked for only when something
+  // changed since the last one, with the task in his words
+  answer = 'yes'; told.length = 0; updates.length = 0;
   await tool('ask_pi').execute({ prompt: 'HANG', mode: 'edit' }, {});
   await new Promise((r) => setTimeout(r, 260));
-  const spoken = told.filter((x) => x.t === null && /still|Bear with me/i.test(x.v));
-  assert.ok(spoken.length >= 2, 'progress lines were spoken'); assert.match(spoken[0].v, /^Still on it\. Pi's 0 steps in\.$/);
+  assert.deepEqual(told.filter((x) => x.t === null && !/^For pi, /.test(x.v)), [], 'no progress lines from code (the Send bubble\'s own line aside)');
+  assert.equal(updates.length, 0, 'nothing changed: no update');
   pi.stop(); await settled();
+  taskSaid = 'Get the data ready';
+  await tool('ask_pi').execute({ prompt: 'SLOW: install pandas and get the data ready', mode: 'edit' }, {});
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(updates.length, 1, 'one change, one update, however many ticks');
+  assert.equal(updates[0].task, 'Get the data ready');
+  assert.deepEqual(updates[0].toTell.map((e) => [e.kind, e.names, e.status]), [['install', ['pandas'], 'ok']]);
+  assert.ok(!JSON.stringify(updates[0]).includes('pip install'), 'never the command');
+  pi.stop(); await settled(); taskSaid = '';
   // briefings: due once a day, in their window, built from the day's records
   const at = (h, m) => new Date(2026, 10, 12, h, m);
   assert.equal(pi.briefing(at(8, 59)), null);

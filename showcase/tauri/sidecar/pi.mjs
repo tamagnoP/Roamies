@@ -28,6 +28,7 @@ import { QUEUE_ORDER, WAITING_PHRASES, WHY } from './quiet.mjs'; // feature 31: 
 import { CHECK_AGAIN_TIMES, DONE_WORDS as CHECK_DONE_WORDS, NOT_YET_WORDS, SKIP_BEFORE_START_MINUTES, STILL_WORDS } from './checkin.mjs'; // feature 25: shown in settings.default.json
 import { localAddress } from './local.mjs'; // feature 23: the one address the local model may have
 import { GROUPS as MASK_GROUPS, LABELS as MASK_LABELS, MASK_NOTE, WEB_OFF, cleanMask, listedCount } from './mask.mjs'; // feature 34: masking
+import { MAX_SENTENCES as UPDATE_SENTENCES, NOT_SEEN, RECOGNISED, UPDATE_MODES, URGENT_KINDS, URGENT_SECONDS, createSchedule, createWatch } from './piwatch.mjs'; // feature 41: pi's updates in plain words
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -86,6 +87,8 @@ export function briefly(text, max) {
 const tilde = (p, home) => (p === home ? '~' : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p);
 const expand = (p, home) => path.resolve(String(p).replace(/^~(?=$|\/)/, home));
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
+/** A prompt's first sentence, the task when the owner's own words aren't known (a routine, a pending hand-off). */
+const firstSentence = (text) => { const all = forVoice(text); const first = (/^.*?[.!?](?=\s|$)/s.exec(all)?.[0] ?? all).trim(); return clip(first, 200); };
 const base = (p) => path.basename(String(p ?? '')) || String(p ?? '');
 
 /** One line for a step pi takes, from a tool_execution_start event. */
@@ -290,6 +293,12 @@ export const LIMITS = {
   snapshotMaxFileMB: { default: 2, min: 0.1, max: 100 }, // a new file bigger than this is left out of an undo snapshot
   snapshotMaxFiles: { default: 5000, min: 1, max: 100_000, whole: true }, // new files in one undo snapshot
   routinesShown: { default: 12, min: 1, max: 100, whole: true }, // routines the model is told about
+  piUpdateChars: { default: 220, min: 80, max: 600, whole: true }, // feature 41: the longest update on pi's work accepted from the model
+  piSummaryChars: { default: 400, min: 120, max: 1200, whole: true }, // feature 41: the longest closing summary accepted from the model
+  piStatements: { default: 3, min: 0, max: 10, whole: true, zero: 'pi\'s own statements are left out of the digest' }, // feature 41: pi's own statements in one digest
+  piStatementChars: { default: 300, min: 50, max: 2000, whole: true }, // feature 41: the length of each
+  piNamesSaid: { default: 3, min: 1, max: 20, whole: true }, // feature 41: file or package names said in one line before "and N more"
+  piUpdateSeconds: { default: 15, min: 3, max: 60 }, // feature 41: the time an update's request may take before code's own sentence is used
   noteMaxChars: { default: 20_000, min: 1000, max: 1_000_000, whole: true }, // characters of a note written or read in one go
   notesSearched: { default: 5000, min: 10, max: 100_000, whole: true }, // notes looked through in a search
   noteTitleOnlyBytes: { default: 300_000, min: 1000, max: 10_000_000, whole: true }, // a bigger note is searched by its title only
@@ -410,7 +419,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], masking: true, mask: Object.fromEntries(MASK_GROUPS.map((g) => [g, []])), measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, piUpdates: UPDATE_MODES[0], piUpdatesOwnWork: true, piWatch: { installs: [], network: [], pushes: [] }, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], masking: true, mask: Object.fromEntries(MASK_GROUPS.map((g) => [g, []])), measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -439,6 +448,14 @@ const CLEAN = {
   keepLogsDays: number((n) => n >= 0),
   autoSendReadOnly: number((n) => n >= 0),
   progressSeconds: number((n) => n >= 0),
+  piUpdates: when((v) => UPDATE_MODES.includes(v)), // feature 41: "worded", "plain" or "off"
+  piUpdatesOwnWork: when((v) => typeof v === 'boolean'), // feature 41: Roamies speaks of pi's work as its own
+  piWatch: (v, d) => { // feature 41: programs the owner adds to what code recognises, "program" or "program subcommand"
+    if (!isObj(v)) return [d, false];
+    let ok = Object.keys(v).every((k) => k in d);
+    const kept = Object.fromEntries(Object.keys(d).map((k) => { const l = v[k] ?? []; const good = Array.isArray(l) ? l.filter(full).map((x) => x.trim()) : []; if (!Array.isArray(l) || good.length !== l.length) ok = false; return [k, good]; }));
+    return [kept, ok];
+  },
   routines: (v, d) => {
     if (!isObj(v)) return [d, false];
     let ok = true;
@@ -605,7 +622,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), masking: set.masking, mask: set.mask, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), piUpdates: set.piUpdates, piUpdatesOwnWork: set.piUpdatesOwnWork, piWatch: set.piWatch, keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), masking: set.masking, mask: set.mask, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -640,8 +657,10 @@ export function projectProblem(dir, home) {
 /** A snapshot of a project as it is now, kept as a git ref (refs/roamies/<stamp>) without touching the branch, the
  *  index or any file: the tracked files as they are, plus new files up to 2 MB each that .gitignore doesn't exclude.
  *  { ref } on success, { why } when there's none (not a git repository, git missing, or it failed). */
+// Local-only build (feature 41, guarantee 2): git is started by its full path, with fixed arguments, never through a shell.
+export const GIT = process.platform === 'win32' ? 'git' : '/usr/bin/git';
 export function snapshot(project, stampText, { init = false, limits = limitDefaults() } = {}) {
-  const git = (args, opts = {}) => spawnSync('git', ['-c', 'user.name=Roamies', '-c', 'user.email=roamies@localhost', ...args], { cwd: project, encoding: 'utf8', timeout: limits.gitTimeoutSeconds * 1000, maxBuffer: 64 * 1024 * 1024, ...opts });
+  const git = (args, opts = {}) => spawnSync(GIT, ['-c', 'user.name=Roamies', '-c', 'user.email=roamies@localhost', ...args], { cwd: project, encoding: 'utf8', timeout: limits.gitTimeoutSeconds * 1000, maxBuffer: 64 * 1024 * 1024, ...opts });
   try {
     let inside = git(['rev-parse', '--is-inside-work-tree']);
     if (inside.error) return { why: 'git isn\'t installed' };
@@ -663,6 +682,40 @@ export function snapshot(project, stampText, { init = false, limits = limitDefau
       const ref = `refs/roamies/${stampText}`;
       if (!commit || git(['update-ref', ref, commit]).status !== 0) return { why: 'git couldn\'t save the snapshot' };
       return { ref };
+    } finally { fs.rmSync(index, { force: true }); fs.rmSync(`${index}.lock`, { force: true }); }
+  } catch (e) { return { why: e.message }; }
+}
+/** Feature 41: what changed in a project since its snapshot (ref), however it changed: the project as it is now is
+ *  written to a tree the way the snapshot was (a temporary index; no branch, index or file touched, nothing kept but
+ *  git's own objects) and compared with the snapshot's. A new file too big for a snapshot is listed as added when it
+ *  was modified after since (ms). → { changes: [{ status: 'M'|'A'|'D'|'R', path, from }] } or { why }. */
+export function compareSnapshot(project, ref, { limits = limitDefaults(), since = 0 } = {}) {
+  const git = (args, opts = {}) => spawnSync(GIT, ['-c', 'core.quotepath=off', ...args], { cwd: project, encoding: 'utf8', timeout: limits.gitTimeoutSeconds * 1000, maxBuffer: 64 * 1024 * 1024, ...opts });
+  try {
+    const gitDir = path.resolve(project, git(['rev-parse', '--git-dir']).stdout.trim());
+    if (!ref || git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]).status !== 0) return { why: 'no snapshot' };
+    const index = path.join(gitDir, `roamies-index-${process.pid}-${Date.now()}-after`);
+    const env = { ...process.env, GIT_INDEX_FILE: index };
+    try {
+      if (git(['read-tree', ref], { env }).status !== 0) return { why: 'git couldn\'t read the snapshot' };
+      if (git(['add', '-u'], { env }).status !== 0) return { why: 'git couldn\'t record the changed files' };
+      const big = [];
+      const fresh = git(['ls-files', '-o', '--exclude-standard', '-z'], { env }).stdout.split('\0').filter(Boolean).filter((f) => {
+        try { const st = fs.lstatSync(path.join(project, f)); if (!st.isFile()) return false; if (st.size <= limits.snapshotMaxFileMB * 1024 * 1024) return true; if (st.mtimeMs >= since) big.push(f); return false; } catch { return false; }
+      }).slice(0, limits.snapshotMaxFiles);
+      if (fresh.length && git(['add', '--pathspec-from-file=-', '--pathspec-file-nul'], { env, input: fresh.join('\0') }).status !== 0) return { why: 'git couldn\'t record the new files' };
+      const tree = git(['write-tree'], { env }).stdout.trim();
+      if (!tree) return { why: 'git couldn\'t write the tree' };
+      const out = git(['diff-tree', '-r', '-z', '--name-status', '-M', `${ref}^{tree}`, tree]);
+      if (out.status !== 0) return { why: 'git couldn\'t compare' };
+      const f = out.stdout.split('\0').filter((x, i, a) => !(x === '' && i === a.length - 1));
+      const changes = [];
+      for (let i = 0; i < f.length;) {
+        const st = f[i++] ?? '';
+        if (!st) break;
+        if (st[0] === 'R' || st[0] === 'C') { const from = f[i++], to = f[i++]; changes.push({ status: st[0] === 'R' ? 'R' : 'A', path: to, from }); } else changes.push({ status: st[0], path: f[i++] });
+      }
+      return { changes: [...changes, ...big.map((f) => ({ status: 'A', path: f }))] };
     } finally { fs.rmSync(index, { force: true }); fs.rmSync(`${index}.lock`, { force: true }); }
   } catch (e) { return { why: e.message }; }
 }
@@ -729,13 +782,15 @@ export function watchParent(groupPid, spawnImpl = spawn, dir = '') {
 /** How a hand-off that ended done or error is told (sidekick.mjs onDone). With spoken replies on, Roamies first says
  *  the gist in its own turn (summarise; the model is given pi's reply, never the notice); then the full text goes on
  *  screen; then, once the gist has finished playing, the leftovers notice (feature 24) is said, worded by code. */
-export async function tellResult(r, { voiceOn, summarise, show, speak, played }) {
+export async function tellResult(r, { voiceOn, summarise, show, speak, played, plainLines = () => '' }) {
   if (voiceOn) await summarise(r);
-  show(r.shown);
+  // Feature 41: with spoken replies off, no request: code's lines for the events go above pi's reply.
+  const lines = voiceOn ? '' : plainLines(r);
+  show(lines ? `${lines}\n\n${r.shown}` : r.shown);
   if (voiceOn && r.notice) { await played(); speak(r.notice); }
 }
 
-export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now(), leftoversTmp = os.tmpdir(), leftoversSpawnSync = spawnSync } = {}) {
+export function createPi({ home = os.homedir(), userName = 'the user', say = () => {}, tell = () => {}, onDone = null, update = null, taskWords = () => '', ask, askYesNo = null, question = null, retext = () => {}, log = () => {}, onChange = () => {}, spawnImpl = spawn, shell = process.env.SHELL || '/bin/zsh', sandboxExec = SANDBOX_EXEC, volumes = VOLUMES, now = () => Date.now(), leftoversTmp = os.tmpdir(), leftoversSpawnSync = spawnSync } = {}) {
   let job = null; // the hand-off pi is working on
   const openLeftovers = new Set(); // feature 24: hand-off folders not yet removed (leftovers.mjs)
   let last = null; // the one before: { prompt, mode, project, status, reply, at }
@@ -752,7 +807,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   // voice the microphone then opens by itself for the answer. If that window runs out with no answer the bubble
   // closes, nothing is sent, the hand-off is kept as a pending question and approve rejects with Unanswered.
   // kept: the pending question this is, when it is being asked again (it keeps its age).
-  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0, limits = limitDefaults(), kept = null }, signal) {
+  async function approve({ prompt, mode, project, followUp, dir, notes = [], auto = 0, limits = limitDefaults(), kept = null, task = '' }, signal) {
     const where = tilde(project, home);
     // auto: a read-only task is sent after this many seconds unless it's stopped. One that can edit always waits for Send.
     const head = `${auto ? `Asking pi in ${auto} s` : 'Send to pi?'}  ${mode === 'edit' ? 'CAN EDIT files and run commands' : 'Read only'} · in ${where}${followUp ? ' · continues the last pi task' : ''}${notes.map((n) => `\n${n}`).join('')}`;
@@ -768,7 +823,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     let noAnswer = () => {}, answered = false;
     const unanswered = new Promise((_, reject) => { noAnswer = () => reject(new Unanswered('nothing went to pi')); });
     unanswered.catch(() => {});
-    const keep = { ...(kept ? { id: kept.id, at: kept.at } : {}), kind: 'handoff', brief: `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}: ${briefly(prompt, limits.heardLineChars)}`, data: { prompt, mode, followUp: !!followUp, project } };
+    const keep = { ...(kept ? { id: kept.id, at: kept.at } : {}), kind: 'handoff', brief: `For pi, ${mode === 'edit' ? 'with editing allowed' : 'read only'}: ${briefly(prompt, limits.heardLineChars)}`, data: { prompt, mode, followUp: !!followUp, project, ...(task ? { task } : {}) } };
     const window = question ? question({ brief: line, always: true, pending: keep, onTimeout: () => noAnswer() }) : (tell(null, line), null);
     const closing = new AbortController();
     const signals = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
@@ -817,7 +872,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     }
   }
 
-  function start({ prompt, mode, project, followUp, settings, by, snap = null, box = null, leftovers = true }) {
+  function start({ prompt, mode, project, followUp, settings, by, snap = null, box = null, leftovers = true, task = '' }) {
     const id = ++seq, t0 = now();
     // Feature 24: a hand-off that can edit gets the extension that records its commands (leftovers.mjs). macOS only.
     const lf = mode === 'edit' && leftovers && process.platform === 'darwin' ? prepareLeftovers({ tmpdir: leftoversTmp, spawnSyncImpl: leftoversSpawnSync, log }) : null;
@@ -853,6 +908,12 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     const j = job = { id, prompt, mode, project, at: t0, child, snapshot: snap?.ref ?? null, stopped: false, reply: '', problem: '', stderr: '', steps: 0, record, leftovers: lf, events: 0 };
     log('pi_start', { mode, followUp: !!session, chars: prompt.length });
     onChange();
+    // Feature 41: the digest of the work (piwatch.mjs), and the updates: at most one every progressSeconds, only when
+    // something changed since the last; a package installed, a deletion or move, the network or a push brings the
+    // next one forward. Worded and said by the app (update); none without one, or with piUpdates "off".
+    const watch = createWatch({ task: task || firstSentence(prompt), prompt, project, mode, extra: settings.piWatch, limits: settings.limits, now });
+    j.watch = watch;
+    const updates = createSchedule({ seconds: update && settings.piUpdates !== 'off' ? settings.progressSeconds : 0, due: () => { if (job === j && watch.pending()) update(watch, j); } });
     let stepAt = 0, stepTimer = null, stepText = '';
     const step = (line) => {
       j.steps++;
@@ -863,6 +924,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       if (wait <= 0) { stepAt = now(); say(stepText); } else if (!stepTimer) stepTimer = setTimeout(() => { stepTimer = null; stepAt = now(); if (job === j) say(stepText); }, wait);
     };
     const onEvent = (e) => {
+      try { const r = watch.event(e); if (r.urgent) updates.urgent(); else if (r.ended && !r.running) updates.settled(); } catch (err) { console.error('pi watch', err); }
       if (e.type === 'session' && typeof e.id === 'string') sessions.set(project, e.id);
       else if (e.type === 'tool_execution_start') step(describeStep(e.toolName, e.args));
       else if (e.type === 'auto_retry_start') step('trying again after an error');
@@ -887,23 +949,19 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       }
     });
     child.stderr.on('data', (d) => { j.stderr = (j.stderr + d.toString('utf8')).slice(-4000); });
-    // Every so often on a long task, a spoken line so the silence isn't a mystery (only with spoken replies on).
-    let told = 0;
-    const lines = [(n, w) => `Still on it. Pi's ${n} step${n === 1 ? '' : 's'} in${w}.`, (n, w) => `Pi's still working${w}. ${n} step${n === 1 ? '' : 's'} so far.`, (n, w) => `Bear with me, pi's not done yet${w}.`];
-    const progress = settings.progressSeconds > 0 ? setInterval(() => { if (job === j) tell(null, lines[told++ % lines.length](j.steps, stepText ? `, ${stepText.replace(/^Pi's /, '').replace(/…$/, '')} right now` : '')); }, settings.progressSeconds * 1000) : null;
     const timer = setTimeout(() => { j.problem = `it ran for over ${settings.maxMinutes} minutes, so I stopped it`; j.stopped = 'timeout'; group.end(); }, settings.maxMinutes * 60_000);
     let finished = false;
     const finish = (code, spawnError) => {
       if (finished) return;
       finished = true;
-      clearTimeout(timer); clearTimeout(stepTimer); clearInterval(progress);
+      clearTimeout(timer); clearTimeout(stepTimer); updates.stop();
       group.end(); // pi has gone: nothing it started stays, whatever still holds its output open
       // Feature 24: pi couldn't load the extension (it stops before doing anything): started again without it.
       if (lf && !j.stopped && !j.events && code !== 0 && j.stderr.includes('Failed to load extension') && j.stderr.includes(path.basename(lf.dir))) {
         guard.stop(); dropLf();
         write({ type: 'roamies_retry', why: 'pi could not load the extension that records its commands' });
         if (job === j) job = null;
-        start({ prompt, mode, project, followUp, settings, by, snap, box, leftovers: false });
+        start({ prompt, mode, project, followUp, settings, by, snap, box, leftovers: false, task });
         return;
       }
       // Feature 24: what its commands left running (leftovers.mjs), then the watcher and the folder go.
@@ -922,14 +980,19 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       if (j.stopped === true) status = 'stopped';
       else if (code === 127 || /command not found|No such file or directory/i.test(spawnError?.message ?? (code ? errText : ''))) { status = 'error'; j.problem = `I couldn't start pi ("${settings.pi}" wasn't found). Put its full path, from \`which pi\` in Terminal, as "pi" in ${tilde(settings.file, home)}.`; }
       else if (j.problem || code || !j.reply) { status = 'error'; j.problem ||= errText || (code ? `pi exited with code ${code}` : 'pi finished without a reply'); }
-      last = { prompt: j.prompt, mode: j.mode, project: j.project, snapshot: j.snapshot, status, reply: j.reply, problem: status === 'error' ? j.problem : '', at: now() };
+      // Feature 41: after an edit hand-off, what changed since the snapshot, however it changed (git, by its full path).
+      if (j.snapshot && status !== 'stopped') {
+        const cmp = compareSnapshot(project, j.snapshot, { limits: settings.limits, since: t0 });
+        if (cmp.changes) watch.compare(cmp.changes); else log('pi_compare_failed', { why: clip(String(cmp.why), 80) });
+      }
+      last = { prompt: j.prompt, mode: j.mode, project: j.project, snapshot: j.snapshot, status, reply: j.reply, problem: status === 'error' ? j.problem : '', at: now(), told: '' };
       write({ type: 'roamies_result', at: new Date(now()).toISOString(), status, exit: code ?? null, ms: now() - t0, steps: j.steps, reply: j.reply, problem: last.problem || undefined });
       log('pi_end', { status, ms: now() - t0, steps: j.steps, chars: j.reply.length });
       if (job === j) job = null;
       onChange();
       // What's put on screen: pi's own words, whole and unchanged.
       const shown = `${status === 'stopped' ? 'Stopped pi.' : status === 'error' ? `Pi hit a problem: ${j.problem}${j.reply ? `\n\nBefore that it said:\n\n${j.reply}` : ''}` : `Here's what pi came back with:\n\n${j.reply}`}${leftNotice ? `\n\n${leftNotice}` : ''}`;
-      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown, notice: leftNotice, ended };
+      const result = { status, reply: j.reply, problem: last.problem, prompt: j.prompt, mode: j.mode, snapshot: j.snapshot, shown, notice: leftNotice, ended, watch };
       // The app decides how it's told (sidekick.mjs: Roamies says the gist in its own voice, then the full reply goes on
       // screen). Without one, it's shown and read out as it is.
       if (onDone) Promise.resolve().then(() => onDone(result)).catch((e) => { console.error('pi relay', e); tell(shown, null); });
@@ -966,7 +1029,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   /** One hand-off: its checks, the Send bubble, and pi started on a yes. → { ok, mode, project }. kept: the pending
    *  question this is, when it is asked again: then there is no countdown, whatever its mode, so a hand-off is never
    *  sent because it was pending. Throws Unanswered when the answer window ran out (it is kept, or kept again). */
-  async function handoff({ text, mode, followUp }, signal, { kept = null } = {}) {
+  async function handoff({ text, mode, followUp, task = '' }, signal, { kept = null } = {}) {
         if (!text) throw new Error('The prompt is empty.');
         const settings = loadSettings(home);
         if (text.length > settings.limits.promptChars) throw new Error(`The prompt is over ${settings.limits.promptChars} characters. Make it shorter: name the files instead of pasting them.`);
@@ -1003,9 +1066,9 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
         // only), and such a hand-off is never sent by the countdown.
         const listed = settings.masking === false ? 0 : listedCount(text, cleanMask(settings.mask, { maxEntries: settings.limits.maskEntries }).entries);
         if (listed) notes.push(`⚠ pi isn't masked: ${listed} word${listed === 1 ? '' : 's'} on your masking list ${listed === 1 ? 'is' : 'are'} in this prompt.`);
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: !kept && m === 'read' && !unconfined && !listed ? settings.autoSendReadOnly : 0, limits: settings.limits, kept }, signal);
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: !kept && m === 'read' && !unconfined && !listed ? settings.autoSendReadOnly : 0, limits: settings.limits, kept, task }, signal);
         if (!ok) { log('pi_declined', { mode: m }); return { ok: false, mode: m, project: settings.project }; }
-        start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box });
+        start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box, task });
         return { ok: true, mode: m, project: settings.project };
   }
   /** A pending hand-off (flow.mjs). Looked at first, without asking: it is lost when its prompt can't be read or pi
@@ -1019,7 +1082,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     if (typeof d.prompt !== 'string' || !d.prompt.trim()) return { dropped: 'A task for pi was waiting for your answer, but I can no longer read it, so it was not sent.' };
     if (settings.project !== d.project || projectProblem(settings.project, home)) return { dropped: 'A task for pi was waiting for your answer, but pi now works in another folder, so it was not sent.' };
     return { ask: async () => {
-      const r = await handoff({ text: d.prompt.trim(), mode: d.mode, followUp: d.followUp }, undefined, { kept: q });
+      const r = await handoff({ text: d.prompt.trim(), mode: d.mode, followUp: d.followUp, task: typeof d.task === 'string' ? d.task : '' }, undefined, { kept: q });
       if (r.ok) tell('Sent to pi.', 'Sent to pi.');
       return {};
     } };
@@ -1073,7 +1136,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
       executionMode: 'sequential', timeoutMs: limitsFor(home).answerWaitMinutes * 60_000, // time to read the prompt and answer; pi itself runs in the background
       execute: async ({ prompt, mode, follow_up: followUp }, ctx) => {
         if (job) throw new Error('pi is still working on the last task. Wait for its reply, or stop it with stop_pi.');
-        const r = await handoff({ text: String(prompt ?? '').trim(), mode, followUp }, ctx?.signal);
+        const r = await handoff({ text: String(prompt ?? '').trim(), mode, followUp, task: String(taskWords() ?? '').trim() }, ctx?.signal);
         if (!r.ok) throw new Error(`${userName} didn't say send, so nothing went to pi. Don't ask again unless they bring it up.`);
         return `Sent to pi (${r.mode === 'edit' ? 'editing allowed' : 'read only'}, in ${tilde(r.project, home)}). It's working in the background and the app shows ${userName} its steps. Say in a few words, your own way, that pi is on it, and stop: you'll be told when it has finished.`;
       },
@@ -1104,7 +1167,7 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
     if (job) lines.push(`- pi is WORKING now (${job.mode === 'edit' ? 'editing allowed' : 'read only'}) on: "${clip(job.prompt, 300)}". Until it replies you can only talk, keep the to-do list and notes, or stop_pi.`);
     else if (last && last.project === s.project) {
       const said = last.reply ? ` pi's reply (the app puts it on screen for ${userName} in full): <<<${clip(last.reply, s.limits.piReplyChars)}>>>` : '';
-      lines.push(`- Last pi task (${last.status}${last.problem ? `: ${clip(last.problem, 200)}` : ''}; ${last.mode === 'edit' ? 'editing allowed' : 'read only'}): "${clip(last.prompt, 300)}".${said}${last.snapshot ? ` A snapshot from before pi's edits is kept as ${last.snapshot}; to undo, ${userName} runs in Terminal: git -C "${last.project}" restore --source=${last.snapshot} --worktree -- .` : ''}${/\?\s*$/.test(last.reply) ? ` It ended with a question: ${userName}'s answer goes to pi with ask_pi and follow_up true.` : ''}`);
+      lines.push(`- Last pi task (${last.status}${last.problem ? `: ${clip(last.problem, 200)}` : ''}; ${last.mode === 'edit' ? 'editing allowed' : 'read only'}): "${clip(last.prompt, 300)}".${said}${last.snapshot ? ` A snapshot from before pi's edits is kept as ${last.snapshot}; to undo, ${userName} runs in Terminal: git -C "${last.project}" restore --source=${last.snapshot} --worktree -- .` : ''}${/\?\s*$/.test(last.reply) ? ` It ended with a question: ${userName}'s answer goes to pi with ask_pi and follow_up true.` : ''}${last.told ? ` What you told ${userName} about it: "${clip(last.told, 600)}".` : ''}`);
     }
     return lines.join('\n');
   }
@@ -1160,6 +1223,10 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
   return {
     tools, live, stop, stopAll, killNow, tasksOn, briefing,
     busy: () => !!job,
+    /** Feature 41: the closing summary that was said, kept for the live state ("what did pi decide?"). */
+    told(text) { if (last) last.told = String(text ?? ''); },
+    /** Feature 41: the digest of the hand-off pi is working on, or null. */
+    watching: () => job?.watch ?? null,
     /** Something said while a Send bubble is open is for the bubble: "send" sends, "no" doesn't, anything else leaves
      *  it open. True when a bubble was open. */
     heard(text, opts) { if (!approval) return false; approval.answer(text, opts); return true; },
@@ -1275,6 +1342,21 @@ export function codeReference() {
       limits: ['the model doesn\'t know who or what a stand-in is, so answers about them can be worse', 'details left around a stand-in can still point to who or what it is', 'a stand-in the model writes its own way ("Person One", "P1") is shown as written (counted in the log as mask_leftover)', 'his own text shaped like a stand-in comes back spelled out', 'the claude program keeps the masked transcripts of its sessions (30 days, its own setting); a side call\'s session is kept the same way'],
       ledger: 'swaps (words swapped out in what a request newly sent) and swapsBack (stand-ins swapped back in what came back): numbers only',
       logged: 'mask_list { entries, ignored } when the list changes, mask_changed when that makes the agent again, mask_leftover { count }, web_off: never a word, a stand-in or a group',
+    },
+    // Feature 41: pi's updates in plain words (piwatch.mjs).
+    piUpdates: {
+      what: 'while pi works and when it finishes, a short spoken line in plain words: never a command; the commands and full detail stay on screen as before',
+      digest: 'made by code: the task in your words (the prompt\'s first sentence when the app made the request), the kinds of steps and their counts, pi\'s own statements since the last update (code, commands, web addresses, paths and long tokens taken out), and the events below; never a command, its output or a file\'s text',
+      worded: `one small request to the provider\'s summary model (the local model in private mode or offline; none when that is off): ${UPDATE_SENTENCES.update} sentences at most for an update, ${UPDATE_SENTENCES.summary} for the closing summary (the outcome, the decisions made, what you have to do next), masked like any other request and counted in the ledger as piUpdate or piSummary`,
+      alwaysSaid: { install: 'a package installed', removed: 'a file deleted or moved', unnamed: 'a file changed that the task didn\'t name', network: 'a command that reaches the network', pushed: 'anything pushed' },
+      recognisedBy: RECOGNISED,
+      named: 'a file is named when your words or the prompt you approved name it (feature 14\'s rule: its name with the extension, its path, or every word of a name of two words or more), or name a folder it is inside as a folder ("the tests folder", "tests/")',
+      notSeen: `command words only: code does not see ${NOT_SEEN}`,
+      checks: ['at most the sentences above and limits.piUpdateChars or piSummaryChars characters (longer: cut to the sentences; still too long: code\'s own sentence)', 'no backquote, $, option, |, &&, <, >, path, web address or two words in a row from a command pi ran (else code\'s own sentence)', 'no event claimed that did not happen (else code\'s own sentence)', 'each event not mentioned, or mentioned only negated, gets code\'s own plain line after the sentence'],
+      when: `at most one every progressSeconds, and only when something changed since the last; ${URGENT_KINDS.join(', ')} bring the next one forward, to within ${URGENT_SECONDS} seconds; not over a reply, an open answer window, a running request or stand down (it rolls into the next); none with spoken replies off`,
+      spokenRepliesOff: 'no request: code\'s lines for the events are shown above pi\'s reply',
+      settings: '"piUpdates": "worded", "plain" (code\'s sentence and lines only, no request) or "off" (nothing while pi works; the closing summary is still given); "piUpdatesOwnWork": true (Roamies speaks of pi\'s work as its own) or false ("pi has…"); "piWatch": programs you add, as "program" or "program subcommand"',
+      logged: 'pi_update and pi_summary { ms, how, why, chars, events, added, cut, route }: numbers and names of kinds only, never the sentence, a name or the digest',
     },
     sendWords: [...SEND_WORDS],
     handsFreeSendWords: { edit: [...HANDS_FREE_SEND], optional: 'please', readOnly: 'the send words', rule: 'heard in an answer window, a hand-off that can edit is sent only on one of these, said alone' },

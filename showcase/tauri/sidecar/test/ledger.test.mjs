@@ -12,7 +12,7 @@ const l = ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', mod
 assert.deepEqual(l, { t: at(26, 9), kind: 'request', where: 'provider', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, captures: { marked: 1, screenshots: 1, photos: 0 }, windowTexts: 2, fileTexts: 0, fileChars: 0, noteTexts: 0, noteChars: 0, swaps: 0, swapsBack: 0, private: false });
 assert.ok(!JSON.stringify(l).includes('secret'));
 assert.throws(() => ledgerLine({ kind: 'chat' }), /no ledger kind/);
-assert.deepEqual(KINDS, ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed']);
+assert.deepEqual(KINDS, ['request', 'briefing', 'piSummary', 'piUpdate', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed']);
 // the model's name, never a folder of the owner's (the owner, 2026-11-26)
 for (const [m, want] of [['/Users/office/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-it-4bit/snapshots/475b9088', 'gemma-4-e4b-it-4bit'], ['/Users/office/models/my-gemma', 'my-gemma'], ['~/m/x', 'x'], ['C:\\Users\\o\\m', 'm'], ['e4b', 'e4b'], ['mlx-community/gemma-4-e4b-it-4bit', 'mlx-community/gemma-4-e4b-it-4bit'], ['claude-sonnet-5-5', 'claude-sonnet-5-5']]) assert.equal(shortModel(m), want, m);
 assert.equal(ledgerLine({ kind: 'warmup', where: 'mac', model: '/Users/office/models/my-gemma' }).model, 'my-gemma');
