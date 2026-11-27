@@ -1420,6 +1420,7 @@ what he has to do next; commands stay on screen; each update one small request, 
   updates in place of the progress lines, `GIT` by full path, `compareSnapshot`, settings and limits, the reference);
   `sidekick.mjs` (`piWords`, `piUpdate`, the closing summary as one small request, the summary in the live state);
   ledger kind `piUpdate`; guarantee 2 names git, guarantee 10 added. Tests: `piwatch`, `piupdates-run` (both routes).
+  Report: `~/Documents/roamies-reports/2026-11-27_1952_feature-41-report.md`.
 
 ### 29. Run watcher
 
