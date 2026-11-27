@@ -354,6 +354,22 @@ const SHOW_FRAMES = [
   String.raw`what (?:have i|'ve i|i've|do i have|have i got|i have)(?: got)?(?: on| going on)?(?: (?:on|for))? (?<slot>.+?)`,
   String.raw`show me(?: (?:my|the) calendar| my day| what's on)?(?: (?:on|for))? (?<slot>.+?)`,
 ].map(frame);
+/** Feature 14: the file a request to read names, when the whole sentence is "read <file>" (polite words and the
+ *  persona's name aside): a name with an extension ("segment.py", "segment dot py", "notes/plan.md"), or a name
+ *  followed or led by "file" ("the README file", "file README"). → the name as he wrote it, or null. */
+export function fileAsked(said, name = '') {
+  const n = String(name ?? '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const lead = `^\\s*(?:(?:please|can you|could you|would you|will you|hey|ok|okay|so|and${n ? `|${n}` : ''})[\\s,]+)*`;
+  const raw = String(said ?? '').trim().replace(/\s+dot\s+(?=[A-Za-z0-9]{1,8}\b)/gi, '.');
+  const m = new RegExp(`${lead}read(?:\\s+me|\\s+out)?\\s+(.+?)(?:[\\s,]+(?:please|thanks|thank you))?[\\s.!?]*$`, 'i').exec(raw);
+  if (!m) return null;
+  let slot = m[1].trim().replace(/^(?:the|my)\s+/i, '');
+  const byWord = /^file\s+(.+)$/i.exec(slot) ?? /^(.+?)\s+file$/i.exec(slot);
+  if (byWord) slot = byWord[1].trim().replace(/^(?:the|my)\s+/i, '');
+  if (!slot || slot.length > 120 || /\b(?:and|then|also)\b/i.test(slot)) return null;
+  if (/^[^\s]+$/.test(slot) && (byWord || /[^./\s]\.(?=[A-Za-z0-9]{0,7}[A-Za-z])[A-Za-z0-9]{1,8}$/.test(slot))) return slot;
+  return null;
+}
 /** His sentence (as normal() gives it) with the persona's name taken out of the polite words before the request
  *  ("Jarvis, please remind me …", "please Jarvis remind me …"); anywhere else it stays. */
 export function nameAside(t, name = '') {
@@ -385,6 +401,7 @@ export const DECIDED = [
     test: (t, c) => UNBOOK_FRAMES.some((f) => isTitle(fit(f, t), c.title, ['block for', 'time for', 'slot for'])) },
   { action: 'note', tool: 'write_note', words: '"note down / make a note / jot down <text>" (the whole sentence, one request)', test: (t) => ONE_REQUEST(fit(NOTE_FRAME, t)) },
   { action: 'open', tool: 'open', words: '"open <app>": the whole sentence, the app named in one to three words', test: (t) => !!fit(OPEN_FRAME, t) },
+  { action: 'read', tool: 'read_file', words: '"read <file name>": the whole sentence, a name with an extension ("segment.py", "segment dot py") or "the <name> file" (feature 14)', test: (t, c) => !!fileAsked(c.said, c.name) },
   { action: 'show', tool: 'show_day', words: '"what\'s on <day>", "what have I got on <day>", "show me <day>" (the whole sentence, a day and nothing else)', test: (t, c) => { const d = fit(SHOW_FRAMES, t); return !!d && isDay(d, c); } },
 ];
 /** The words of a slot as he said them (his capitals), or the slot. */
@@ -404,10 +421,10 @@ export function titleIn(said, items = []) {
  *  (title: the one open to-do named in his sentence, or null), or null when no row matches or more than one does. */
 export function decideAction(said, { items = [], now = Date.now(), dayStart = 540, dayEnd = 1080, name = '' } = {}) {
   const t = nameAside(normal(said), name), title = titleIn(said, items), times = readTimes(said, { now, dayStart, dayEnd }).times;
-  const rows = DECIDED.filter((r) => r.test(t, { times, title, now, dayStart, dayEnd }));
+  const rows = DECIDED.filter((r) => r.test(t, { times, title, now, dayStart, dayEnd, said, name }));
   if (rows.length !== 1) return null;
   const r = rows[0];
-  return { action: r.action, tool: r.tool, ...(r.status ? { status: r.status } : {}), title, ...(r.action === 'open' ? { app: hisWords(said, fit(OPEN_FRAME, t)) } : {}) };
+  return { action: r.action, tool: r.tool, ...(r.status ? { status: r.status } : {}), title, ...(r.action === 'open' ? { app: hisWords(said, fit(OPEN_FRAME, t)) } : {}), ...(r.action === 'read' ? { file: fileAsked(said, name) } : {}) };
 }
 const POLITE = /^(?:(?:please|can you|could you|would you|will you|hey|ok|okay|oh|and)\s+)*$/;
 const BEFORE_TIME = new Set(['at', 'on', 'by', 'this', 'for', 'around', 'about']);

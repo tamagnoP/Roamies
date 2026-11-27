@@ -70,6 +70,20 @@ s = settings({ address: bad.address });
 out = await createLocalRoute({ settings: () => s, tool, todos: () => TODOS, now: () => NOW }).request('Hi.');
 assert.match(out.problem, /transient_context/); assert.equal(bad.requests.length, 0, 'no request of his was sent');
 await bad.close();
+// feature 14: the file tools get his words in this request, the smaller part and a request mark of their own; the
+// file text they gave is counted on the ledger line of the model call that carried it
+{
+  const seenCtx = [], got = [], fake = await startFakeLocal();
+  s = settings({ address: fake.address });
+  const fileTool = (name) => (name === 'read_file' ? { execute: async (a, ctx) => { seenCtx.push(ctx); ctx.count('file', 30); return 'threshold = 0.6'; } } : tool(name));
+  const r2 = createLocalRoute({ settings: () => s, tool: fileTool, todos: () => TODOS, record: (l) => got.push(l), now: () => NOW });
+  fake.answers.push({ calls: [['read_file', { file: 'segment.py' }]] }, { content: 'The threshold is 0.6.' });
+  const o = await r2.request('What threshold does segment.py use?');
+  assert.equal(o.reply, 'The threshold is 0.6.');
+  assert.deepEqual(seenCtx.map((c) => [c.heard, c.local, c.seePrivate, /^local-\d+$/.test(c.turn)]), [['What threshold does segment.py use?', true, true, true]]);
+  assert.deepEqual(got.filter((l) => l.kind === 'request').map((l) => [l.fileTexts, l.fileChars]), [[0, 0], [1, 30]], 'counted on the call that carried it');
+  await fake.close();
+}
 // the ledger's name for the model (the owner, 2026-11-26): the one local.start names when Roamies starts the server,
 // else what the server lists, which ledgerLine shortens to the model's own name (test/ledger.test.mjs)
 {

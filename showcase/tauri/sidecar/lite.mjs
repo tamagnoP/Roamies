@@ -16,9 +16,9 @@ export const LITE_MAX_TOKENS = 200;
 /** The fixed prompt. `name` is the owner's name from the settings. */
 export function liteSystem(name) {
   return `You are ${name}'s companion on his Mac, answering on the Mac itself while the main assistant is not in use. Answers are spoken: one or two short plain sentences, no lists, no markdown.
-You can only: keep his to-dos and reminders, put to-dos on his calendar and say what is on it, keep notes in his notes vault, read today's daily note when he asks for it, and open an app he names. Call a tool for each of these; never say something is done unless a tool's result says so.
+You can only: keep his to-dos and reminders, put to-dos on his calendar and say what is on it, keep notes in his notes vault, read today's daily note when he asks for it, find and read a file he names in his project folders, and open an app he names. Call a tool for each of these; never say something is done unless a tool's result says so.
 Choose the tool for what he asks and name the to-do by its title, in his words. Never give a time, a day or a length: the app reads them from what he said.
-For anything else (files, coding, the web, the screen, drawing, clicking in apps) say in one sentence that you can't do that here, and do nothing.`;
+For anything else (changing files, coding, the web, the screen, drawing, clicking in apps) say in one sentence that you can't do that here, and do nothing.`;
 }
 
 const fn = (name, description, properties, required = []) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
@@ -37,6 +37,8 @@ export const LITE_TOOLS = [
   fn('search_notes', 'Search his notes by words.', { query: S }, ['query']),
   fn('read_note', 'Read one note by its title.', { title: S }, ['title']),
   fn('read_daily', 'Read today\'s daily note (its plan and log), only when he asks for it.', {}),
+  fn('read_file', 'Read a file in his project folders, only when he asks. file: its name or path, as he said it.', { file: S }, ['file']),
+  fn('find_files', 'Find files in his project folders by name. name: part of the file name.', { name: S }, ['name']),
   fn('open', 'Open the app he names. app: its name.', { app: S }, ['app']),
 ];
 export const LITE_NAMES = LITE_TOOLS.map((t) => t.function.name);
@@ -91,6 +93,9 @@ export function createLiteRunner({ tool, blocks = {}, todos = async () => [], re
       }
       return exec();
     };
+    // Feature 14: the file tools read; no time, day or to-do is placed for them.
+    if (name === 'read_file') return run(name, { path: String(a.file ?? a.path ?? '') }, signal);
+    if (name === 'find_files') return run(name, { name: String(a.name ?? '') }, signal);
     const titled = ['update_commitment', 'schedule_block', 'move_block', 'unschedule_block'].includes(name);
     const found = titled ? await find(a.todo) : null;
     if (found?.ask) return found;
@@ -207,6 +212,17 @@ export async function liteRequest({ chat, run, name, model, said, state, history
     check.result('show_day', res);
     if (res.ok) lastRead = res.text;
     messages.push({ role: 'assistant', content: null, tool_calls: [{ id: 'code_show_day', type: 'function', function: { name: 'show_day', arguments: '{}' } }] }, { role: 'tool', tool_call_id: 'code_show_day', content: res.text || (res.ok ? 'Nothing.' : 'Failed.') });
+    seeded = true;
+  }
+  // Feature 14: reading a file he named, decided by code ("read segment.py"): code reads it first (the file tool finds
+  // it by name in his folders); the model only words the answer. What the tool refuses is said as it is.
+  if (check.decided?.action === 'read') {
+    const res = await run('read_file', { file: check.decided.file }, place);
+    out.calls.push({ name: 'read_file', args: { file: check.decided.file }, ok: !!res.ok, by: 'code' });
+    if (!res.ok) return done('code', res.text || 'That file couldn\'t be read.');
+    check.result('read_file', res);
+    lastRead = res.text;
+    messages.push({ role: 'assistant', content: null, tool_calls: [{ id: 'code_read_file', type: 'function', function: { name: 'read_file', arguments: JSON.stringify({ file: check.decided.file }) } }] }, { role: 'tool', tool_call_id: 'code_read_file', content: res.text });
     seeded = true;
   }
   for (let step = 0; step <= maxSteps; step++) {

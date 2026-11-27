@@ -12,7 +12,7 @@ const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 // of its tools takes a time, a day or a length
 assert.equal(liteSystem('Office'), liteSystem('Office'));
 assert.doesNotMatch(liteSystem('Office'), /2026|November|14:05/);
-assert.deepEqual(LITE_NAMES, ['remember_commitment', 'update_commitment', 'list_commitments', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'write_note', 'search_notes', 'read_note', 'read_daily', 'open']);
+assert.deepEqual(LITE_NAMES, ['remember_commitment', 'update_commitment', 'list_commitments', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'write_note', 'search_notes', 'read_note', 'read_daily', 'read_file', 'find_files', 'open']);
 for (const t of LITE_TOOLS) {
   const fields = Object.keys(t.function.parameters.properties);
   assert.ok(!fields.some((f) => /^(when|day|date|start|end|minutes|from|due|time)$/.test(f)), `${t.function.name}: no time field (${fields})`);
@@ -67,6 +67,9 @@ const PLAN = [{ todo: 'k3f9', title: 'Budget review', start: at(25, 10), minutes
   await go('Note: the seminar is on Friday at 3.', 'write_note', { title: 'Seminar', content: 'The seminar is on Friday at 3.' }); assert.deepEqual(seen.pop(), ['write_note', { title: 'Seminar', content: 'The seminar is on Friday at 3.' }], 'times in a note stay in its text');
   await go('Open Zotero.', 'open', { app: 'Zotero' }); assert.deepEqual(seen.pop(), ['open', { target: 'Zotero' }]);
   assert.deepEqual(await go('Read my daily note.', 'read_daily', {}), { ok: true, text: '## Plan' });
+  // feature 14: the file tools read; no time is placed for them, even with a day in his words
+  await go('Read the notes from Friday in segment.py.', 'read_file', { file: 'segment.py' }); assert.deepEqual(seen.pop(), ['read_file', { path: 'segment.py' }]);
+  await go('Find my loader file.', 'find_files', { name: 'loader' }); assert.deepEqual(seen.pop(), ['find_files', { name: 'loader' }]);
   assert.equal(seen.length, 0, 'nothing else ran');
   const blocks = { schedule_block: async (a) => ({ text: 'for the model', say: `"${a.title}" is on the calendar.` }) };
   said = 'Book the poster tomorrow at 2 for an hour.';
@@ -75,6 +78,20 @@ const PLAN = [{ todo: 'k3f9', title: 'Budget review', start: at(25, 10), minutes
   assert.equal(r.say, '"Poster" is on the calendar.', 'the calendar\'s own line for him');
   const broken = createLiteRunner({ tool: () => ({ execute: async () => { throw new Error('No commitment with id k3f9.'); } }), todos: async () => TODOS, now: () => NOW });
   assert.deepEqual(await broken('update_commitment', { todo: 'budget review', status: 'done' }), { ok: false, text: 'No commitment with id k3f9.' });
+}
+
+// ---- feature 14: "read <file name>", decided by code: read first, the model only words the answer; a refusal is said
+{
+  const ran = [];
+  const run = async (name, args) => { ran.push([name, args]); return args.file === 'segment.py' ? { ok: true, text: '~/p/segment.py (20 bytes):\n\nthreshold = 0.6\n\n[End of the file.]' } : { ok: false, text: 'There\'s no file called "nope.py" in Office\'s project folders.' }; };
+  const fake2 = (answers) => { const bodies = []; return { bodies, chat: async (body) => { bodies.push(JSON.parse(JSON.stringify(body))); const a = answers.shift() ?? { content: '' }; return { content: a.content ?? '', toolCalls: [], usage: null }; } }; };
+  const f = fake2([{ content: 'It sets the threshold to 0.6.' }]);
+  let out = await liteRequest({ chat: f.chat, run, name: 'Office', model: 'm', said: 'Read segment dot py.', state: liteState({ name: 'Office', now: NOW }), now: NOW });
+  assert.deepEqual([out.reply, out.calls.map((c) => [c.name, c.by]), ran.pop()], ['It sets the threshold to 0.6.', [['read_file', 'code']], ['read_file', { file: 'segment.py' }]]);
+  assert.equal(f.bodies[0].messages.at(-1).role, 'tool'); assert.match(f.bodies[0].messages.at(-1).content, /threshold = 0\.6/);
+  const g = fake2([]);
+  out = await liteRequest({ chat: g.chat, run, name: 'Office', model: 'm', said: 'Read nope.py', state: liteState({ name: 'Office', now: NOW }), now: NOW });
+  assert.deepEqual([out.by, out.reply, g.bodies.length], ['code', 'There\'s no file called "nope.py" in Office\'s project folders.', 0]);
 }
 
 // ---- the request: a fake server answers in turn
