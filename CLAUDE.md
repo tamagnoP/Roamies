@@ -30,7 +30,11 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    and no app is named. What a sync has to say goes to a bubble, never into a tool's result. From a task in the app only title, done,
    start, length, deadline and the two matrix tags are read (and whether it repeats); only linked tasks are
    written to, only those fields; none is ever deleted.
-2. **Roamies does not touch files itself, and runs no command on the owner's behalf.** It starts only its own fixed
+2. **Roamies runs no command on the owner's behalf.** It reads files only at the owner's request, in a request he
+   typed or spoke, in the current project and the folders listed under `projects` and `readOnly`, never on the
+   sandbox's blocked list, and never writes, moves or deletes them (`files.mjs`); file work is handed to pi (`pi.mjs`). By
+   default (`fileContents` "ask") a file's contents go to a model only when the owner's own words in that request name
+   the file, or he has said yes to a bubble naming exactly the files to be read. It starts only its own fixed
    helpers: the macOS voice, and the Python named in `settings.json` with the voice script shipped in the app, with
    text going in on a pipe only. That Python is used only if `kokoro.python` is an absolute path to an existing
    executable; it is started directly, never through a shell, with a fixed argument list, under `sandbox-exec` with
@@ -41,10 +45,11 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    pid=,pgid=,etime=` when pi stops, the process list only (never `-E`, the environment), read in memory to find the
    recorded groups still there and dropped, never logged, kept or sent; the watcher beside a hand-off runs the same
    `ps` in its fixed script. Only recorded groups are ended, and none whose number now belongs to a process started
-   at another time. File work is handed to pi (`pi.mjs`). The only files it
-   writes are notes inside the Obsidian vault (`notes.mjs`; the daily note too, `daily.mjs`, written by code alone), where it can create and append but never change or delete,
-   and its own files in `~/Documents/roamies-pi` (`state.json`, the records in `log`, `pending.txt`, and
-   `settings.default.json`), and, for a hand-off that can edit, a folder in the temporary folder made for it and
+   at another time. The only files it
+   writes are notes inside the Obsidian vault (`notes.mjs`; the daily note too, `daily.mjs`, written by code alone), where it can create and append, and change a note the owner names, once he has seen the change and said save; it never deletes one.
+   Roamies keeps the previous version of each note it changes in its own folder, `~/Documents/roamies-pi/note-versions`,
+   outside the vault, and never deletes it. It also writes its own files in `~/Documents/roamies-pi` (`state.json`, the
+   records in `log`, `pending.txt`, `settings.default.json`, and those versions), and, for a hand-off that can edit, a folder in the temporary folder made for it and
    removed after it (pi's extension and its record). Questions nobody answered are kept in `state.json` under `pending`, never in the vault. It never writes `settings.json` after making it, and never reads `settings.default.json`.
 3. **A hand-off that can edit is sent only after the owner says send.** Read-only hand-offs may send themselves after
    the `autoSendReadOnly` countdown. The exact prompt, folder and mode are always shown first. Heard hands-free (in
@@ -70,7 +75,8 @@ Limits enforced in code stay in code. Do not replace one with an instruction in 
 | `showcase/tauri/sidecar/sidekick.mjs` | Main sidecar file: prompts, turn handling, menu, voice wiring. Upstream's, with marked edits. |
 | `showcase/tauri/sidecar/pi.mjs` | Ours. Hand-off to pi, Send approval, background job, records, settings loader, `gateTools`. |
 | `showcase/tauri/sidecar/leftovers.mjs` | Ours. The extension pi is given for a hand-off that can edit, its record, and ending the process groups it records when pi stops. |
-| `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools, the vault's one writer (`createVault`), and the task pages (`createTaskPages`). |
+| `showcase/tauri/sidecar/notes.mjs` | Ours. The Obsidian vault tools, the vault's one writer (`createVault`), the task pages (`createTaskPages`), and feature 14's note edits (`edit_note`, `undo_note_edit`, the previous versions). |
+| `showcase/tauri/sidecar/files.mjs` | Ours. Feature 14: Roamies' own file reading (`read_file`, `list_files`, `find_files`, `search_files`): where, when, the contents rule, all in code; nothing written, no program started. |
 | `showcase/tauri/sidecar/daily.mjs` | Ours. Feature 18: the daily note (Plan, Log, Review, the handover's two parts), built by code; nothing of it goes to the model. |
 | `showcase/tauri/sidecar/handover.mjs` | Ours. Feature 18: the handover's part two (one model request), the open items, the fresh conversation each day. |
 | `showcase/tauri/sidecar/guard.mjs` | Ours. The never-look list. |

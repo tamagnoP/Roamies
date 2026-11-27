@@ -18,6 +18,7 @@ checks, fixed since. Everything else is below.
 | Feature 33 | 1 to 7, 9, 13, 14 | the screen, voice and a real pi task; 13 changed (`typed`); 14 is new |
 | Features 25 and 31 | 8, 15, 16 | 8 needs a real call; 15 and 16 are new |
 | Features 23 and 32 | 1, 5, 6, 7, 8, 9, 10 | 1 and 5 failed and were fixed; 6 and 7 changed; 8 needs your tunnel; 9 needs the shell; 10 is new |
+| Feature 14 | 1 to 12 | new, on `roamies-read` (not on `next` until its review is accepted) |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -227,7 +228,7 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
 
 ## Group 2: features 23, 32, 14, 29 and 30
 
-### Features 23 and 32: the local model, private mode, the ledger (on `next` since `1854529`; 14, 29 and 30 not built)
+### Features 23 and 32: the local model, private mode, the ledger (on `next` since `1854529`; 29 and 30 not built)
 
 **Before.** In `~/Documents/roamies-pi/settings.json`: `"local": { "address": "http://127.0.0.1:8080/v1", "model": "",
 "whenOffline": true, "historyExchanges": 4, "maxSteps": 4, "confirmChanges": true, "start": { "python":
@@ -274,6 +275,45 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
     You should see: a notice, "Something else is answering at 127.0.0.1:8080, where Roamies starts its own local
     model …", and "The local model could not start, so nothing was sent."; no answer from it. Stop that program: the
     next request starts Roamies' own server as usual.
+
+### Feature 14: Roamies reads files you name, and changes a note you name (on `roamies-read`)
+
+**Before.** Build from `roamies-read`. In `settings.json`: a project folder you don't mind Roamies reading, e.g.
+`"projects": ["~/Documents/roamies-test-project"]` and `"project"` the same; `"files": true`, `"fileContents": "ask"`
+(both the defaults). In that folder: `segment.py` with a line `threshold = 0.6`, `src/dataLoader.py`, and a `.env`
+with `TOKEN=x`. In the vault, a note "Test plan" with a line `threshold 0.6`. Nothing of yours needs to be in either.
+
+1. **Type "Read segment.py."**
+   You should see: the bubble's tag "reading segment.py", no question, and an answer from its text.
+2. **Type "What does the loader do?"**
+   You should see: a bubble "Read this file?" with `~/Documents/roamies-test-project/src/dataLoader.py` and **Read
+   it** / **Don't**. Click **Don't**: the answer says it wasn't read. Ask again and click **Read it**: it is read.
+3. **Say "What does the loader do?" and let the bubble's answer window run out.**
+   You should see: the question said, then nothing read and nothing kept.
+4. **Type "Read the .env file in my test project."**
+   You should see: Claude says it can't read it (passwords or keys); no question first.
+5. **Type "Search my test project for threshold."**
+   You should see: one bubble listing the files with matches ("Send the matching lines from…"). **Don't**: nothing
+   from them is sent, not even their names. Again with "Search segment.py for threshold": its line comes back with no
+   bubble.
+6. **Type "What's in my test project?"**
+   You should see: the names, folders ending in `/`, `.env` left out ("1 entry left out: blocked").
+7. **Type "What left the Mac today?"**
+   You should see: "File texts: N (M characters)." and "Note texts: …" with the rest. In `~/.gg/sidekick/logs`, the
+   `file_tool` lines have numbers only: no path, file name or text.
+8. **Say "Change Test plan: the threshold is 0.7."**
+   You should see: a bubble "Change Test plan?" with `- threshold 0.6` and `+ threshold 0.7`, said aloud. Say "yes":
+   nothing happens (the bubble stays). Say "save it": saved. In `~/Documents/roamies-pi/note-versions/` a file
+   "Test plan <date> <time>.md" with the old text; in the daily note's Log "Edited: [[Test plan]]".
+9. **Type "Change the plan: threshold 0.8."**
+   You should see: Claude asks which note; no bubble, nothing changed (the title wasn't in your words).
+10. **Type "Undo the last note edit."**
+    You should see: "Put back Test plan as it was before the edit at HH:MM?" with the lines; **Save it** puts back
+    `threshold 0.6`; a second version is kept in `note-versions`.
+11. **Private mode and Wi-Fi off:** "Keep this private.", then "Read segment.py."
+    You should see: the answer in a bubble tagged "local · private", from the file's text; the provider got nothing
+    (the ledger's line for it says "this Mac").
+12. **Set `"files": false`** and type "Read segment.py." You should see: Claude says file reading is off.
 
 ## Group 3: features 19 and 21
 
