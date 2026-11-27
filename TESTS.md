@@ -20,7 +20,7 @@ checks, fixed since. Everything else is below.
 | Features 23 and 32 | 1, 5, 6, 7, 8, 9, 10 | 1 and 5 failed and were fixed; 1, 6 and 7 changed; 8 needs your tunnel; 9 needs the shell; 10 is new |
 | Feature 14 | 1 to 14 | new; review accepted 2026-11-27 with three changes (13 and 14) |
 | Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
-| Feature 34 | 1 to 12 | new, on `masking` (waiting for your review) |
+| Feature 34 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -367,9 +367,9 @@ are new). Make two throwaway files with a name nothing of yours has: `~/Desktop/
     today?" shows no request for any of the searches. If macOS asked "Roamies would like to access files in your
     Documents folder" (or Desktop, or a removable volume) at any point, note which and when.
 
-### Feature 34: masking (on `masking`)
+### Feature 34: masking (in `next` since the review of 2026-11-27)
 
-**Before.** Build from `masking`. Use throwaway words only, never real names: in `settings.json` set
+**Before.** Build from `next`. Use throwaway words only, never real names: in `settings.json` set
 `"mask": {"people": ["Zorbina Quell", "Mark"], "organisations": ["Fennick Labs"], "projects": ["Halyard"], "other": ["Quellium"]}`
 and leave `"masking": true`. Then start Roamies (quit and open it again if it was running; the list itself is read at
 each request, the start-up bubble only at start).

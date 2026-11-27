@@ -54,7 +54,7 @@ Last updated: 2026-11-25.
 | 31 | Speaking budget and quiet queue | In `next` with 25 (`ca766c8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
-| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Built 2026-11-27 on `masking`, `test:all` passed; waiting for his review; `TESTS.md` group 2, checks 1 to 12 | `8790e99`, `2f7a46e`, `380964a`, `ee9ba7b` |
+| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | In `next` (review accepted 2026-11-27 with one change: the shell clears the test-only switches); `TESTS.md` group 2, checks 1 to 12 | `next` |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 | 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
@@ -2134,12 +2134,17 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   `2026-11-27_1228_owner-accepts-feature-40-and-plan-34.md`.
 - **2026-11-27 16:15 (the owner).** Feature 34's plan accepted with answers to its seven questions and yes to
   guarantee 8 with two additions; build on a branch off `next`. His words: `2026-11-27_1615_owner-answers-feature-34.md`.
+- **2026-11-27 18:15 (the owner).** Feature 34's review accepted with one change: the shell clears
+  `ROAMIES_FAKE_CLAUDE` and every other switch that exists only for tests from what it starts, with a test; the rule
+  "no test-only switch may be reachable in the installed app" goes in `CLAUDE.md`; then `test:all`, merge into
+  `next`, push. Then plan feature 41 (pi's updates in plain words), building nothing. His words:
+  `2026-11-27_1815_owner-accepts-feature-34-env-rule-and-plan-41.md`.
 
 ## 6. Still to test
 
 - [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
 - [ ] Feature 40 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
-- [ ] Feature 34 on `masking`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
+- [ ] Feature 34 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone
