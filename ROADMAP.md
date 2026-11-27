@@ -54,7 +54,7 @@ Last updated: 2026-11-25.
 | 31 | Speaking budget and quiet queue | In `next` with 25 (`ca766c8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
-| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Planned 2026-11-27 (seven questions, guarantee 8 for his yes); nothing built | |
+| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Built 2026-11-27 on `masking`, `test:all` passed; waiting for his review; `TESTS.md` group 2, checks 1 to 12 | `8790e99`, `2f7a46e`, `380964a`, `ee9ba7b` |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 | 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
@@ -1381,6 +1381,14 @@ masked; the ledger counts swaps. **Planned only after 40 is built and merged** (
   guarantee 8, adding: what was sent before a word was listed, and the local model gets his words wherever
   `local.address` leads. Hand checks in TESTS.md group 2. Built on a branch off `next`, `test:all`, one report with
   the masking time and the first request after a list change on each route.
+- **Built 2026-11-27** on `masking` (off `next` at `d9c15ac`): `mask.mjs` (the list's checks, numbers per group in
+  `state.json` "masks", matching, case kept both ways, the form last sent coming back, "#" before a digit, text shaped
+  like a stand-in in use sent spelled out, the reply as it streams); the doors in `sidekick.mjs` (instructions and
+  tool descriptions, the request, the live state, the earlier conversation at each agent build, tool calls, side calls,
+  the saved conversation), web search off with the app's line, a fresh claude session and the old transcript deleted
+  on a list change; pi's Send bubble count and no countdown; `swaps`/`swapsBack` in the ledger; guarantee 9 (8 was
+  taken) and one sentence in 3. Tests: `mask`, `mask-run` (API route), `mask-cc-run` (Claude's route, through
+  `ROAMIES_FAKE_CLAUDE`). Report: `~/Documents/roamies-reports/2026-11-27_1726_feature-34-report.md`.
 
 ### 29. Run watcher
 
@@ -2131,6 +2139,7 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 
 - [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
 - [ ] Feature 40 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
+- [ ] Feature 34 on `masking`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone
