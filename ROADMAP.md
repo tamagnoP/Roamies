@@ -54,7 +54,7 @@ Last updated: 2026-11-25.
 | 31 | Speaking budget and quiet queue | In `next` with 25 (`ca766c8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
-| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Agreed 2026-11-27; planned only after 40 is built and merged (the owner) | |
+| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Planned 2026-11-27 (seven questions, guarantee 8 for his yes); nothing built | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 | 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
@@ -1367,6 +1367,12 @@ Finder, selected, nothing opened. Names and places only; counts in the log.
 Agreed 2026-11-27: private words in `settings.json`, grouped, swapped by code for stable stand-ins before anything goes
 to the provider and swapped back before anything is shown, spoken, written or passed to a tool; the local route not
 masked; the ledger counts swaps. **Planned only after 40 is built and merged** (the owner).
+- **Plan 2026-11-27** (`~/Documents/roamies-reports/2026-11-27_1239_feature-34-plan.md`): one module (`mask.mjs`)
+  at the doors out (his words, system prompt, tool descriptions, live state, history, tool results, side calls) and
+  in (streamed reply, tool arguments, side-call answers, saved messages); the conversation stays plain on the Mac;
+  matching rules; stand-ins numbered per group, kept in `state.json`, never reused; a list change rebuilds the
+  model's copy and starts a fresh claude session; `swaps`/`swapsBack` in the ledger; settings `masking`, `mask`,
+  `limits.maskEntries`; a proposed guarantee 8; seven questions. Nothing built.
 
 ### 29. Run watcher
 
