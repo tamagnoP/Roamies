@@ -5,7 +5,8 @@ agent (`showcase/tauri/sidecar`), shared browser JS in `showcase/roamies`, macOS
 `src-tauri/build.rs`, and two Windows helpers built by `build.sh` for Windows targets: voice
 (`src-tauri/voice-win`, Rust + Parakeet; `--transcribe <wav>` and `--test-audio <wav>` test speech without a
 Windows PC, see the top of its `main.rs`) and hands (`src-tauri/hands-win`, the twin of `hands/main.swift`: same
-commands and JSON, over Win32, UI Automation and Windows OCR). Only hands-win's `logic.rs` builds off Windows, so
+commands and JSON, over Win32, UI Automation and Windows OCR, except `find` and `reveal` (feature 40), which exist in
+the macOS helper only). Only hands-win's `logic.rs` builds off Windows, so
 `cargo test` there runs its checks anywhere; `roamies-hands --smoke` drives Notepad on a real Windows desktop (CI).
 From a Mac, `cargo xwin check --target x86_64-pc-windows-msvc` type-checks the Windows code with the real SDK.
 
