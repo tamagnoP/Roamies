@@ -220,7 +220,7 @@ assert.equal(oneChange(['show_day', 'search_notes']), '');
 {
   const OPEN = [{ id: 'k3f9', title: 'Budget review' }, { id: 'p2x7', title: 'Grant report draft' }, { id: 't5', title: 'Thesis chapter 2' }];
   const D = (s) => { const d = decideAction(s, { items: OPEN, now: NOW }); return d ? `${d.action}${d.status ? `:${d.status}` : ''}${d.title ? `@${d.title.id}` : ''}` : null; };
-  assert.deepEqual(DECIDED.map((r) => r.action), ['remind', 'todo', 'due', 'mark', 'unbook', 'note', 'open', 'show']);
+  assert.deepEqual(DECIDED.map((r) => r.action), ['remind', 'todo', 'due', 'mark', 'unbook', 'note', 'open', 'read', 'show']);
   for (const [said, want] of [
     // remind: the sentence starts with "remind me" (polite words aside)
     ['Remind me at half past four to pick up the parcel.', 'remind'], ['Can you remind me tomorrow to call Bo?', 'remind'], ['Remind me by Friday to read the budget review.', 'remind@k3f9'],

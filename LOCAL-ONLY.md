@@ -1,8 +1,8 @@
 # Local-only build, with file work handed to pi
 
 This copy of Roamies is patched so that, while running, the only thing it sends anywhere is the conversation with
-the AI provider you sign in to, and so that anything involving your files goes through pi (the pi coding agent)
-after you approve it. Made against upstream commit `fa798b4` (app version 0.1.34), for macOS, with pi 1.5.0.
+the AI provider you sign in to, and so that changing your files, or running anything, goes through pi (the pi coding
+agent) after you approve it. Roamies reads files in your project folders itself, only when you ask (feature 14). Made against upstream commit `fa798b4` (app version 0.1.34), for macOS, with pi 1.5.0.
 
 ## What Roamies does itself
 
@@ -12,11 +12,13 @@ after you approve it. Made against upstream commit `fa798b4` (app version 0.1.34
 | Open an app by name (Zotero, Inkscape) | Only when you name it. No websites, files or folders |
 | Click and type in an app | Only when you ask, only in the app in front, and only with "Allow File Edits & Commands" on |
 | Keep the to-do list and reminders | As before |
-| Keep notes in your Obsidian vault | Writes only when you ask; can add to a note, never change or delete one |
+| Keep notes in your Obsidian vault | Writes only when you ask; can add to a note, and change one you name once you have seen the change and said save (the old version kept); never deletes one |
+| Read, list, find and search files in your project folders | Only in a request you type or speak; a file's text goes to the model only when your words name the file or you say yes to a bubble naming it (feature 14) |
 | Hand a task to pi | Read-only tasks after a short countdown you can stop; tasks that can edit only after you say send |
 
-Its own file and command tools (`read_file`, `list_files`, `search_files`, `write_file`, `run_command`) and
-`fetch_url` are removed. The limits themselves are enforced in code: apps only, the front app only, the switch for
+Upstream's file and command tools (`read_file`, `list_files`, `search_files`, `write_file`, `run_command`) and
+`fetch_url` are removed. Roamies' own read-only file tools (`files.mjs`, feature 14) take the place of the first three,
+with `find_files`; they write nothing and start no program (see "Reading your files"). The limits themselves are enforced in code: apps only, the front app only, the switch for
 clicking and typing, and Send before anything reaches pi. Whether you asked for it (that you referred to your screen,
 or named an app) is a rule in its instructions, which the model follows but the code can't check.
 
@@ -347,6 +349,11 @@ setup guide is open, the bubble waits until it closes.
   block placed or dropped, a conflict resolved, a task deleted in the app) is said as well as shown when you are
   not in a spoken exchange. `false` leaves those bubbles silent there. Inside an exchange everything shown is said
   either way.
+- `files`: `true` or `false` (`true` unless you set it). `false` turns Roamies' own file reading off: each file tool
+  then says so and reads nothing (see "Reading your files").
+- `fileContents`: `"ask"` (the default) or `"free"`. With `"ask"`, a file's text goes to a model only when your own
+  words in that request name the file, or you said yes to a bubble naming exactly the files. With `"free"`, any read
+  in a request you typed or spoke.
 - `measurePageRebuild`: `true` or `false` (`false` unless you set it). With `true`, each fresh page after a quiet
   stretch (see "Where the character sits") is measured, numbers only, into the activity log
   (`~/.gg/sidekick/logs`) as `rebuild_measure` lines: from the moment it is asked for until 6 seconds after the old
@@ -416,6 +423,14 @@ setup guide is open, the bubble waits until it closes.
   | `openItemAskDays` | 7 | 1 to 60, whole | Days an open item stays open before the evening review asks whether to keep it or let it go (see "The daily note"). |
   | `reviewQuestions` | 3 | 1 to 20, whole | The most to-dos the daily note's questions ask about each time, oldest first (see "The daily note"). |
   | `pageRebuildQuietMinutes` | 15 | 0 to 1440, whole; 0 is never | Quiet minutes after which the overlay page is made afresh (see "Where the character sits"). |
+  | `fileReadChars` | 20000 | 1000 to 100000, whole | Characters of a file in one read; the rest comes in further parts (feature 14). |
+  | `fileListEntries` | 300 | 20 to 2000, whole | Entries in one listing of a folder. |
+  | `fileSearchFiles` | 2000 | 100 to 20000, whole | Files looked through in one search or find. |
+  | `fileSearchBytes` | 1000000 | 10000 to 20000000, whole | A larger file is skipped by a search. |
+  | `fileMatches` | 50 | 5 to 500, whole | Matching lines, or files found, given back by one search or find. |
+  | `filesPerRequest` | 10 | 1 to 50, whole | Reads (a part of a file, or a search's lines) in one request. |
+  | `localFileChars` | 6000 | 1000 to 20000, whole | Characters of a file in one read on the local model's route. |
+  | `noteEditLines` | 40 | 5 to 200, whole | Changed lines a note edit's bubble shows before "and N more lines". |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
   missing setting.
@@ -448,6 +463,10 @@ second time.
 
 `pending.txt`: appears only while a Send bubble is open for a prompt too long to fit in it, and holds the whole
 prompt.
+
+`note-versions/` (feature 14): the version of each note from before Roamies changed it, with the vault's folders
+below it, named `<title> <YYYY-MM-DD HHMM>.md`. Roamies never deletes one; you may. `state.json` remembers the last 50
+edits under `noteEdits`, for "undo the last note edit".
 
 ## Where the character sits
 
@@ -856,14 +875,40 @@ for Roamies to use it.
 - "What do my notes say about…" searches titles and text, in subfolders too, and can read a note back.
 - Related notes are linked the Obsidian way, `[[Title]]`.
 
-These are the only files Roamies touches itself. In code, a title is only ever a file name inside the vault, an
-existing note is never written over, and nothing is changed or deleted. What it reads from your notes to answer you
-becomes part of the conversation with your AI provider.
+These are the only files Roamies writes itself, besides its own folder. In code, a title is only ever a file name
+inside the vault, and nothing is deleted or renamed. A note is changed only as below ("Changing a note"). What it
+reads from your notes to answer you becomes part of the conversation with your AI provider, stays in that day's
+conversation and is sent again with each later request until the conversation is folded, and is counted in the
+ledger (note texts), once.
 
 Everything Roamies writes in the vault goes through one writer in `notes.mjs` (`createVault`, feature 18). It can
-only make a file that isn't there or add to the end of one that is, on a line of its own. It never writes over,
-renames or deletes anything. It refuses a path with an empty part, a part that starts with a dot, or `..`. It also
+make a file that isn't there, add to the end of one that is, on a line of its own, and (feature 14) put a note's new
+text in place of its old one, only while the note still holds exactly what you were shown. It never deletes or
+renames anything. It refuses a path with an empty part, a part that starts with a dot, or `..`. It also
 refuses a folder or file that is a link, and anything that would land outside the vault.
+
+**Changing a note** (feature 14, the owner's answers of 2026-11-26).
+- Only a note you name in that request, typed or spoken, judged as for a file (see "Reading your files"): its
+  title, or all its words ("change my lab plan: the threshold is 0.7" names "Lab plan"). Otherwise nothing is shown
+  and nothing changes.
+- The change is exact pieces of the note's text, each found once, and what replaces them. A whole new text only when
+  your words in that request say rewrite.
+- A bubble shows it first: "Change Lab plan?", the removed lines (`- `) and the added ones (`+ `), at most
+  `limits.noteEditLines`, with **Save it** and **Keep it as it is**. It is said too in a spoken exchange.
+- Only "save" or "save it" saves, said alone, with the usual small words around it (um, please, so, just… and the
+  persona's name), hands-free too. "Yes" doesn't. "Keep it", "no" or "cancel" keep the note as it is. No answer saves
+  nothing, and the question is not kept.
+- Before the note is changed, its previous version is written to `~/Documents/roamies-pi/note-versions/` (outside
+  the vault, never deleted). The new text goes in through a temporary file beside the note, renamed over it, and only
+  if the note still holds exactly what you were shown: if Obsidian or you changed it meanwhile, nothing is saved and
+  Roamies says so. A change that would leave the note empty is refused.
+- "Undo the last note edit" (or "put back my lab plan") shows the version from before the last edit and saves it the
+  same way, on "save"; the version it replaces is kept too.
+- Daily notes and task pages can't be changed this way (the app writes them). On the provider's route a private note
+  can't be seen, so it can't be changed either; the local model doesn't change notes.
+- The daily note's Log gets "Edited: [[<title>]]".
+- A note open in Obsidian with unsaved typing can still write over Roamies' change afterwards: Roamies can't see
+  Obsidian's unsaved text.
 
 **Task pages** (feature 18, as agreed on 2026-11-21). A to-do or a reminder can have a page of its own in the
 vault, `Tasks/<its title>.md`.
@@ -880,6 +925,57 @@ vault, `Tasks/<its title>.md`.
 - Which page belongs to which to-do is kept in `state.json` under `taskPages`.
 - What reaches the AI: the to-do's id it passes, and the note titles `notes_for` finds. A page's text and the
   to-do's title are not sent.
+
+## Reading your files
+
+Feature 14 (the owner's answers of 2026-11-26). Roamies reads files itself, only when you ask; changing them, or
+running anything, still goes to pi. Four tools, in `files.mjs`, all in code: nothing is written and no program is
+started (no `rg` or `grep`).
+
+| Tool | What it gives the model |
+| --- | --- |
+| `read_file` | A text file's text, in parts of `limits.fileReadChars` (20,000 characters); each part says where the next starts |
+| `list_files` | The names in one folder, folders ending in `/`, links marked and not followed |
+| `find_files` | The paths of files whose name has the words you gave (or matches `*` and `?`) |
+| `search_files` | Each line with the words, with its file and line number, in one folder |
+
+- **Where.** The current project, the folders under `projects`, and `readOnly`, by real path (links are resolved
+  first). Refused wherever they sit: the sandbox's blocked list (the same list pi's sandbox has), what Roamies never
+  reads (keys, passwords, tokens, `.env` files, other apps' data), the notes vault (notes have their own tools),
+  Roamies' own files in `~/Documents/roamies-pi` (its `workspace` folder aside), a file with more than one hard link,
+  and a file that isn't text. A listing, find or search never goes through a link, and finds and searches skip
+  `.git`, `node_modules`, `.venv`, `venv` and `__pycache__`. A whole home folder, Library or drive is never searched.
+- **When.** Only in a request you typed or spoke: never in a briefing, pi's summary, a system note or anything else
+  the app sends, never on Roamies' own initiative, and not while pi works. At most `limits.filesPerRequest` (10) reads
+  in one request.
+- **Names** (`list_files`, `find_files`) in any request you made.
+- **Contents** (`fileContents`, "ask" by default). A file's text goes to a model only when your own words in that
+  request name the file, or you say yes to a bubble naming exactly the files ("Read this file? - ~/Projects/thesis/
+  src/dataLoader.py", **Read it** / **Don't**). No answer reads nothing. Each further read, a further part too, needs
+  your words or your yes again; after a no, that file isn't asked about again in that request. Text in a file never
+  counts as your words. A search finds the lines on the Mac first; the lines from files your words name are sent,
+  and the other files with matches are listed in one bubble: with no yes, nothing from them is sent, not even their
+  names. With `"free"`, any read in a request you typed or spoke.
+- **How "names the file" is judged**, by code: the whole file name, with or without its extension, is in your words
+  ("segment.py", "segment dot py", "segment"), or every word of the name is, the name split at `_`, `-`, `.`,
+  spaces, capitals and digits, and "the", "a", "my", "of" and the like aside. "The data loader" names `dataLoader.py`;
+  "the final report" names `final_report.md`; "the report" or "the loader" names neither. A name of one word
+  counts without its extension only when your sentence is plainly about a file: it also has "file", "read", "open",
+  "show", "look at", "look in" or "check" (the owner, 2026-11-27). "What's the plan for today?" doesn't name
+  `plan.md`; "read the plan" and "plan dot md" do. The same for a note's title when changing a note, where "note"
+  counts too ("add milk to my groceries note" names "Groceries"; "add milk to groceries" doesn't).
+- **Shown.** The bubble's tag names the file being read ("reading segment.py"), the folder listed, or the words
+  searched for; the activity list says the same.
+- **The local model** (private mode, or no network) reads and finds files the same way, with parts of
+  `limits.localFileChars` (6,000). "Read segment.py" (or "read the methods file") as your whole sentence is read by
+  code first, and the local model only words the answer. In private mode a file's text goes only to the local model.
+- **Logged** by tool, characters and whether it was refused; never a path, a file name or any text.
+- **The ledger** counts the file texts each request carried and their characters; "What left the Mac today?" says
+  them ("File texts: 2 (1,240 characters).").
+- **What to know.** A file's or a note's text, once read, stays in that day's conversation and is sent again with
+  each later request to the same model until the conversation is folded; the ledger counts it once, when it is read. A secret in a file that
+  doesn't look like one (a token inside a YAML file) can reach the model when you ask for that file. A folder in
+  Desktop, Documents, Downloads or iCloud Drive can bring up macOS's one-time "Roamies would like to access" prompt.
 
 ## The daily note
 
@@ -1257,16 +1353,29 @@ request fails with a network error before any reply; and in private mode. A slow
   daily note with a mark Claude's note tools leave out. You lift the mark by asking ("lift the private mark from
   ..."), with a yes.
 - **What the local model can do.** Your to-dos and reminders, the calendar, notes, today's daily note when you ask,
-  and opening an app by name. A change it chooses is shown as a question and saved only on your yes
+  reading and finding a file in your project folders (feature 14, see "Reading your files"), and opening an app by
+  name. A change it chooses is shown as a question and saved only on your yes
   (`local.confirmChanges`); what code decides from your words is saved at once: only when your whole sentence fits one
   of its frames ("remind me …", "… is due on …", "add a to-do: …", "I'm done with <title>", "open <app>"; the
   persona's name, "please", "can you" or "could you" may come first), and for a
-  change to a to-do only with its whole title. "What's on Friday?" and "show me <day>" are looked up by code.
-  Times, days and lengths are read by code from what you said, never taken from the model. A hand-off to pi, the
-  screen, drawing and clicking are refused by a line.
+  change to a to-do only with its whole title. An action code decided that needs nothing from the model is done by
+  code alone, with no model call (the owner, 2026-11-27): a reminder code reads whole, taking a to-do off the
+  calendar, marking one done, a new due time, opening an app, and a day looked up ("What's on Friday?", "show me
+  <day>"), whose blocks code says ("Friday 28 November: 09:00 to 10:00, Lab meeting."). The model is asked only for
+  what it must supply: a new to-do's or a note's own text, or the answer about a file it read. Times, days and
+  lengths are read by code from what you said, never taken from the model. A hand-off to pi, the screen, drawing and
+  clicking are refused by a line.
+- **A tool call written out as text** (the owner, 2026-11-27). When the local model's reply is a tool call written as
+  text instead of made (`unschedule_block{todo:…}`), it is never shown, spoken or run: the reply is "I couldn't do
+  that here. Nothing was changed." (after a change that did run, its line, then "I couldn't do the rest of that here;
+  nothing more was changed."). It is found by its shape, not by tool names: the model's own control tokens (`<|…|>`),
+  or the reply opening with a name joined to braces with a field (`name{field:`), to brackets with a field set or
+  nothing (`name(field=`, `name()`), or JSON with a call's fields (`{"name":`). A sentence about code further on in
+  a reply ("it defines split(threshold=0.6)") is not taken for one.
 - **The ledger.** One line per request to any model in `~/.gg/sidekick/ledger.jsonl`, beside `usage.jsonl`: when, the
   kind, where it went (the provider, or this Mac), the model, its tokens, how many screen captures and window texts it
-  carried, whether it was private. Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
+  carried, the file texts and note texts it carried with their characters (feature 14), whether it was private.
+  Never any content. Kept `limits.ledgerDays` (90) days. "What left the Mac today?"
   is answered from it by code and sent to no model, typed or spoken, like "review my day" and "anything waiting?";
   the local model's warm-ups are named apart from the requests that stayed on this Mac. A request that failed at
   sign-in is kept as its own kind (`signInFailed`) and has a sentence of its own in the answer, not counted among
@@ -1296,7 +1405,9 @@ request fails with a network error before any reply; and in private mode. A slow
 
 - `showcase/tauri/sidecar/pi.mjs` (new): the hand-off, the Send approval, the sandbox, the background job, the record, projects,
   and the gate that removes the file tools and narrows `open`, `act_in_app` and `draw`.
-- `showcase/tauri/sidecar/notes.mjs` (new): the notes vault, its one writer, and the task pages (feature 18).
+- `showcase/tauri/sidecar/notes.mjs` (new): the notes vault, its one writer, the task pages (feature 18), and changing
+  a named note with its previous version kept (feature 14).
+- `showcase/tauri/sidecar/files.mjs` (new): Roamies' own file reading (feature 14).
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler

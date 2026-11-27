@@ -390,6 +390,12 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     log('daily_log', { what: 'note', lines: 1 });
   }
 
+  /** Feature 14: a note was changed (or put back) at his request: its line in the Log, linked. */
+  function edited(title) {
+    logLines(today(), [`- ${hm(now())} Edited: [[${oneLine(title)}]]`]);
+    log('daily_log', { what: 'edited', lines: 1 });
+  }
+
   /** Each planned to-do as it stands now: done, missed (its time is over) or still open today. */
   function standing(t0) {
     tick();
@@ -604,5 +610,5 @@ export function createDaily({ home = os.homedir(), userName = 'the user', todos 
     log('plan_ticked', { todos: ticked.length });
     return ticked.length;
   }
-  return { tick, noted, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, privateLines, logged, today, planFor, state: get };
+  return { tick, noted, edited, ensure, whenOpts, answerWhen, checkTicks, editDay, logLines: (lines) => logLines(today(), lines), review, reviewDue, reviewWithBriefing, questions, morningDue, morningAsked, morningNote, ask, handoverPartOne, handoverPartTwo, privateLines, logged, today, planFor, state: get };
 }

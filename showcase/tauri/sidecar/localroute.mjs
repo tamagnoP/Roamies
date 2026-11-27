@@ -39,6 +39,7 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
   const label = (model) => { try { const st = settings().local.start; return st?.python ? st.model : model; } catch { return model; } };
   let checked = null; // { address, problem, model }: the live check of the server at that address
   const history = [];
+  let turns = 0; // feature 14: each request is its own "this request" for the file tools
   async function ready() {
     const s = settings().local, address = localAddress(s.address);
     if (!address) return { problem: 'The local model is off: local.address is empty.' };
@@ -66,8 +67,13 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
     const items = open.map((t) => ({ id: t.id, title: t.title }));
     const planOf = async (day) => { const d = dayFrom(day, now()); if (!d) return []; const t0 = d.getTime(); return Object.entries(b).filter(([, x]) => x.start >= t0 && x.start < t0 + 864e5).map(([id, x]) => ({ todo: id, title: open.find((t) => t.id === id)?.title ?? '', start: x.start, minutes: x.minutes })); };
     const dueOf = async (id) => { const t = open.find((x) => x.id === id); return typeof t?.due === 'number' ? { ms: t.due, dayOnly: false } : null; };
-    // seePrivate: the local route sees private items (privacy.mjs); Claude's calls never carry it.
-    const call = (name) => { const t = tool(name); return t ? { execute: (a, ctx) => t.execute(a, { ...ctx, signal, seePrivate: true }) } : null; };
+    // seePrivate: the local route sees private items (privacy.mjs); Claude's calls never carry it. Feature 14: the
+    // file tools read his words in this request (heard), give the smaller part (local), and count the file and note
+    // texts the next model call carries (count), for its ledger line.
+    const texts = { fileTexts: 0, fileChars: 0, noteTexts: 0, noteChars: 0 }, turn = `local-${++turns}`;
+    const count = (kind, chars) => { if (kind === 'file' || kind === 'note') { texts[`${kind}Texts`]++; texts[`${kind}Chars`] += Math.max(0, Math.round(chars) || 0); } };
+    const taken = () => { const t = { ...texts }; for (const k of Object.keys(texts)) texts[k] = 0; return t; };
+    const call = (name) => { const t = tool(name); return t ? { execute: (a, ctx) => t.execute(a, { ...ctx, signal, seePrivate: true, local: true, heard: said, turn, count }) } : null; };
     const blockLine = (name) => async (a) => { const text = String(await tool(name).execute(a, { signal, seePrivate: true }) ?? ''); return { text, say: plain(text) }; };
     const run = createLiteRunner({ tool: call, blocks: { schedule_block: blockLine('schedule_block'), move_block: blockLine('move_block') }, todos: async () => items, readDaily, now, said: () => said, planOf, dueOf });
     const hours = { dayStart: s.calendar.dayStart, dayEnd: s.calendar.dayEnd };
@@ -75,7 +81,7 @@ export function createLocalRoute({ settings, userName = 'the user', server = nul
     let out;
     try {
       out = await liteRequest({
-        chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: label(r.model), private: priv, tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
+        chat: async (body) => { const res = await chatOnce({ address, body, signal, fetchImpl }); record({ kind: 'request', where: 'mac', provider: 'local', model: label(r.model), private: priv, ...taken(), tokens: { new: (res.usage?.prompt_tokens ?? 0) - (res.usage?.prompt_tokens_details?.cached_tokens ?? 0), cacheRead: res.usage?.prompt_tokens_details?.cached_tokens ?? 0, out: res.usage?.completion_tokens ?? 0 } }); return res; },
         run, name: userName, model: r.model, said, state: liteState({ name: userName, now: now(), facts: liteFacts(open, b, now()) }),
         history: history.slice(-local.historyExchanges), maxSteps: local.maxSteps, now: now(), hours, items,
         confirm: async (p) => confirm(p), confirmChanges: local.confirmChanges, persona: s.persona?.name ?? '',

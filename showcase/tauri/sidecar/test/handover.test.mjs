@@ -226,7 +226,7 @@ assert.match(side, /!isSummary\(m\) && !isHandover\(m\)/, 'the memory pass skips
 assert.ok(!/handoverPartOne[^\n]*session\.messages|content: [^\n]*handoverPartOne/.test(side), 'part one never goes into the conversation');
 assert.match(side, /\.\.\.flow\.tools, \.\.\.handover\.tools\]/, 'item_dealt_with is one of the tools');
 for (const n of ['item_dealt_with', 'link_note', 'notes_for']) assert.ok(codeReference().tools.allowedWhilePiWorks.includes(n), `${n} works while pi is busy, like the notes`);
-assert.match(side, /ownWords = intro \|\| text\.startsWith\('\('\) \? '' : text;/, 'the owner\'s own words: never a note from the app');
+assert.match(side, /ownWords = intro \|\| briefing \|\| text\.startsWith\('\('\) \? '' : text;/, 'the owner\'s own words: never a note from the app, nor a briefing (feature 14)');
 assert.match(side, /handover\.checkDone\(todoItems\(\)\); handover\.checkTicks\(\); notes\.pages\.renames\(\);/);
 assert.match(side, /await dailyAsk\('review'\);\n\s*await inSeries\('items', \(\) => handover\.askStale\(dailyIO\)\);/, 'the evening review asks about the old open items after the missed to-dos');
 

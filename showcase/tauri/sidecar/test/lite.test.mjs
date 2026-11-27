@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { NOTHING_CHANGED, ONE_AT_A_TIME, createRequestCheck } from '../checks.mjs';
-import { LITE_NAMES, LITE_TOOLS, createLiteRunner, liteBody, liteRequest, liteState, liteSystem, warmBody } from '../lite.mjs';
+import { LITE_NAMES, LITE_TOOLS, WRITTEN_CALL, createLiteRunner, dayReply, liteBody, liteRequest, liteState, liteSystem, warmBody, writtenCall } from '../lite.mjs';
 
 const NOW = new Date(2026, 10, 25, 14, 5).getTime(); // a Wednesday
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
@@ -12,7 +12,7 @@ const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 // of its tools takes a time, a day or a length
 assert.equal(liteSystem('Office'), liteSystem('Office'));
 assert.doesNotMatch(liteSystem('Office'), /2026|November|14:05/);
-assert.deepEqual(LITE_NAMES, ['remember_commitment', 'update_commitment', 'list_commitments', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'write_note', 'search_notes', 'read_note', 'read_daily', 'open']);
+assert.deepEqual(LITE_NAMES, ['remember_commitment', 'update_commitment', 'list_commitments', 'schedule_block', 'move_block', 'unschedule_block', 'show_day', 'write_note', 'search_notes', 'read_note', 'read_daily', 'read_file', 'find_files', 'open']);
 for (const t of LITE_TOOLS) {
   const fields = Object.keys(t.function.parameters.properties);
   assert.ok(!fields.some((f) => /^(when|day|date|start|end|minutes|from|due|time)$/.test(f)), `${t.function.name}: no time field (${fields})`);
@@ -67,6 +67,9 @@ const PLAN = [{ todo: 'k3f9', title: 'Budget review', start: at(25, 10), minutes
   await go('Note: the seminar is on Friday at 3.', 'write_note', { title: 'Seminar', content: 'The seminar is on Friday at 3.' }); assert.deepEqual(seen.pop(), ['write_note', { title: 'Seminar', content: 'The seminar is on Friday at 3.' }], 'times in a note stay in its text');
   await go('Open Zotero.', 'open', { app: 'Zotero' }); assert.deepEqual(seen.pop(), ['open', { target: 'Zotero' }]);
   assert.deepEqual(await go('Read my daily note.', 'read_daily', {}), { ok: true, text: '## Plan' });
+  // feature 14: the file tools read; no time is placed for them, even with a day in his words
+  await go('Read the notes from Friday in segment.py.', 'read_file', { file: 'segment.py' }); assert.deepEqual(seen.pop(), ['read_file', { path: 'segment.py' }]);
+  await go('Find my loader file.', 'find_files', { name: 'loader' }); assert.deepEqual(seen.pop(), ['find_files', { name: 'loader' }]);
   assert.equal(seen.length, 0, 'nothing else ran');
   const blocks = { schedule_block: async (a) => ({ text: 'for the model', say: `"${a.title}" is on the calendar.` }) };
   said = 'Book the poster tomorrow at 2 for an hour.';
@@ -75,6 +78,20 @@ const PLAN = [{ todo: 'k3f9', title: 'Budget review', start: at(25, 10), minutes
   assert.equal(r.say, '"Poster" is on the calendar.', 'the calendar\'s own line for him');
   const broken = createLiteRunner({ tool: () => ({ execute: async () => { throw new Error('No commitment with id k3f9.'); } }), todos: async () => TODOS, now: () => NOW });
   assert.deepEqual(await broken('update_commitment', { todo: 'budget review', status: 'done' }), { ok: false, text: 'No commitment with id k3f9.' });
+}
+
+// ---- feature 14: "read <file name>", decided by code: read first, the model only words the answer; a refusal is said
+{
+  const ran = [];
+  const run = async (name, args) => { ran.push([name, args]); return args.file === 'segment.py' ? { ok: true, text: '~/p/segment.py (20 bytes):\n\nthreshold = 0.6\n\n[End of the file.]' } : { ok: false, text: 'There\'s no file called "nope.py" in Office\'s project folders.' }; };
+  const fake2 = (answers) => { const bodies = []; return { bodies, chat: async (body) => { bodies.push(JSON.parse(JSON.stringify(body))); const a = answers.shift() ?? { content: '' }; return { content: a.content ?? '', toolCalls: [], usage: null }; } }; };
+  const f = fake2([{ content: 'It sets the threshold to 0.6.' }]);
+  let out = await liteRequest({ chat: f.chat, run, name: 'Office', model: 'm', said: 'Read segment dot py.', state: liteState({ name: 'Office', now: NOW }), now: NOW });
+  assert.deepEqual([out.reply, out.calls.map((c) => [c.name, c.by]), ran.pop()], ['It sets the threshold to 0.6.', [['read_file', 'code']], ['read_file', { file: 'segment.py' }]]);
+  assert.equal(f.bodies[0].messages.at(-1).role, 'tool'); assert.match(f.bodies[0].messages.at(-1).content, /threshold = 0\.6/);
+  const g = fake2([]);
+  out = await liteRequest({ chat: g.chat, run, name: 'Office', model: 'm', said: 'Read nope.py', state: liteState({ name: 'Office', now: NOW }), now: NOW });
+  assert.deepEqual([out.by, out.reply, g.bodies.length], ['code', 'There\'s no file called "nope.py" in Office\'s project folders.', 0]);
 }
 
 // ---- the request: a fake server answers in turn
@@ -128,15 +145,15 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   const out2 = await liteRequest({ chat: g.chat, run: okRun, name: 'Office', model: 'm', said: 'Anything on Thursday I should know about?', state: state1 });
   assert.deepEqual([out2.by, out2.reply, g.bodies.length], ['model', 'You have the lab meeting at 9.', 2]);
   assert.equal(g.bodies[1].messages[1].content, g.bodies[0].transient_context, 'later calls carry his message as an ordinary one');
-  // looking up a day, decided by code: show_day runs first, whatever the model would choose; the model only words it
+  // looking up a day, decided by code: show_day runs and code words the day; no model call (the owner, 2026-11-27)
   const g2 = fake([{ content: 'You have the lab meeting at 9.' }]);
-  const out4 = await liteRequest({ chat: g2.chat, run: okRun, name: 'Office', model: 'm', said: 'What\'s on Thursday?', state: state1 });
-  assert.deepEqual([out4.by, out4.reply, g2.bodies.length, out4.calls], ['model', 'You have the lab meeting at 9.', 1, [{ name: 'show_day', args: {}, ok: true, by: 'code' }]]);
-  assert.equal(g2.bodies[0].transient_context, undefined); assert.deepEqual(g2.bodies[0].messages.slice(2).map((m) => m.role), ['assistant', 'tool']);
-  assert.equal(g2.bodies[0].messages[2].tool_calls[0].function.name, 'show_day'); assert.equal(g2.bodies[0].messages[3].content, 'ran show_day');
-  // an empty answer after a read: the result itself, without its ids
-  const h = fake([{ content: '' }]);
-  const out3 = await liteRequest({ chat: h.chat, run: async () => ({ ok: true, text: 'Thursday:\n09:00 to 10:00 (60 min): Lab meeting [m1]' }), name: 'Office', model: 'm', said: 'What\'s on Thursday?', state: state1 });
+  const out4 = await liteRequest({ chat: g2.chat, run: async () => ({ ok: true, text: 'Thursday 27 November:\n09:00 to 10:00 (60 min): Lab meeting [m1]\n10:30 to 11:00: taken by a task of their own in Super Productivity' }), name: 'Office', model: 'm', said: 'What\'s on Thursday?', state: state1 });
+  assert.deepEqual([out4.by, out4.reply, g2.bodies.length, out4.calls], ['code', 'Thursday 27 November: 09:00 to 10:00, Lab meeting; 10:30 to 11:00, taken by a task of their own in Super Productivity.', 0, [{ name: 'show_day', args: {}, ok: true, by: 'code' }]]);
+  assert.equal(dayReply('Nothing is on the calendar Friday 28 November.'), 'Nothing is on the calendar Friday 28 November.');
+  assert.equal(dayReply('Friday 28 November:\n09:00 to 10:00 (60 min): Lab meeting [m1]\nThe sync with Super Productivity is late.'), 'Friday 28 November: 09:00 to 10:00, Lab meeting. The sync with Super Productivity is late.');
+  // an empty answer after a read the model chose: the result itself, without its ids
+  const h = fake([{ calls: [['show_day', {}]] }, { content: '' }]);
+  const out3 = await liteRequest({ chat: h.chat, run: async () => ({ ok: true, text: 'Thursday:\n09:00 to 10:00 (60 min): Lab meeting [m1]' }), name: 'Office', model: 'm', said: 'Anything on Thursday I should know about?', state: state1 });
   assert.equal(out3.reply, 'Thursday:\n09:00 to 10:00 (60 min): Lab meeting');
 }
 {
@@ -146,11 +163,24 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   assert.equal(out.calls[0].ok, false); assert.equal(out.reply, 'I can\'t do that here.');
   // steps run out
   const h = fake(Array.from({ length: 9 }, () => ({ calls: [['show_day', {}]] })));
-  const out3 = await liteRequest({ chat: h.chat, run: okRun, name: 'Office', model: 'm', said: 'What is on today?', state: state1, maxSteps: 2 });
+  const out3 = await liteRequest({ chat: h.chat, run: okRun, name: 'Office', model: 'm', said: 'Anything on today I should know?', state: state1, maxSteps: 2 });
   assert.equal(out3.by, 'steps'); assert.equal(h.bodies.length, 3);
   // the no-stream retries are counted
   const k = fake([{ retried: 1, calls: [['open', { app: 'Zotero' }]] }]);
-  assert.equal((await liteRequest({ chat: k.chat, run: okRun, name: 'Office', model: 'm', said: 'Open Zotero.', state: state1 })).noStreamRetries, 1);
+  assert.equal((await liteRequest({ chat: k.chat, run: okRun, name: 'Office', model: 'm', said: 'Could you get Zotero up for me?', state: state1 })).noStreamRetries, 1);
+}
+{
+  // a tool call written out as text, by its shape: never shown, spoken or run; a code-worded line instead
+  for (const x of ['unschedule_block{todo:<|"|>Grant report draft<|"|>}', 'open(app="Zotero")', 'show_day()', 'call:move_block{todo:"x"}', '{"name":"open","arguments":{}}', '```json\n{"tool_calls":[]}', '<|tool_call>call:x{}<tool_call|>', 'make_tea {cups: 2}']) assert.ok(writtenCall(x), x);
+  for (const x of ['You have the lab meeting at 9.', 'It defines split(threshold=0.6) to cut cells.', 'The file sets {threshold: 0.6} near the top.', 'Friday (the 28th) is free.', '"Budget review" is off the calendar.']) assert.ok(!writtenCall(x), x);
+  let ran = 0;
+  const f = fake([{ content: 'unschedule_block{todo:<|"|>Grant report draft<|"|>}' }]);
+  const out = await liteRequest({ chat: f.chat, run: async (...a) => { ran++; return okRun(...a); }, name: 'Office', model: 'm', said: 'Take the grant report draft off my calendar.', state: state1 });
+  assert.deepEqual([out.by, out.reply, ran, out.written], ['written', WRITTEN_CALL, 0, true]);
+  // after a read the model chose
+  const g2 = fake([{ calls: [['show_day', {}]] }, { content: 'open_app{name: "Zotero"}' }]);
+  const out2 = await liteRequest({ chat: g2.chat, run: okRun, name: 'Office', model: 'm', said: 'Anything on today?', state: state1 });
+  assert.deepEqual([out2.by, out2.reply], ['written', WRITTEN_CALL]);
 }
 {
   // what code decided is saved at once; a change the model chose is shown first, and saved only on a yes
@@ -173,10 +203,21 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   ({ out, f } = await req('Remind me tomorrow to buy milk.', [{ calls: [['remember_commitment', { text: 'buy milk' }]] }], { confirm: answer(null) }));
   assert.deepEqual([out.by, f.bodies.length, asked.length], ['tools', 1, 0]); assert.deepEqual(seen.pop(), ['remember_commitment', { text: 'buy milk', due: '2026-11-26', kind: 'reminder' }]);
 
-  // code decided a due time; the model chose to move the block: code's action runs, at once
-  ({ out } = await req('The grant report draft is now due on Tuesday.', [{ calls: [['move_block', { todo: 'Grant report draft' }]] }], { confirm: answer(null) }));
+  // code decided a due time for a to-do named whole: done by code alone, no model call (the owner, 2026-11-27)
+  ({ out, f } = await req('The grant report draft is now due on Tuesday.', [{ calls: [['move_block', { todo: 'Grant report draft' }]] }], { confirm: answer(null) }));
   assert.deepEqual(seen.pop(), ['update_commitment', { id: 'p2x7', due: '2026-12-01' }]);
-  assert.deepEqual([out.by, out.reply, out.calls[0].by, asked.length], ['tools', '"Grant report draft" is now due on Tuesday 1 December.', 'code', 0]);
+  assert.deepEqual([out.by, out.reply, out.calls[0].by, asked.length, f.bodies.length], ['code', '"Grant report draft" is now due on Tuesday 1 December.', 'code', 0, 0]);
+  // mark done and off the calendar: the same
+  ({ out, f } = await req('Mark the budget review as done.', [{ content: 'should not be asked' }]));
+  assert.deepEqual([seen.pop(), out.by, f.bodies.length], [['update_commitment', { id: 'k3f9', status: 'done' }], 'code', 0]); assert.match(out.reply, /Budget review/);
+  ({ out, f } = await req('Take the grant report draft off the calendar.', [{ content: 'unschedule_block{todo:<|"|>Grant report draft<|"|>}' }]));
+  assert.deepEqual([seen.pop(), out.by, out.reply, f.bodies.length], [['unschedule_block', { todo: 'p2x7' }], 'code', 'ok unschedule_block', 0]);
+  // a due time code can't place: code's question, still no model call, nothing saved
+  ({ out, f } = await req('The grant report draft is now due.', [{ content: 'x' }]));
+  assert.deepEqual([out.by, f.bodies.length, seen.length], ['ask', 0, 0]);
+  // a new to-do needs its text from the model: the model is asked
+  ({ out, f } = await req('Add a to-do to call the clinic.', [{ calls: [['remember_commitment', { text: 'call the clinic' }]] }]));
+  assert.deepEqual([out.by, f.bodies.length, seen.pop()[0]], ['tools', 1, 'remember_commitment']);
 
   // the model chose: shown, and with no answer nothing is saved
   ({ out } = await req('Move the budget review to tomorrow at 10.', [{ calls: [['move_block', { todo: 'Budget review' }]] }], { confirm: answer(null) }));
@@ -203,14 +244,14 @@ const state1 = liteState({ name: 'Office', now: NOW }), state2 = liteState({ nam
   ({ out } = await req('Book the literature search on Monday.', [{ calls: [['schedule_block', { todo: 'literature search' }]] }], { confirm: answer(true) }));
   assert.deepEqual([out.by, asked.length, seen.length], ['ask', 0, 0]);
   // reads never ask
-  ({ out } = await req('What have I got on Friday?', [{ content: 'Nothing on Friday.' }], { confirm: answer(null) }));
-  assert.deepEqual([out.reply, asked.length, out.calls[0].by], ['Nothing on Friday.', 0, 'code']); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
+  ({ out, f } = await req('What have I got on Friday?', [{ content: 'Nothing on Friday.' }], { confirm: answer(null) }));
+  assert.deepEqual([out.reply, asked.length, out.calls[0].by, f.bodies.length], ['Ok show_day', 0, 'code', 0]); assert.deepEqual(seen.pop(), ['show_day', { date: 'friday' }]);
   // a change decided by code for an open to-do needs its whole title: part of it goes to the model and is shown
   ({ out } = await req('I\'ve finished the thesis chapter.', [{ calls: [['update_commitment', { todo: 'Thesis chapter 2', status: 'done' }]] }], { confirm: answer(null) }));
   assert.deepEqual([out.by, seen.length, asked.pop()], ['unanswered', 0, 'Mark "Thesis chapter 2" as done?']);
   // open: the app as he named it, not the model's
-  ({ out } = await req('Open Zotero.', [{ calls: [['open', { app: 'Zotero 7' }]] }]));
-  assert.deepEqual(seen.pop(), ['open', { target: 'Zotero' }]); assert.equal(out.calls[0].by, 'code');
+  ({ out, f } = await req('Open Zotero.', [{ calls: [['open', { app: 'Zotero 7' }]] }]));
+  assert.deepEqual(seen.pop(), ['open', { target: 'Zotero' }]); assert.deepEqual([out.calls[0].by, f.bodies.length], ['code', 0]);
   // with no tool called, a promise is replaced
   ({ out } = await req('Remind me about the seminar.', [{ content: 'I will remember the seminar.' }]));
   assert.deepEqual([out.by, out.reply], ['replaced', 'Nothing was changed.']);

@@ -86,7 +86,7 @@ try {
   net = false; beat(); await sleep(300);
   from = out.length; const sent = provider.length;
   local.answers.push({ calls: [['show_day', {}]] }, { content: 'Nothing is on today.' });
-  await typed('What is on my calendar today?');
+  await typed('Anything on my calendar today?'); // not a day decided by code, which the model isn't asked about
   await waitFor(() => said(from, /local model/), 20_000, 'the local reply');
   const r1 = said(from, /local model/);
   assert.match(r1.text, /^Claude can't be reached, so the local model on this Mac is answering\. /); assert.equal(r1.tag, 'local');
