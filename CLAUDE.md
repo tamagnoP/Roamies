@@ -163,6 +163,11 @@ The reset is what makes macOS ask again.
 - **Every change gets a test** in `sidecar/test/`, added to the `test` script in `sidecar/package.json`, or to
   `test:all` if it takes minutes. Stand in for pi, `say` and the window helper with fakes, as the existing tests
   do. Never call a real model from a test.
+- **No test-only switch may be reachable in the installed app** (the owner's rule, 2026-11-27). A switch that
+  exists for tests (an environment variable, a file, an argument) is either taken out by the shell before it
+  starts the sidecar or a helper (`TEST_ONLY_ENV` in `src-tauri/src/sidecar.rs`, with its test there), read by the
+  shell in debug builds only (`#[cfg(debug_assertions)]`), or overwritten by the shell (`ROAMIES_HANDS`). A new one
+  goes on that list, with the test updated, in the same commit.
 - **Update `LOCAL-ONLY.md`** in the same commit as the behaviour it describes.
 - **If a test fails, find the cause.** Do not weaken or delete a test to get a pass; say what failed.
 - **Update `ROADMAP.md`** in the same commit as any change of status: when a feature is started, finished, merged,

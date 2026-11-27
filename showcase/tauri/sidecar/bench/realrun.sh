@@ -7,7 +7,8 @@
 set -u
 cd "$(dirname "$0")"
 MODE=$1; N=$2; QUIET=$3; NAME=${4:-real-$MODE}
-SRC=../../src-tauri/target/release/bundle/macos/Roamies.app
+# A debug bundle (`npx tauri build --debug` in showcase/tauri): the shell honours ROAMIES_NODE in debug builds only.
+SRC=../../src-tauri/target/debug/bundle/macos/Roamies.app
 APP=/private/tmp/lean/app/Roamies.app
 if [ ! -d "$APP" ]; then
   mkdir -p /tmp/lean/app && cp -R "$SRC" "$APP" && rm -f "$APP/Contents/MacOS/roamies-voice" "$APP/Contents/MacOS/roamies-hands"

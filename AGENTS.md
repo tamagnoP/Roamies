@@ -16,6 +16,8 @@ every window is an X11 window (`GDK_BACKEND=x11` on Wayland, through XWayland), 
 region (the page reports its click areas, `host.js` → `set_hit_rects`) instead of following the cursor, and
 screenshots, copying, Open at Login and AppImage-only updates live there. Debug aids: `ROAMIES_TRACE=1` prints the
 overlay's click areas, and in debug builds `ROAMIES_TEST_AUDIO=<wav>` stands in for the microphone.
+Switches that exist only for tests never reach the installed app: the shell clears them for the sidecar and the
+helpers (`TEST_ONLY_ENV` in `src-tauri/src/sidecar.rs`) or reads them in debug builds only; see `CLAUDE.md`.
 
 ## Commands
 

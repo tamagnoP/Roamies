@@ -600,7 +600,7 @@ fn set_typing(app: AppHandle, window: WebviewWindow, on: bool) {
 /// Runs the voice helper in a one-shot permission mode and returns what it printed.
 fn helper_perms(args: &[&str]) -> Value {
     let Some(bin) = voice_binary() else { return json!({ "type": "perms", "unsupported": true }) };
-    let out = hide_console(&mut Command::new(bin)).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output();
+    let out = hide_console(sidecar::without_test_switches(&mut Command::new(bin))).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output();
     out.ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|t| t.lines().rev().find_map(|l| serde_json::from_str::<Value>(l).ok()))
@@ -655,6 +655,7 @@ fn diagnostics(app: &AppHandle) -> Value {
 fn accessibility(prompt: bool) -> &'static str {
     let Some(bin) = helper_binary("roamies-hands") else { return "unknown" };
     let mut cmd = Command::new(bin);
+    sidecar::without_test_switches(&mut cmd); // Local-only build: no test switch reaches a helper (sidecar.rs)
     cmd.arg("trusted");
     if prompt {
         cmd.arg("--prompt");
@@ -728,7 +729,7 @@ async fn screen_check() -> Value {
     }
     tauri::async_runtime::spawn_blocking(|| {
         let Some(bin) = helper_binary("roamies-hands") else { return json!({ "unsupported": true }) };
-        Command::new(bin)
+        sidecar::without_test_switches(&mut Command::new(bin))
             .arg("screencheck")
             .stdin(Stdio::null())
             .stderr(Stdio::null())
@@ -756,7 +757,7 @@ fn perm_guide(app: AppHandle, kind: Option<String>) {
             .ok()
             .and_then(|e| e.ancestors().find(|p| p.extension().is_some_and(|x| x == "app")).map(|p| p.to_string_lossy().into_owned()))
             .unwrap_or_default();
-        let child = Command::new(bin)
+        let child = sidecar::without_test_switches(&mut Command::new(bin))
             .args(["guide", &kind, &bundle])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

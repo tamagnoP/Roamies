@@ -1576,6 +1576,11 @@ request fails with a network error before any reply; and in private mode. A slow
   `ledger.mjs`: `swaps`, `swapsBack`. `brain.mjs`: the test seam passed on. Tests: `mask`, `mask-run` (the API route),
   `mask-cc-run` (Claude's route, through `ROAMIES_FAKE_CLAUDE`, a module standing in for the claude program; tests
   only).
+- `showcase/tauri/src-tauri/src/sidecar.rs`, `main.rs`, `voice.rs` (Local-only build): the shell takes the switches
+  that exist only for tests out of the environment of the sidecar and the helpers it starts (`TEST_ONLY_ENV`:
+  `ROAMIES_FAKE_CLAUDE`, `ROAMIES_COMPACT_AT`, `ROAMIES_THINKING`, `ROAMIES_USAGE`, `ROAMIES_VOICE_DRYRUN`,
+  `ROAMIES_VOICE_DRYRUN_TEXT`; `ROAMIES_DATA_DIR` in release builds; `ROAMIES_SESSION` and `ROAMIES_LAUNCH` outside
+  Linux), and reads `ROAMIES_NODE` in debug builds only. `bench/realrun.sh` therefore runs a debug bundle.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler

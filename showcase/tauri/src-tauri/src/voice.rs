@@ -50,6 +50,7 @@ pub(crate) fn start_voice(app: &AppHandle) {
     };
     let chord = app.state::<TalkChord>().0.lock().unwrap().join(",");
     let mut cmd = Command::new(bin);
+    crate::sidecar::without_test_switches(&mut cmd); // Local-only build: no test switch reaches the helper
     cmd.arg("--chord").arg(chord);
     if let Some(dir) = app.state::<VoiceModel>().0.lock().unwrap().clone() {
         cmd.arg("--model").arg(dir);
