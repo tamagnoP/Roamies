@@ -147,7 +147,7 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   assert.match(side, /queue: \{ due: \(\) => !!queue\?\.ready\(\), run: \(\) => quietGive\('exchange'\) \}/);
   assert.match(side, /if \(own && !flow\.spoken\(\)\) queue\?\.exchanged\(\);/);
   assert.match(side, /if \(!area\?\.file && isWaitingAsk\(text\)\) \{ ui\(\{ kind: 'heard' \}\); waitingAsked\(true\); return; \}/, '"anything waiting?" spoken: the app answers');
-  assert.match(side, /if \(isWaitingAsk\(text\)\) waitingAsked\(false\); else (?:if \(isLeftAsk\(text\)\) leftAsked\(\); else )?enqueue/, 'and typed');
+  assert.match(side, /if \(isWaitingAsk\(text\)\) waitingAsked\(false\); else (?:if \(isLeftAsk\(text\)\) leftAsked\(\); else )?(?:if \(fq\) findAsked\(fq\)[^;]*; else )?enqueue/, 'and typed');
   assert.match(side, /quietGive\('asked'\)\.then\(\(gave\) => \{ if \(!gave\) aloud\('Nothing is waiting\.', 'happy'\); \}/);
   // away and on a call: the shell's two numbers only; Roamies' own listening is not a call
   assert.match(side, /else if \(m\.type === 'presence'\) presenceSeen\(m\);/);
