@@ -12,6 +12,8 @@
 //   roamies-hands locate-control <target> <id>  where one control (from `ui`) is on screen, for pointing
 //   roamies-hands screencheck                  takes (and deletes) one test screenshot: {"seen": true|false}
 //   roamies-hands guide accessibility|screen [<Roamies.app>] [--preview]  drag-me-in panel under System Settings (until stdin closes)
+//   roamies-hands find                         feature 40: files and folders by name, from Spotlight; {"words":[…]} on stdin
+//   roamies-hands reveal                       feature 40: one file shown in Finder, selected, never opened; {"path":…} on stdin
 import AppKit
 import ApplicationServices
 import CoreGraphics
@@ -1435,6 +1437,63 @@ func secretQuery(_ name: String) -> [String: Any] {
     [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: secretService, kSecAttrAccount as String: name]
 }
 
+// ---------- finding files by name (feature 40) ----------
+// Spotlight's own index, asked in this process (NSMetadataQuery): names only, nothing opened or read. The words and
+// the path come in on stdin, never in arguments (other processes can read those). The sidecar (findany.mjs) leaves
+// out what must not be shown and ranks what is left; here only ~/Library and hidden parts are passed over early, so
+// that they don't use up the results.
+struct FindAsk: Decodable { let words: [String]; let seconds: Double?; let max: Int?; let drives: Bool? }
+
+/// The external drives to search: local, browsable, mounted under /Volumes, not the start-up disk. Network drives
+/// are not local, so they are never searched. Read from the volume list only: no drive's folders are listed.
+func localDrives() -> [[String: String]] {
+    let keys: [URLResourceKey] = [.volumeIsLocalKey, .volumeIsRootFileSystemKey, .volumeIsBrowsableKey, .volumeNameKey]
+    let vols = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
+    return vols.compactMap { u in
+        guard let v = try? u.resourceValues(forKeys: Set(keys)), v.volumeIsLocal == true, v.volumeIsRootFileSystem != true,
+              v.volumeIsBrowsable != false, u.path.hasPrefix("/Volumes/") else { return nil }
+        return ["path": u.path, "name": v.volumeName ?? u.lastPathComponent]
+    }
+}
+/// A word as part of a LIKE pattern: its wildcards and escapes taken out, so a word only ever means itself.
+func likeWord(_ w: String) -> String {
+    w.replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "?", with: "")
+        .trimmingCharacters(in: .whitespaces)
+}
+/// Items whose name holds every word (any case, any accents), in the given places, waited for at most `seconds`.
+func findByName(words: [String], scopes: [String], seconds: Double, limit: Int, skip: (String) -> Bool) -> (items: [[String: Any]], timedOut: Bool) {
+    let q = NSMetadataQuery()
+    let each = words.map { NSPredicate(format: "%K LIKE[cd] %@", NSMetadataItemFSNameKey, "*\($0)*") }
+    q.predicate = each.count == 1 ? each[0] : NSCompoundPredicate(andPredicateWithSubpredicates: each) // one word: Spotlight refuses an AND of one
+    q.searchScopes = scopes
+    var finished = false
+    let token = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidFinishGathering, object: q, queue: nil) { _ in finished = true }
+    defer { NotificationCenter.default.removeObserver(token) }
+    guard q.start() else { return ([], false) }
+    let until = Date().addingTimeInterval(seconds)
+    while !finished && Date() < until { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05)) }
+    q.disableUpdates()
+    q.stop()
+    var items: [[String: Any]] = []
+    for i in 0 ..< q.resultCount {
+        if items.count >= limit { break }
+        guard let it = q.result(at: i) as? NSMetadataItem, let p = it.value(forAttribute: NSMetadataItemPathKey) as? String, !skip(p) else { continue }
+        let tree = (it.value(forAttribute: "kMDItemContentTypeTree") as? [String]) ?? []
+        let type = (it.value(forAttribute: NSMetadataItemContentTypeKey) as? String) ?? ""
+        let kind = tree.contains("com.apple.application") || type.hasPrefix("com.apple.application") ? "app"
+            : type == "public.volume" ? "volume" : type == "public.folder" ? "folder" : tree.contains("com.apple.package") ? "package" : "file"
+        var o: [String: Any] = ["path": p, "kind": kind, "type": type]
+        if let d = it.value(forAttribute: "kMDItemLastUsedDate") as? Date { o["used"] = Int(d.timeIntervalSince1970 * 1000) }
+        if let d = it.value(forAttribute: NSMetadataItemFSContentChangeDateKey) as? Date { o["changed"] = Int(d.timeIntervalSince1970 * 1000) }
+        items.append(o)
+    }
+    return (items, !finished)
+}
+/// What a find never hands back, before the sidecar's own checks: ~/Library, and any hidden part of a path.
+func findSkips(_ p: String, home: String) -> Bool {
+    p == home + "/Library" || p.hasPrefix(home + "/Library/") || p.split(separator: "/").contains { $0.hasPrefix(".") }
+}
+
 // ---------- commands ----------
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -1510,6 +1569,16 @@ case "--self-test":
     check("the plan's window gone: that app's front window", currentWindow([pw(9, 7), pw(5, 1), pw(4, 1)], pinned: pw(2, 1))?.id == 5)
     check("the plan's window gone and none left: nothing", currentWindow([], pinned: pw(2, 1)) == nil)
     check("another app's windows are never taken", currentWindow([pw(9, 7), pw(8, 7)], pinned: pw(2, 1)) == nil)
+    // Feature 40: a word means only itself in a Spotlight pattern; ~/Library and hidden parts are passed over.
+    check("wildcards are taken out of a word", likeWord("*bud?get\\") == "budget")
+    check("~/Library is passed over", findSkips("/Users/a/Library/Mobile Documents/x.pdf", home: "/Users/a") && findSkips("/Users/a/Library", home: "/Users/a"))
+    check("a hidden part is passed over", findSkips("/Users/a/.Trash/budget.xlsx", home: "/Users/a") && findSkips("/Volumes/D/.Trashes/501/x", home: "/Users/a"))
+    check("an ordinary file is kept", !findSkips("/Users/a/Documents/Library notes.pdf", home: "/Users/a") && !findSkips("/Volumes/Drive/Finance/budget.xlsx", home: "/Users/a"))
+    // A real Spotlight query on the system's own apps (never the owner's files). Skipped when Spotlight gives nothing
+    // (indexing off, as on some build machines).
+    let calc = findByName(words: ["calculator"], scopes: ["/System/Applications"], seconds: 5, limit: 20) { _ in false }
+    if calc.items.isEmpty { print("skip a Spotlight query: nothing came back (indexing may be off)\(calc.timedOut ? ", timed out" : "")") }
+    else { check("Spotlight finds Calculator by name, as an app", calc.items.contains { ($0["path"] as? String)?.hasSuffix("/Calculator.app") == true && ($0["kind"] as? String) == "app" }) }
     exit(bad == 0 ? 0 : 1)
 
 case "trusted":
@@ -2116,6 +2185,29 @@ case "secret-delete":
     let st = SecItemDelete(secretQuery(secretName(1)) as CFDictionary)
     guard st == errSecSuccess || st == errSecItemNotFound else { fail("keychain delete failed (\(st))") }
     out(["ok": true])
+
+// Feature 40: files and folders whose name holds every word, in the home folder and on the local external drives.
+// Names, kinds and dates only; the sidecar filters and ranks them and logs counts only.
+case "find":
+    let raw = FileHandle.standardInput.readDataToEndOfFile()
+    guard let ask = try? JSONDecoder().decode(FindAsk.self, from: raw) else { fail("bad find request") }
+    let words = Array(ask.words.map(likeWord).filter { !$0.isEmpty }.prefix(8))
+    guard !words.isEmpty else { fail("no words to find") }
+    let home = NSHomeDirectory()
+    let drives = ask.drives == false ? [] : localDrives()
+    let found = findByName(words: words, scopes: [home] + drives.compactMap { $0["path"] }, seconds: min(max(ask.seconds ?? 3, 0.5), 15),
+                           limit: min(max(ask.max ?? 1000, 1), 5000)) { findSkips($0, home: home) }
+    out(["ok": true, "items": found.items, "drives": drives, "timedOut": found.timedOut])
+
+// Feature 40: the file the owner picked from the card, shown in Finder with it selected. Finder is asked to show it
+// (NSWorkspace); nothing is opened and no other program is started.
+case "reveal":
+    let raw = FileHandle.standardInput.readDataToEndOfFile()
+    guard let o = try? JSONSerialization.jsonObject(with: raw) as? [String: Any], let p = o["path"] as? String, p.hasPrefix("/") else { fail("bad reveal request") }
+    guard FileManager.default.fileExists(atPath: p) else { out(["ok": true, "gone": true]) }
+    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+    _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.2))
+    out(["ok": true, "shown": true])
 
 case "screencheck":
     // Screen Recording can read as allowed and still not work (say, before a relaunch), so take one real screenshot.
