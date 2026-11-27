@@ -43,6 +43,8 @@ assert.deepEqual(ask('find the café menu PDF').spot, ['cafe', 'menu']); assert.
   assert.ok(createFind({ settings: () => ({ ...s, findAnywhere: true }) }).ask('Where is budget.xlsx?'));
 }
 
+// Spotlight's paths are macOS paths; the sandbox's list and a real home folder are only built as such off Windows.
+const POSIX = process.platform !== 'win32';
 // ---- 2. what is never shown
 const H = '/Users/t';
 const ctx = { home: H, drives: [{ path: '/Volumes/Backup', name: 'Backup' }], blocked: blockedPaths(H, `${H}/Documents/roamies-pi`), own: [`${H}/Documents/roamies-pi`, `${H}/.gg`], vault: `${H}/Documents/roamies-vault`, leaveOut: [`${H}/Private`], projects: [`${H}/Projects/thesis`] };
@@ -61,14 +63,13 @@ const cases = {
   yours: [`${H}/Private/budget.xlsx`],
   secret: [`${H}/Projects/app/prod.pem`, `${H}/Documents/server.key`, `${H}/Documents/id_rsa`, `${H}/Music/Music/budget.mp3`],
 };
-for (const [why, ps] of Object.entries(cases)) for (const p of ps) assert.equal(out(p), why, `${p}: ${why || 'shown'}`);
+if (POSIX) for (const [why, ps] of Object.entries(cases)) for (const p of ps) assert.equal(out(p), why, `${p}: ${why || 'shown'}`);
 assert.equal(out(`${H}/Applications/Budget.app`, 'app'), 'app'); assert.equal(out(`${H}/Downloads/Budget.app`), 'app');
 assert.equal(out(`${H}/Documents/Talk.key`, 'package', 'com.apple.iwork.keynote.key'), '', 'a Keynote presentation is not a key');
 assert.equal(out(`${H}/Documents/talk.key`, 'file', 'com.apple.iwork.keynote.sffkey'), '', 'nor a single-file one');
 assert.equal(out(`${H}/Pictures/Old.photoslibrary`, 'package'), '', 'a package itself can be listed');
 // the sandbox's blocked list, all of it (the same list files.mjs and pi's profile use)
-for (const [kind, b] of ctx.blocked) assert.notEqual(out(kind === 'literal' ? b : `${b}/x.txt`), '', `blocked: ${b}`);
-assert.ok(ctx.blocked.some(([, b]) => b.endsWith('/.ssh')));
+if (POSIX) { for (const [kind, b] of ctx.blocked) assert.notEqual(out(kind === 'literal' ? b : `${b}/x.txt`), '', `blocked: ${b}`); assert.ok(ctx.blocked.some(([, b]) => b.endsWith('/.ssh'))); }
 
 // ---- 3. the kind asked for
 const q = (t) => ask(t);
@@ -132,7 +133,7 @@ assert.match(nothingLine(q("Where's my thesis folder?")), /^I found no folder ca
 assert.equal(nothingLine(bq, { timedOut: true, seconds: 3 }), 'Spotlight didn\'t answer within 3 seconds, so I found no file called "budget".');
 
 // ---- 8. the search, with a stand-in for the hands helper
-{
+if (POSIX) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'findany-home-')));
   const base = loadSettings(home);
   const settings = { ...base, findLeaveOut: [path.join(home, 'Private')], limits: { ...base.limits, findMatches: 3 } };

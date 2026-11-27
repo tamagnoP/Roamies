@@ -18,7 +18,7 @@
 //   - The log gets counts only: never what he said, a name or a folder.
 import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
+import nodePath from 'node:path';
 import { NO_WORDS, YES_WORDS, only, plainNum, unfilled } from './answers.mjs';
 import { SKIPPED_FOLDERS } from './files.mjs';
 import { blockedPaths, loadSettings } from './pi.mjs';
@@ -59,6 +59,7 @@ const BACKUP = /^(Backups\.backupdb|.+\.(backup|previous|interrupted|inprogress)
 const SKIPPED = new Set(SKIPPED_FOLDERS);
 export const LEFT_OUT_REASONS = ['place', 'library', 'hidden', 'app', 'package', 'backup', 'skipped', 'blocked', 'own', 'vault', 'yours', 'secret'];
 
+const path = nodePath.posix; // Spotlight's paths are macOS paths, whatever runs the tests
 const inside = (p, dir) => !!dir && (p === dir || p.startsWith(dir.endsWith('/') ? dir : `${dir}/`));
 const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
 /** A Keynote presentation: its name ends in .key like a key file's, and Spotlight's kind says which it is. */
