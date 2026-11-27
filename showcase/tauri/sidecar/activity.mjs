@@ -17,8 +17,11 @@ export function describe(name, args = {}) {
     case 'draw': return (args.beats ?? []).length ? ['Drawing on your screen', 'Drew on your screen'] : ['Changing the drawing', 'Changed the drawing'];
     case 'see_photo': return args.url ? [`Looking at a picture on ${host(args.url)}`, `Looked at a picture on ${host(args.url)}`] : ['Looking at a picture', 'Looked at a picture'];
     case 'read_file': return [`Reading ${short(base(args.path))}`, `Read ${short(base(args.path))}`];
-    case 'list_files': return [`Looking in ${short(base(args.dir))}`, `Looked in ${short(base(args.dir))}`];
+    case 'list_files': return args.dir ? [`Looking in ${short(base(args.dir))}`, `Looked in ${short(base(args.dir))}`] : ['Looking in the project', 'Looked in the project']; // local-only build (feature 14): dir may be left out
     case 'search_files': return ['Searching your files', 'Searched your files'];
+    case 'find_files': return ['Finding files', 'Found files']; // local-only build (feature 14)
+    case 'edit_note': return ['Changing a note', 'Changed a note']; // local-only build (feature 14)
+    case 'undo_note_edit': return ['Putting back a note', 'Put back a note']; // local-only build (feature 14)
     case 'write_file': return [`Saving ${short(base(args.path))}`, `Saved ${short(base(args.path))}`];
     case 'run_command': return ['Running a command', 'Ran a command'];
     case 'ask_pi': return ['Handing a task to pi', 'Handed a task to pi']; // local-only build

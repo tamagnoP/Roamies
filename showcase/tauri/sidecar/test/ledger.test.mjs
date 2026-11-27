@@ -9,7 +9,7 @@ import { KINDS, UNSEEN, countTools, createLedger, isLeftAsk, leftLine, ledgerLin
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 // A line holds numbers, names and the kind; whatever else a caller passes is not kept.
 const l = ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, marked: 1, screenshots: 1, windowTexts: 2, text: 'my secret request', prompt: 'x', said: 'y' });
-assert.deepEqual(l, { t: at(26, 9), kind: 'request', where: 'provider', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, captures: { marked: 1, screenshots: 1, photos: 0 }, windowTexts: 2, private: false });
+assert.deepEqual(l, { t: at(26, 9), kind: 'request', where: 'provider', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, captures: { marked: 1, screenshots: 1, photos: 0 }, windowTexts: 2, fileTexts: 0, fileChars: 0, noteTexts: 0, noteChars: 0, private: false });
 assert.ok(!JSON.stringify(l).includes('secret'));
 assert.throws(() => ledgerLine({ kind: 'chat' }), /no ledger kind/);
 assert.deepEqual(KINDS, ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed']);
@@ -30,7 +30,14 @@ ledger.record({ kind: 'request', provider: 'anthropic', model: 'claude-x', token
 assert.equal((fs.statSync(file).mode & 0o777).toString(8), '600');
 assert.ok(!fs.readFileSync(file, 'utf8').includes('never kept'));
 assert.equal(ledger.lines().length, 5);
-assert.equal(ledger.left(), 'Sent to anthropic today: 2 requests, 1 fold of the conversation; 35,000 tokens sent (30,500 of them read from its cache) and 500 answered. Screen captures: 1 marked area, 1 screenshot. Window texts: 1. 1 request stayed on this Mac, with the local model. 1 hand-off to pi. ' + UNSEEN);
+assert.equal(ledger.left(), 'Sent to anthropic today: 2 requests, 1 fold of the conversation; 35,000 tokens sent (30,500 of them read from its cache) and 500 answered. Screen captures: 1 marked area, 1 screenshot. Window texts: 1. No file texts. No note texts. 1 request stayed on this Mac, with the local model. 1 hand-off to pi. ' + UNSEEN);
+// Feature 14: the file and note texts a request carried, with their characters; the local model's said apart
+{
+  const day = [ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', fileTexts: 2, fileChars: 1234, noteTexts: 1, noteChars: 50, text: 'never kept' }), ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', fileTexts: 1, fileChars: 6 }), ledgerLine({ t: at(26, 9), kind: 'request', where: 'mac', provider: 'local', fileTexts: 1, fileChars: 900 })];
+  assert.deepEqual([day[0].fileTexts, day[0].fileChars, day[0].noteTexts, day[0].noteChars, day[0].text], [2, 1234, 1, 50, undefined]);
+  const said = leftLine(day, at(26, 10));
+  assert.match(said, / No window texts\. File texts: 3 \(1,240 characters\)\. Note texts: 1 \(50 characters\)\. 1 request stayed on this Mac, with the local model\. File texts read by the local model: 1 \(900 characters\)\. /);
+}
 // the local model's warm-ups are told apart from the requests that stayed on this Mac
 {
   const f2 = path.join(path.dirname(file), 'ledger-warm.jsonl'), l2 = createLedger({ file: f2, keepDays: () => 90, now: () => clock });
@@ -53,7 +60,7 @@ assert.match(fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8'
 // Yesterday's lines are not today's.
 assert.equal(leftLine(ledger.lines(), at(27, 9)), `Nothing went to the provider today. ${UNSEEN}`);
 // What the claude program reported making by itself: in the totals, and said.
-assert.equal(leftLine([ledgerLine({ t: at(26, 9), kind: 'request', provider: 'claude-code', tokens: { new: 10, cacheRead: 1000, out: 5 } }), ledgerLine({ t: at(26, 9), kind: 'own', provider: 'claude-code', model: 'claude-haiku-5-5', tokens: { new: 500, out: 40 } })], at(26, 10)), `Sent to claude-code today: 1 request; 1,510 tokens sent (1,000 of them read from its cache) and 45 answered. Of these, 500 tokens were requests the claude program reported making by itself. No screen captures. No window texts. ${UNSEEN}`);
+assert.equal(leftLine([ledgerLine({ t: at(26, 9), kind: 'request', provider: 'claude-code', tokens: { new: 10, cacheRead: 1000, out: 5 } }), ledgerLine({ t: at(26, 9), kind: 'own', provider: 'claude-code', model: 'claude-haiku-5-5', tokens: { new: 500, out: 40 } })], at(26, 10)), `Sent to claude-code today: 1 request; 1,510 tokens sent (1,000 of them read from its cache) and 45 answered. Of these, 500 tokens were requests the claude program reported making by itself. No screen captures. No window texts. No file texts. No note texts. ${UNSEEN}`);
 // A private request that reached the provider would be said (stage 4 makes sure none does).
 assert.match(leftLine([ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', private: true })], at(26, 10)), /1 private request went to the provider\./);
 clock = at(26, 10) + 91 * 864e5;

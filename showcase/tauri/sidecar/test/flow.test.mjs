@@ -865,7 +865,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.match(side, /cancel: \(\) => send\(\{ type: 'listen_cancel' \}\),/);
   assert.match(side, /if \(interrupt && byVoice\) flow\.start\(\);/);
   assert.match(side, /\$\{b\.kind === 'morning' \? flow\.note\(\) : ''\}/, 'the morning briefing mentions what is pending');
-  assert.match(side, /\[\.\.\.notes\.tools, \.\.\.cal\.tools, \.\.\.flow\.tools, \.\.\.handover\.tools\]/); // feature 18: and the open items
+  assert.match(side, /\[\.\.\.notes\.tools, \.\.\.files\.tools, \.\.\.cal\.tools, \.\.\.flow\.tools, \.\.\.handover\.tools\]/); // feature 18: and the open items; feature 14: the file tools
   const shell = fs.readFileSync(new URL('../../src-tauri/src/voice.rs', import.meta.url), 'utf8');
   assert.match(shell, /"type": "voice_state", "state": msg\.get\("state"\), "window": msg\.get\("window"\)/); assert.match(shell, /"via": msg\.get\("via"\), "window": msg\.get\("window"\)/);
   const helper = fs.readFileSync(new URL('../../src-tauri/voice/main.swift', import.meta.url), 'utf8');
