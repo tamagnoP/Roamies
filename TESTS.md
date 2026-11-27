@@ -19,6 +19,7 @@ checks, fixed since. Everything else is below.
 | Features 25 and 31 | 8, 15, 16 | 8 needs a real call; 15 and 16 are new |
 | Features 23 and 32 | 1, 5, 6, 7, 8, 9, 10 | 1 and 5 failed and were fixed; 1, 6 and 7 changed; 8 needs your tunnel; 9 needs the shell; 10 is new |
 | Feature 14 | 1 to 14 | new; review accepted 2026-11-27 with three changes (13 and 14) |
+| Feature 40 | 1 to 12 | new, on `find-anywhere` (waiting for your review) |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -226,7 +227,7 @@ due 10 minutes from now; a to-do due tomorrow morning with no block. `speakNotic
     Click the second: the to-do moves to 10:00 on the later Friday, and the Log says so. No answer changes nothing,
     and the Log gets `Check-in: <title>: not yet`.
 
-## Group 2: features 23, 32, 14, 29 and 30
+## Group 2: features 23, 32, 14, 40, 29 and 30
 
 ### Features 23 and 32: the local model, private mode, the ledger (on `next` since `1854529`; 29 and 30 not built)
 
@@ -321,6 +322,49 @@ with `TOKEN=x`. In the vault, a note "Test plan" with a line `threshold 0.6`. No
 14. **Wi-Fi off, "Mark <a test to-do's whole title> as done."** You should see: the to-do marked done and the
     calendar's own line, at once, tagged "local"; in the activity log the `local_request` line has `"by":"code"` and
     `"steps":0` (no model call). The same with "Take <its title> off the calendar." once it has a block.
+
+### Feature 40: find a file anywhere and show its folder (on `find-anywhere`)
+
+**Before.** Build from `find-anywhere`, with the hands helper built by `build.rs` (the `find` and `reveal` commands
+are new). Make two throwaway files with a name nothing of yours has: `~/Desktop/roamies-findtest.txt` and
+`~/Documents/roamies-findtest-2026.txt`, and a folder `~/Desktop/Roamies Findtest`. If you have an external drive,
+`roamies-findtest-drive.txt` on it. Wait a minute so Spotlight has them. The defaults: `"findAnywhere": true`,
+`"findDrives": true`, `"findLeaveOut": []`, `limits.findMatches` 8.
+
+1. **Type "Find the file roamies findtest."**
+   You should see: a card "found 3: roamies findtest" (4 with the drive) listing each with its folder
+   (`~/Desktop`, `~/Documents`, the drive as "<drive name> › …"), the folder not among them (you asked for a file);
+   the line "I found 3; the first two are … . Click one to show it in Finder." No reply from Claude.
+2. **Click the second row.**
+   You should see: Finder comes forward with that file selected; nothing opens. "Showing … in Finder."
+3. **Say "Where is roamies-findtest dot txt?"**
+   You should see and hear: "I found 2 (3): … and …. Which one should I show?", only the count and two names said, no
+   folder. Say "the second one": that file shown in Finder, and "Showing it in Finder." said.
+4. **Say "Which folder is roamies findtest in?" and say nothing.**
+   You should see: the card with the files and the folder ("folder" beside its name); after the answer window runs
+   out the bubble goes, the card stays and nothing is shown in Finder. Click the folder's row: Finder shows the folder
+   selected in `~/Desktop`.
+5. **Type "What is on my calendar today?"**
+   You should see: the card goes; Claude answers as usual.
+6. **Type "Where is roamies-nothing-like-this.pdf?"**
+   You should see: "I found no file called "roamies-nothing-like-this.pdf". I look by name with Spotlight in your home
+   folder and on your drives; hidden folders, ~/Library and the folders you excluded from Spotlight … aren't
+   searched, …". No card.
+7. **Type "Where is my lab meeting?" and "Find my keys."**
+   You should see: Claude answers both as usual (not file searches).
+8. **Move `~/Documents/roamies-findtest-2026.txt` to the Trash, then type "Find the file roamies findtest" and click
+   that row if it is still listed** (Spotlight may still have it).
+   You should see: "… isn't there any more." Then empty that one from the Trash.
+9. **Wi-Fi off, and private mode:** "Keep this private.", then "Find the file roamies findtest."
+   You should see: the same card and line, at once; the local model isn't asked (no "local" reply).
+10. **Set `"findLeaveOut": ["~/Desktop"]`** and type "Find the file roamies findtest."
+    You should see: only the one in Documents (and on the drive). Set it back to `[]`.
+11. **Set `"findAnywhere": false`** and type "Where is roamies-findtest.txt?"
+    You should see: Claude answers (the sentence went the usual way). Set it back to `true`.
+12. **The record.** In `~/.gg/sidekick/logs`, the `find_file` and `find_pick` lines have numbers only (found, shown,
+    left out, milliseconds; the row and voice or click): no "findtest", no name and no folder. "What left the Mac
+    today?" shows no request for any of the searches. If macOS asked "Roamies would like to access files in your
+    Documents folder" (or Desktop, or a removable volume) at any point, note which and when.
 
 ## Group 3: features 19 and 21
 
