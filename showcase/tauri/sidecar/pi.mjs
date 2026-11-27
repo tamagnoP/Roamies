@@ -27,6 +27,7 @@ import { STAND_CAUGHT, STAND_FILL } from './standdown.mjs'; // feature 33: shown
 import { QUEUE_ORDER, WAITING_PHRASES, WHY } from './quiet.mjs'; // feature 31: shown in settings.default.json
 import { CHECK_AGAIN_TIMES, DONE_WORDS as CHECK_DONE_WORDS, NOT_YET_WORDS, SKIP_BEFORE_START_MINUTES, STILL_WORDS } from './checkin.mjs'; // feature 25: shown in settings.default.json
 import { localAddress } from './local.mjs'; // feature 23: the one address the local model may have
+import { GROUPS as MASK_GROUPS, LABELS as MASK_LABELS, MASK_NOTE, WEB_OFF, cleanMask, listedCount } from './mask.mjs'; // feature 34: masking
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -321,6 +322,7 @@ export const LIMITS = {
   noteEditLines: { default: 40, min: 5, max: 200, whole: true }, // feature 14: changed lines shown in a note edit's bubble before "and N more lines"
   findMatches: { default: 8, min: 1, max: 20, whole: true }, // feature 40: matches on the card of a search for a file anywhere
   findSeconds: { default: 3, min: 1, max: 15 }, // feature 40: how long Spotlight is waited for
+  maskEntries: { default: 500, min: 1, max: 5000, whole: true }, // feature 34: entries on the masking list that are used
 };
 // Feature 14: what may send a file's contents to a model ("fileContents"). ask: his own words in that request name
 // the file, or he said yes to a bubble naming exactly the files; free: any read at his request in that turn.
@@ -408,7 +410,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], masking: true, mask: Object.fromEntries(MASK_GROUPS.map((g) => [g, []])), measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -465,6 +467,8 @@ const CLEAN = {
   findAnywhere: when((v) => typeof v === 'boolean'), // feature 40: "where is <file>?" answered by code from Spotlight, on or off
   findDrives: when((v) => typeof v === 'boolean'), // feature 40: the local external drives searched too
   findLeaveOut: list, // feature 40: his own folders never searched
+  masking: when((v) => typeof v === 'boolean'), // feature 34: masking on or off (off: as if the list were empty)
+  mask: (v, d) => (isObj(v) ? [v, true] : [d, false]), // feature 34: the list; its entries are checked by mask.mjs (cleanMask), and the start-up bubble names those it can't use
   measurePageRebuild: when((v) => typeof v === 'boolean'),
   measureRequests: when((v) => typeof v === 'boolean'), // feature 23: timings and memory per request, numbers only, in the activity log
   voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
@@ -601,7 +605,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), masking: set.masking, mask: set.mask, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
@@ -995,7 +999,11 @@ export function createPi({ home = os.homedir(), userName = 'the user', say = () 
             if (box.docker) notes.push('Docker allowed: containers can reach folders outside this project.');
           }
         }
-        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: !kept && m === 'read' && !unconfined ? settings.autoSendReadOnly : 0, limits: settings.limits, kept }, signal);
+        // Feature 34: pi isn't masked. The bubble says how many words on the masking list the prompt holds (a count
+        // only), and such a hand-off is never sent by the countdown.
+        const listed = settings.masking === false ? 0 : listedCount(text, cleanMask(settings.mask, { maxEntries: settings.limits.maskEntries }).entries);
+        if (listed) notes.push(`⚠ pi isn't masked: ${listed} word${listed === 1 ? '' : 's'} on your masking list ${listed === 1 ? 'is' : 'are'} in this prompt.`);
+        const { ok, by } = await approve({ prompt: text, mode: m, project: settings.project, followUp: cont, dir: settings.dir, notes, auto: !kept && m === 'read' && !unconfined && !listed ? settings.autoSendReadOnly : 0, limits: settings.limits, kept }, signal);
         if (!ok) { log('pi_declined', { mode: m }); return { ok: false, mode: m, project: settings.project }; }
         start({ prompt: text, mode: m, project: settings.project, followUp: cont, settings, by, snap, box });
         return { ok: true, mode: m, project: settings.project };
@@ -1247,6 +1255,25 @@ export function codeReference() {
       picked: 'by voice in the answer window ("the second one", "number two", its name) or by a click on the card until it closes or the next request; the picked file is shown in Finder, selected, never opened; nothing happens without a pick',
       logged: 'counts only (find_file, find_pick): never what he said, a name or a folder',
       off: '"findAnywhere": false sends these sentences the usual way',
+    },
+    masking: {
+      what: 'the words in "mask" (people, organisations, projects, other) are swapped by code for stand-ins in everything sent to the provider, and swapped back in everything that comes back before it is shown, spoken, written or passed to a tool (mask.mjs); "masking": false, or an empty list, masks nothing',
+      standIns: Object.fromEntries(MASK_GROUPS.map((g) => [g, `${MASK_LABELS[g]} 1, ${MASK_LABELS[g]} 2, …`])),
+      numbers: 'per group; a word gets the next free number the first time it is listed and keeps it for good, even when moved, removed or listed again; a number is never given to another word; a spelling fix is a new word; kept in state.json "masks"',
+      entries: 'text, or { "name": "…", "also": ["other spellings, sharing its stand-in"], "exactCase": true }; at least 2 characters and a letter; no quotation mark or backslash; not a stand-in\'s own word; a word listed twice: the first is used; at most limits.maskEntries entries',
+      matching: ['case is not told apart (an entry with "exactCase" matches only as written)', 'accents and the kinds of apostrophe are not told apart', 'a word inside another never matches; _ - . / a digit or a lower-to-upper change is an edge ("AnaNotes", "acme.com")', '"\'s", "s" and "es" after a word stay outside its stand-in', 'the words of a longer entry may be split by spaces, a line break or a hyphen', 'the longest entry wins'],
+      case: 'a stand-in keeps the case of what it replaced ("acme" → "organisation 2", "ACME" → "ORGANISATION 2"); coming back, it becomes the form last sent for it, else the main form in its case; text that already looks like a stand-in in use ("Term 2") is sent spelled out ("Term two")',
+      sent: ['his requests, typed or spoken', 'requests the app makes (briefings, pi\'s gist, check-ins)', 'the instructions and the tool descriptions', 'the live state', 'the earlier conversation', 'tool results (notes, files, window texts, the calendar)', 'the fold, the memory pass and the handover\'s part two'],
+      back: ['the reply as it streams (a stand-in split between pieces is held until it is whole)', 'tool arguments, before the tool runs', 'the side calls\' answers, before they are kept', 'the conversation as saved'],
+      kept: 'the conversation, notes, the daily note, the handover and memory stay in his words on the Mac',
+      instruction: MASK_NOTE,
+      listChanged: 'read at each request: the agent is made again from the conversation masked with the new list; the claude program starts a fresh session and the transcript of the one it replaces is deleted; on the API route the full conversation is sent again (the cache misses once); reasoning made under the old list is dropped',
+      webSearch: `off while the list has words (API route); a request for one gets the app's line: "${WEB_OFF}"`,
+      pi: 'not masked: the Send bubble says how many listed words the prompt holds (a count only), and such a hand-off never goes on the countdown',
+      notMasked: ['pictures (screen captures, marked areas, photos)', 'what pi sends to its own provider', 'words not on the list', 'words misheard by the voice helper', 'what was sent before a word was on the list', 'the local model, which gets his words as they are, wherever local.address leads'],
+      limits: ['the model doesn\'t know who or what a stand-in is, so answers about them can be worse', 'details left around a stand-in can still point to who or what it is', 'a stand-in the model writes its own way ("Person One", "P1") is shown as written (counted in the log as mask_leftover)', 'his own text shaped like a stand-in comes back spelled out', 'the claude program keeps the masked transcripts of its sessions (30 days, its own setting); a side call\'s session is kept the same way'],
+      ledger: 'swaps (words swapped out in what a request newly sent) and swapsBack (stand-ins swapped back in what came back): numbers only',
+      logged: 'mask_list { entries, ignored } when the list changes, mask_changed when that makes the agent again, mask_leftover { count }, web_off: never a word, a stand-in or a group',
     },
     sendWords: [...SEND_WORDS],
     handsFreeSendWords: { edit: [...HANDS_FREE_SEND], optional: 'please', readOnly: 'the send words', rule: 'heard in an answer window, a hand-off that can edit is sent only on one of these, said alone' },

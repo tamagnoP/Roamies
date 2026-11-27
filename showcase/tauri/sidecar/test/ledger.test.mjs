@@ -9,7 +9,7 @@ import { KINDS, UNSEEN, countTools, createLedger, isLeftAsk, leftLine, ledgerLin
 const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
 // A line holds numbers, names and the kind; whatever else a caller passes is not kept.
 const l = ledgerLine({ t: at(26, 9), kind: 'request', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, marked: 1, screenshots: 1, windowTexts: 2, text: 'my secret request', prompt: 'x', said: 'y' });
-assert.deepEqual(l, { t: at(26, 9), kind: 'request', where: 'provider', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, captures: { marked: 1, screenshots: 1, photos: 0 }, windowTexts: 2, fileTexts: 0, fileChars: 0, noteTexts: 0, noteChars: 0, private: false });
+assert.deepEqual(l, { t: at(26, 9), kind: 'request', where: 'provider', provider: 'anthropic', model: 'claude-x', tokens: { new: 1200, cacheRead: 14000, cacheWrite: 0, out: 80 }, captures: { marked: 1, screenshots: 1, photos: 0 }, windowTexts: 2, fileTexts: 0, fileChars: 0, noteTexts: 0, noteChars: 0, swaps: 0, swapsBack: 0, private: false });
 assert.ok(!JSON.stringify(l).includes('secret'));
 assert.throws(() => ledgerLine({ kind: 'chat' }), /no ledger kind/);
 assert.deepEqual(KINDS, ['request', 'briefing', 'piSummary', 'fold', 'memory', 'handover', 'warmup', 'pi', 'own', 'signInFailed']);

@@ -380,6 +380,25 @@ const records = () => fs.readdirSync(path.join(dir, 'log')).sort().map((f) => fs
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(done, false); assert.match(asked.at(-1).placeholder, /^Send to pi\?  CAN EDIT/);
   lastResolve('yes'); await waiting; await settled();
+  // feature 34: pi isn't masked. A read-only hand-off whose prompt holds words on the masking list: the bubble gives
+  // their count (never the words), and the countdown is off, so it waits for Send
+  const base = { pi: fakePi, autoSendReadOnly: 0.05, progressSeconds: 0.05, routines: { 'Start a research session': ['open Zotero', 'ask pi to read TODO.md'], bad: [] }, briefings: { morning: '09:00', evening: '18:30' } };
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ ...base, mask: { people: ['Zorbina Quell'], projects: ['Halyard'] } }));
+  let maskedSent = false; answer = never;
+  const masked = tool('ask_pi').execute({ prompt: 'Ask Zorbina Quell about the Halyard data and the halyard notes', mode: 'read' }, {}).then(() => { maskedSent = true; }, () => {});
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(maskedSent, false, 'well past the countdown: nothing was sent');
+  assert.match(asked.at(-1).placeholder, /^Send to pi\?  Read only · in [^\n]*\n(?:[^\n]*\n)*⚠ pi isn't masked: 3 words on your masking list are in this prompt\.\n/);
+  assert.ok(!/Asking pi in/.test(asked.at(-1).placeholder)); assert.deepEqual(asked.at(-1).choices, ['Send', "Don't send"]);
+  lastResolve(null); await masked;
+  // a prompt with none of them, or masking off: the countdown as before, and no count
+  answer = never;
+  await tool('ask_pi').execute({ prompt: 'auto five', mode: 'read' }, {}); await settled();
+  assert.match(asked.at(-1).placeholder, /^Asking pi in 0\.05 s/); assert.ok(!/isn't masked/.test(asked.at(-1).placeholder));
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ ...base, masking: false, mask: { people: ['Zorbina Quell'] } }));
+  await tool('ask_pi').execute({ prompt: 'auto six for Zorbina Quell', mode: 'read' }, {}); await settled();
+  assert.match(asked.at(-1).placeholder, /^Asking pi in 0\.05 s/); assert.ok(!/isn't masked/.test(asked.at(-1).placeholder));
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(base));
   // a long task says so now and then (spoken only)
   answer = 'yes'; told.length = 0;
   await tool('ask_pi').execute({ prompt: 'HANG', mode: 'edit' }, {});

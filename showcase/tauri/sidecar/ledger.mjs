@@ -4,7 +4,8 @@
 // sign-in), where it went (the provider and which one, or this Mac), the model, its tokens (new,
 // read from the cache, written to the cache, answered), how many screen captures it carried (a marked area,
 // take_screenshot, see_photo) and how many window texts (read_window), the file texts and note texts it carried with
-// their characters (feature 14: read_file and search_files; read_note and search_notes), and whether it was private.
+// their characters (feature 14: read_file and search_files; read_note and search_notes), how many words were swapped
+// for stand-ins and back (feature 34: swaps, swapsBack; counts only), and whether it was private.
 // Never any of its content. "What left the Mac today?" is answered from it by code (leftLine) and never sent to a model.
 import fs from 'node:fs';
 import { only, plainNum, unfilled } from './answers.mjs';
@@ -33,10 +34,10 @@ export function shortModel(m) {
 }
 const n = (x) => (Number.isFinite(+x) && +x > 0 ? Math.round(+x) : 0);
 /** One ledger line from what a caller knows: only numbers, names and the kind; anything else is dropped. */
-export function ledgerLine({ t = Date.now(), kind, where = 'provider', provider = '', model = '', tokens = {}, marked = 0, screenshots = 0, photos = 0, windowTexts = 0, fileTexts = 0, fileChars = 0, noteTexts = 0, noteChars = 0, private: priv = false }) {
+export function ledgerLine({ t = Date.now(), kind, where = 'provider', provider = '', model = '', tokens = {}, marked = 0, screenshots = 0, photos = 0, windowTexts = 0, fileTexts = 0, fileChars = 0, noteTexts = 0, noteChars = 0, swaps = 0, swapsBack = 0, private: priv = false }) {
   if (!KINDS.includes(kind)) throw new Error(`no ledger kind ${kind}`);
   const tok = { new: n(tokens.new), cacheRead: n(tokens.cacheRead), cacheWrite: n(tokens.cacheWrite), out: n(tokens.out) };
-  return { t, kind, where: where === 'mac' ? 'mac' : 'provider', provider: String(provider).slice(0, 40), model: shortModel(model).slice(0, 80), tokens: tok, captures: { marked: n(marked), screenshots: n(screenshots), photos: n(photos) }, windowTexts: n(windowTexts), fileTexts: n(fileTexts), fileChars: n(fileChars), noteTexts: n(noteTexts), noteChars: n(noteChars), private: !!priv };
+  return { t, kind, where: where === 'mac' ? 'mac' : 'provider', provider: String(provider).slice(0, 40), model: shortModel(model).slice(0, 80), tokens: tok, captures: { marked: n(marked), screenshots: n(screenshots), photos: n(photos) }, windowTexts: n(windowTexts), fileTexts: n(fileTexts), fileChars: n(fileChars), noteTexts: n(noteTexts), noteChars: n(noteChars), swaps: n(swaps), swapsBack: n(swapsBack), private: !!priv };
 }
 /** The captures and window texts in a request's tool calls (names only). → { screenshots, photos, windowTexts } */
 export function countTools(names = []) {
@@ -69,6 +70,9 @@ export function leftLine(lines, now = Date.now()) {
     parts.push(caps.length ? `Screen captures: ${caps.join(', ')}.` : 'No screen captures.');
     parts.push(wins ? `Window texts: ${fmt(wins)}.` : 'No window texts.');
     parts.push(texts(out, 'file', 'File texts', 'No file texts.'), texts(out, 'note', 'Note texts', 'No note texts.'));
+    // Feature 34: the masking list's swaps, counted, never the words; nothing said when none were made.
+    const swaps = sumOf(out, 'swaps'), back = sumOf(out, 'swapsBack'), masked = out.filter((l) => l.swaps > 0).length;
+    if (swaps || back) parts.push(`Private words swapped for stand-ins: ${plural(swaps, 'time')} in ${plural(masked, 'request')} (${fmt(back)} swapped back).`);
     if (priv) parts.push(`${plural(priv, 'private request')} went to the provider.`);
   } else parts.push(failed.length ? 'No request to the provider was answered today.' : 'Nothing went to the provider today.');
   if (failed.length) parts.push(`${plural(failed.length, 'request')} to ${[...new Set(failed.map((l) => l.provider || 'the provider'))].join(' and ')} failed at sign-in and got no answer; what ${failed.length === 1 ? 'it' : 'they'} sent before failing, if anything, isn't known.`);
