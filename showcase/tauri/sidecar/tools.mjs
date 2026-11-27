@@ -17,9 +17,10 @@ const HOME = os.homedir();
 export const expand = (p) => path.resolve(String(p).replace(/^~(?=$|\/|\\)/, HOME));
 const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n…(${s.length - n} more characters)` : s);
 // windowsHide: no console window flashing up for each command or screenshot on Windows.
-// onLine: called with each line of stderr as it arrives (the hands helper's live progress).
-export const run = (cmd, args, { onLine, ...opts } = {}) => new Promise((res) => {
+// onLine: called with each line of stderr as it arrives (the hands helper's live progress). input: written to its stdin.
+export const run = (cmd, args, { onLine, input, ...opts } = {}) => new Promise((res) => {
   const child = execFile(cmd, args, { maxBuffer: 8 << 20, timeout: 60_000, windowsHide: true, ...opts }, (err, stdout, stderr) => res({ err, stdout: String(stdout), stderr: String(stderr) }));
+  if (input != null) { child.stdin?.on('error', () => {}); child.stdin?.end(input); }
   if (!onLine || !child.stderr) return;
   let buf = '';
   child.stderr.on('data', (d) => {
@@ -123,6 +124,15 @@ const actionsOff = `File edits and commands are switched off. Tell the user to t
 // macOS, hands-win on Windows; same commands and JSON). A .mjs one (a test's fake) runs on this Node.
 const HANDS = process.env.ROAMIES_HANDS || '';
 const runHands = (args, opts) => (HANDS.endsWith('.mjs') ? run(process.execPath, [HANDS, ...args], opts) : run(HANDS, args, opts));
+/** Feature 40: one hands command with its request on stdin (never in its arguments); → its JSON, or throws. Null when
+ *  there is no helper (not the Roamies app). */
+export const handsWithInput = HANDS ? async (args, input, timeout) => {
+  const r = await runHands(args, { input, timeout });
+  let res;
+  try { res = JSON.parse(r.stdout.trim().split('\n').pop() || '{}'); } catch { throw new Error('the hands helper gave no answer'); }
+  if (res.ok === false) throw new Error(res.error || 'the hands helper failed');
+  return res;
+} : null;
 const STALE_ID = 'The page changed since read_window, so that id is out of date. Call read_window again and use the new ids.';
 // An app named in read_window or act_in_app that isn't open: open it (with the open tool's safety check) and wait
 // up to 6 s for its window. True when it's there. Only plain app names, never paths or links.

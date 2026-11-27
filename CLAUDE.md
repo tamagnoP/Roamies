@@ -34,8 +34,12 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    typed or spoke, in the current project and the folders listed under `projects` and `readOnly`, never on the
    sandbox's blocked list, and never writes, moves or deletes them (`files.mjs`); file work is handed to pi (`pi.mjs`). By
    default (`fileContents` "ask") a file's contents go to a model only when the owner's own words in that request name
-   the file, or he has said yes to a bubble naming exactly the files to be read. It starts only its own fixed
-   helpers: the macOS voice, and the Python named in `settings.json` with the voice script shipped in the app, with
+   the file, or he has said yes to a bubble naming exactly the files to be read. It looks up file and folder names,
+   never their contents, with Spotlight in the home folder and on local external drives only when the owner's words
+   in a request he typed or spoke ask where a file or folder is (`findany.mjs`, feature 40); it sends no name or path
+   to any model, and leaves out the sandbox's blocked list, its own folders and ~/Library. It starts only its own fixed
+   helpers: the macOS voice, the hands helper (`roamies-hands`, one run per command; feature 40's `find` and `reveal`
+   take their request on stdin), and the Python named in `settings.json` with the voice script shipped in the app, with
    text going in on a pipe only. That Python is used only if `kokoro.python` is an absolute path to an existing
    executable; it is started directly, never through a shell, with a fixed argument list, under `sandbox-exec` with
    network denied (`kokorovoice.mjs`). The voice script never writes or logs the text it is given, and its error
@@ -59,6 +63,8 @@ These are the reasons the fork exists. A change that weakens one needs the owner
 4. **An undo snapshot is taken before any hand-off that can edit** (git ref under `refs/roamies/`).
 5. **Apps on the never-look list are never captured, read or worked in** (`guard.mjs`), and the check fails closed.
 6. **`open` takes an app name only; `act_in_app` works the front app only.** Both limits live in `gateTools`.
+   Showing a file in Finder (feature 40) is not `open`: only a file from the card that the owner picked, shown
+   selected in Finder and never opened (`findany.mjs`, checked again by `checkReveal` in `safety.mjs`).
 7. **pi is never started in the folder that holds `settings.json`**, or in any folder containing it.
 8. **The microphone opens by itself only in an answer window** (`flow.mjs`): after the overlay has reported that
    Roamies has finished speaking, for `limits.answerWindowSeconds`, closed by the voice helper's own stop, the

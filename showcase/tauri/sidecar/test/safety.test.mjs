@@ -1,6 +1,6 @@
 // The safety rules: what runs on its own, what needs a yes, what never runs. Run: npm test
 import assert from 'node:assert/strict';
-import { ASK, BLOCK, SAFE, checkDrawAction, checkLink, checkOpen, checkRead, checkUrl, checkWrite, classifyCommand, isPrivateAddress, isYes, splitCommand } from '../safety.mjs';
+import { ASK, BLOCK, SAFE, checkDrawAction, checkLink, checkOpen, checkRead, checkReveal, checkUrl, checkWrite, classifyCommand, isPrivateAddress, isYes, splitCommand } from '../safety.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import nodePath from 'node:path';
@@ -59,6 +59,15 @@ cases('read', (p) => checkRead(p, HOME), [
   ['~/.env.example.md', SAFE], ['~/environment.txt', SAFE],
 ]);
 assert.equal(checkRead('~', HOME, { recursive: true }).level, BLOCK, 'searching all of home is blocked');
+// Feature 40: what may be shown in Finder from the card of found files (selected, never opened)
+cases('reveal', (p) => checkReveal(p, HOME), [
+  ['/Users/ken/Documents/Finance/budget.xlsx', SAFE], ['/Users/ken/Desktop/Thesis', SAFE], ['/Volumes/Backup/Finance/budget.xlsx', SAFE], ['/Users/ken/Documents/Talk.key', BLOCK],
+  ['~/Documents/budget.xlsx', BLOCK], ['Documents/budget.xlsx', BLOCK], ['/Users/ken', BLOCK], ['/Volumes/Backup', BLOCK], ['/Applications/Safari.app', BLOCK], ['/etc/hosts', BLOCK], ['/tmp/x.txt', BLOCK],
+  ['/Users/ken/Library/Mobile Documents/com~apple~CloudDocs/budget.xlsx', BLOCK], ['/Users/ken/Library', BLOCK], ['/Users/ken/.Trash/budget.xlsx', BLOCK], ['/Users/ken/.ssh/id_ed25519', BLOCK],
+  ['/Volumes/Backup/.Trashes/501/x', BLOCK], ['/Users/ken/Projects/app/.env', BLOCK], ['/Users/ken/Documents/id_rsa', BLOCK], ['/Users/ken/Documents/prod.pem', BLOCK], ['/Users/ken/Documents/../../other/x.txt', BLOCK],
+]);
+assert.equal(checkReveal('/Users/ken/Documents/Talk.key', HOME, { keynote: true }).level, SAFE, 'a Keynote presentation, as Spotlight says it is');
+assert.equal(checkReveal('/Users/ken/.ssh/server.key', HOME, { keynote: true }).level, BLOCK, 'never a hidden one');
 assert.equal(checkRead('/', HOME, { recursive: true }).level, BLOCK, 'searching the whole disk is blocked');
 assert.equal(checkRead('~/projects', HOME, { recursive: true }).level, SAFE, 'searching a project folder is fine');
 assert.equal(checkRead('~', HOME).level, SAFE, 'listing home (not recursing) is fine');

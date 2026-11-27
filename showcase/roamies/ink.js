@@ -2005,6 +2005,76 @@
     if (remOpen()) remRelayout();
   }
 
+  // ---------------------------------------------------------------- the card of found files (feature 40)
+  // The sidecar's matches for "where is …?" ({ id, total, said, more, rows: [{ n, name, folder, where }] }): each row
+  // its number, name (folders marked) and folder. A click on a row picks it (found_pick); × or Esc closes it
+  // (found_closed). It stays until then or until the next request ({ close: true }); it never times out.
+  const FOUND_W = 380, FOUND_PART = 'found';
+  const FOUND = { m: null, id: 0 };
+  const foundOpen = () => !!FOUND.m && FOUND.m.alive && !FOUND.m.leaving;
+  function foundLayout(msg) {
+    const rows = [], tw = FOUND_W - 44 - 16, all = msg.rows ?? [];
+    // As many rows as the screen has room for; the rest are counted in "and N more" (never a row out of sight).
+    const room = Math.max(1, Math.floor((maxCardH() - 26 - 8 - 26 - 10) / 42)), shown = all.slice(0, room), more = (msg.more > 0 ? msg.more : 0) + all.length - shown.length;
+    let yy = 26 + 8;
+    for (const r of shown) {
+      const tag = r.folder ? 'folder' : '', tagW = tag ? textW(tag, SMALL) + 10 : 0;
+      rows.push({ n: r.n, name: ellipsize(r.name, tw - tagW, BODY), tag, where: ellipsize(r.where, tw, SMALL), y: yy, h: 42 });
+      yy += 42;
+    }
+    if (more > 0) { rows.push({ more: `and ${more} more`, y: yy, h: 26 }); yy += 26; }
+    return { rows, h: yy + 10, head: ellipsize(`found ${msg.total}: ${msg.said}`, FOUND_W - 90, `500 10px ${MONO}`) };
+  }
+  function foundDraw(b, l, t) {
+    const x = this.x, y = this.y, w = FOUND_W, h = this.h, cw = this.ready ? w : this.cw, ch = this.ready ? h : this.ch;
+    if (cw < 4) return;
+    chrome(b, x, y, cw, ch);
+    if (!this.ready) return;
+    b.fillStyle = 'rgba(120,255,226,0.06)'; b.fillRect(x + 2, y + 2, w - 4, 24);
+    b.fillStyle = DEEP; b.fillRect(x + 2, y + 26, w - 4, 1);
+    [0, 1].forEach((k) => { b.fillStyle = k ? DEEP : ACC; b.fillRect(x + 12 + k * 12, y + 11, 5, 5); });
+    typed(b, this.head, x + w / 2, y + 17, `500 10px ${MONO}`, DIM, (t - this.opened) / 0.4, { anchor: 'middle' });
+    const cx = x + w - 18, cyy = y + 13;
+    b.fillStyle = this.hoverClose ? HOT : DIM; for (let k = -3; k <= 3; k++) { b.fillRect(cx + k - 1, cyy + k - 1, 2, 2); b.fillRect(cx + k - 1, cyy - k - 1, 2, 2); }
+    b.save(); b.beginPath(); b.rect(x + 2, y + 27, w - 4, h - 29); b.clip();
+    try {
+      this.rows.forEach((r, k) => {
+        const ry = y + r.y, a = t - this.opened - 0.1 - k * 0.06;
+        if (a <= 0) return;
+        if (r.more) { typed(b, r.more, x + 44, ry + 17, SMALL, DIM, a / 0.4); return; }
+        if (this.hoverId === r.n) { b.fillStyle = rgba(ACC, 0.07); b.fillRect(x + 4, ry, w - 8, r.h); }
+        typed(b, String(r.n), x + 24, ry + 18, SMALL, ACC, a / 0.2, { anchor: 'end' });
+        const nw = typed(b, r.name, x + 44, ry + 18, BODY, TEXT, a / 0.4);
+        if (r.tag) typed(b, r.tag, x + 44 + nw + 10, ry + 18, SMALL, DIM, (a - 0.1) / 0.3);
+        typed(b, r.where, x + 44, ry + 34, SMALL, DIM, (a - 0.1) / 0.4);
+      });
+    } finally { b.restore(); }
+  }
+  async function foundShow(msg) {
+    if (foundOpen()) fadeOut([FOUND.m]);
+    FOUND.id = msg.id;
+    await fontsReady();
+    if (FOUND.id !== msg.id) return;
+    const L = foundLayout(msg), [x, y] = place(FOUND_W, L.h, FOUND_PART);
+    const c = FOUND.m = add({ z: 2, part: FOUND_PART, local: true, card: true, kind: 'found', x, y, cw: 0, ch: 0, p: 1, ready: false, opened: Infinity, ...L,
+      box() { return [this.x - 4, this.y - 4, FOUND_W + 8, this.h + 14]; },
+      draw: foundDraw,
+      hits() {
+        const { x: cx, y: cy } = this;
+        return [...this.rows.filter((r) => r.n).map((r) => ({ rect: [cx, cy + r.y, FOUND_W, r.h], kind: 'found', id: r.n, n: r.n, part: FOUND_PART })),
+          { rect: [cx + FOUND_W - 28, cy + 2, 26, 22], kind: 'close', part: FOUND_PART }, { rect: [cx, cy, FOUND_W - 30, 26], kind: 'drag', part: FOUND_PART }, { rect: [cx, cy, FOUND_W, this.h], kind: 'card', part: FOUND_PART }];
+      },
+    });
+    sfx('page');
+    await tween(0.35, (u) => { const e = ease(u); c.cw = FOUND_W * e; c.ch = c.h * e; });
+    c.ready = true; c.opened = now();
+    touch(2 + c.rows.length * 0.08); syncClearAll();
+  }
+  function found(msg = {}) {
+    if (msg.close) { FOUND.id = 0; if (foundOpen()) fadeOut([FOUND.m]); return; }
+    if (Array.isArray(msg.rows) && msg.rows.length) foundShow(msg);
+  }
+
   // ---------------------------------------------------------------- hit areas: buttons, card close, card drag, links
   let drag = null, hovered = null;
   const hitAt = (x, y) => {
@@ -2017,17 +2087,18 @@
   const setHover = (h) => {
     const m = h?.m ?? null;
     if (hovered && hovered !== m) { hovered.hover = false; hovered.hoverClose = false; hovered.hoverId = null; hovered.setHover?.(false); }
-    if (m) { m.hover = h.kind === 'button' || h.kind === 'link' || h.kind === 'clearall'; m.hoverClose = h.kind === 'close'; m.hoverId = h.kind === 'tick' || h.kind === 'pick' ? h.id : null; m.setHover?.(h.kind === 'button'); }
+    if (m) { m.hover = h.kind === 'button' || h.kind === 'link' || h.kind === 'clearall'; m.hoverClose = h.kind === 'close'; m.hoverId = h.kind === 'tick' || h.kind === 'pick' || h.kind === 'found' ? h.id : null; m.setHover?.(h.kind === 'button'); }
     if (hovered !== m || m) touch(0.2);
     hovered = m;
-    document.documentElement.style.cursor = h && (h.kind === 'button' || h.kind === 'close' || h.kind === 'link' || h.kind === 'clearall' || h.kind === 'tick' || h.kind === 'pick') ? 'pointer' : h?.kind === 'drag' ? 'grab' : 'default';
+    document.documentElement.style.cursor = h && (h.kind === 'button' || h.kind === 'close' || h.kind === 'link' || h.kind === 'clearall' || h.kind === 'tick' || h.kind === 'pick' || h.kind === 'found') ? 'pointer' : h?.kind === 'drag' ? 'grab' : 'default';
   };
   const ours = (e) => !!hitAt(e.clientX, e.clientY) || !!drag;
   addEventListener('pointerdown', (e) => {
     const h = hitAt(e.clientX, e.clientY);
     if (!h) return;
     e.stopPropagation(); e.preventDefault();
-    if (h.kind === 'close') { sfx('tick'); if (!h.m.local) R.ink.send?.({ type: 'ink_closed', part: h.part }); fadeOut(partMarks(h.part)); }
+    if (h.kind === 'close') { sfx('tick'); if (!h.m.local) R.ink.send?.({ type: 'ink_closed', part: h.part }); if (h.part === FOUND_PART) R.ink.send?.({ type: 'found_closed', id: FOUND.id }); fadeOut(partMarks(h.part)); }
+    else if (h.kind === 'found') { sfx('pip'); touch(0.3); R.ink.send?.({ type: 'found_pick', id: FOUND.id, n: h.n }); }
     else if (h.kind === 'tick') { sfx(h.done ? 'tick' : 'pip'); REM.until = Math.max(REM.until, now() + 4); R.ink.send?.({ type: 'list_toggle', id: h.id }); }
     else if (h.kind === 'button') { h.m.down = now(); h.m.press?.(); sfx('pip'); touch(0.3); R.ink.send?.({ type: 'ink_action', part: h.part }); }
     else if (h.kind === 'link') { sfx('pip'); R.ink.send?.({ type: 'open_link', url: h.url }); }
@@ -2083,6 +2154,8 @@
     // The reminders list from the sidecar: { today, later, seconds, flash, toggle }. seconds > 0 opens or extends it;
     // 0 only updates it if it's open; toggle closes it if it's open.
     reminders,
+    // Feature 40: the card of found files from the sidecar: { id, total, said, more, rows } opens it; { close: true } closes it.
+    found,
     get reminding() { return remOpen(); },
     get busy() { return G.playing || marks.length > 0; },
     get playing() { return G.playing; },

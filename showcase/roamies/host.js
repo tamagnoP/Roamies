@@ -468,6 +468,7 @@
     else if (m.kind === 'agent') onAgent(m.e);
     else if (m.kind === 'voice') onVoice(m);
     else if (m.kind === 'list') Roamie.ink?.reminders(m);
+    else if (m.kind === 'found') Roamie.ink?.found(m); // feature 40: the card of found files
   };
 
   // ---------- local-only build (feature 33): stand down ----------

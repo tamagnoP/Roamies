@@ -108,6 +108,23 @@ export function checkRead(p, home, { recursive = false } = {}) {
   return { ...verdict(SAFE), path: abs };
 }
 
+/** Feature 40: a file the owner picked from the card of found files, shown in Finder (selected, never opened). Only an
+ *  absolute path in the home folder (not ~/Library) or on a drive under /Volumes, with no hidden part, and nothing
+ *  checkRead refuses (keynote: Spotlight says it is a Keynote presentation, whose name ends in .key like a key file's).
+ *  Returns { level, reason, path }. */
+export function checkReveal(p, home, { keynote = false } = {}) {
+  home = slash(home);
+  const s = slash(p);
+  if (!isAbs(s) || s.startsWith('~')) return { ...verdict(BLOCK, 'Only a full path is shown in Finder.'), path: s };
+  const abs = norm(s, home), all = bothOf(abs);
+  const placed = (a) => (a.startsWith(home + '/') && !(a === `${home}/Library` || a.startsWith(`${home}/Library/`))) || /^\/Volumes\/[^/]+\/./.test(a);
+  if (!all.every(placed)) return { ...verdict(BLOCK, `${p} isn't in the home folder or on a drive, so I don't show it.`), path: abs };
+  if (all.some((a) => rel(a, home).split('/').some((x) => x.startsWith('.')))) return { ...verdict(BLOCK, `${p} is hidden, so I don't show it.`), path: abs };
+  const c = checkRead(abs, home);
+  if (c.level === BLOCK && !(keynote && /\.key$/i.test(abs))) return { ...c, path: abs };
+  return { ...verdict(SAFE), path: abs };
+}
+
 /** write_file. Existing files need a yes; secrets, startup files and system folders never. */
 export function checkWrite(p, home, { exists = false } = {}) {
   home = slash(home);

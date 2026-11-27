@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 const ROOT = new URL('../../../', import.meta.url); // showcase/
 /** The overlay page with stand-ins for the browser and the shell. Time only moves in tick(). */
-export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80, right: 0, ox: 0, oy: 0 } } = {}) {
+export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80, right: 0, ox: 0, oy: 0 }, ink = false } = {}) {
   let clock = 1000, tid = 1, frames = 0;
   const rafs = [], timers = [], listeners = {}, sent = [], invoked = [], made = [];
   // Something that can be read, called and built without complaint: the parts of the browser nothing here depends on.
@@ -50,7 +50,7 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
     dispatchEvent: (e) => { for (const f of listeners[e.type] ?? []) f(e); },
     Event: class { constructor(t) { this.type = t; } }, Image: class {}, Path2D: class { moveTo() {} lineTo() {} closePath() {} rect() {} arc() {} },
     location: { search: '' }, navigator: { platform: 'MacIntel', userAgent: '' },
-    document: { createElement: el, addEventListener() {}, body: el('body'), documentElement: el('html'), head: el('head'), fonts: { load() {} }, querySelector: () => null },
+    document: { createElement: el, addEventListener() {}, body: el('body'), documentElement: el('html'), head: el('head'), fonts: { load() {} }, querySelector: () => null, getElementById: () => null },
     // the shell: every call is noted, messages for the sidecar are kept apart
     __TAURI__: { core: { invoke: (cmd, args) => { invoked.push([cmd, args]); if (cmd === 'sidecar_send') sent.push(args.msg); return Promise.resolve(true); } } },
   };
@@ -61,6 +61,7 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
   for (const f of ['core.js', 'measure.js', 'glass.js', 'home.js', 'agent.js', 'agent-tools.js', 'jarvis.js', 'people.js', '10-dither.js', '12-sidekick.js']) run(f);
   win.Roamie.setSafe(safe);
   win.Roamie.bootDesktop(canvas);
+  if (ink) for (const f of ['ink3d.js', 'world.js', 'ink.js', 'pen.js']) run(f); // the drawings and cards (feature 40's card of found files)
   run('host.js');
   const R = win.Roamie, creature = R.tiles.find((t) => t.creature.agent).creature;
   /** Lets `sec` seconds pass at 60 frames a second. Returns how many frames the page asked for and ran. */

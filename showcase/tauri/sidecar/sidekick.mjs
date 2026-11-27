@@ -6,7 +6,7 @@
 // out: {type:'menu', items} {type:'ui', msg} {type:'overlays', ids}
 import { Agent } from '@kenkaiiii/gg-agent';
 import { ClaudeCodeAgent, SDK_TOOL_SHADOWED, closeSpare, isToolShadowWarning } from './claudecode.mjs';
-import { SAFE, checkDrawAction, checkLink } from './safety.mjs';
+import { SAFE, checkDrawAction, checkLink, checkReveal } from './safety.mjs';
 import { agentEvents, stallWatch } from './agentstream.mjs';
 import {
   AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
@@ -31,7 +31,7 @@ import { createLiveBlocks, stripLive } from './live.mjs';
 import { foldInput, foldPrompt, memoryInput, memoryPrompt, oneShot, parseBrain, transcript } from './brain.mjs';
 import { EMOTES, EchoFilter, ReplyStream } from './reply.mjs';
 import { downloadModel, isReady, modelDir, sizeLabel, totalBytes } from './voicemodel.mjs';
-import { createTools, expand, fitImage, frontLine, imageBlock, run as runHelper, winOpen } from './tools.mjs'; // Local-only build: frontLine and run, for whereFront
+import { createTools, expand, fitImage, frontLine, handsWithInput, imageBlock, run as runHelper, winOpen } from './tools.mjs'; // Local-only build: frontLine and run, for whereFront
 import { describeMarks } from './marks.mjs';
 import { faviconFor } from './draw.mjs';
 import { QUESTIONS, openNote, answerTurn, wantsSkip, endsChat, splitTurn, plain, stripNote, tourBeats, goalFrom, showcaseBeats } from './intro.mjs';
@@ -44,6 +44,7 @@ import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTr
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
 import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
 import { SHORT, leanTools } from './lean.mjs';
+import { createFind, foundLine, nothingLine, pickRow, WHICH_FILE } from './findany.mjs'; // Local-only build (feature 40): find a file anywhere, by code alone
 import { countTools, createLedger, isLeftAsk, signInFailed } from './ledger.mjs'; // Local-only build (feature 32): the ledger
 import { createLocalRoute } from './localroute.mjs'; // Local-only build (feature 23): requests to the local model
 import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, off by default
@@ -760,6 +761,55 @@ async function quietGive(by = 'exchange') {
 }
 /** "anything waiting?", said or typed alone: answered by the app, never by the model. */
 /** Feature 32: "what left the Mac today?", worded by code from the ledger; never sent to a model. */
+// Local-only build (feature 40): "where is budget.xlsx?" and the like, answered by code alone from Spotlight (findany.mjs).
+// Nothing of it goes to a model, the conversation, the activity record or the daily note; the log gets counts only.
+// The card stays until it is closed or the next request; a pick (said in the answer window, or a click on the card)
+// shows that file in Finder, selected, and opens nothing.
+const finder = createFind({ home: HOME, hands: handsWithInput });
+let found = null, foundSeq = 0;
+const personaName = () => personaNow()?.name ?? '';
+function foundDrop() {
+  if (!found) return;
+  found.ctl.abort();
+  found = null;
+  ui({ kind: 'found', close: true });
+}
+/** A line shown, and said in a spoken exchange in its own words (a picked name is shown, not said). */
+const foundTell = (shown, spoken, mood) => { say(shown, mood); if (flow.spoken()) voiceLine(spoken); };
+async function findAsked(q) {
+  foundDrop();
+  if (!q.words.length) { logLine('find_file', { noName: true }); aloud(WHICH_FILE, 'happy'); flow.settle(); return; }
+  const r = await finder.search(q);
+  logLine('find_file', { found: r.total, shown: r.rows.length, leftOut: r.leftOut, otherKind: r.otherKind ?? 0, ms: r.ms, drives: r.drives, timedOut: r.timedOut, ...(r.failed ? { failed: true } : {}) });
+  if (r.failed) { aloud(r.failed, 'concerned'); flow.settle(); return; }
+  const s = loadSettings(HOME);
+  if (!r.rows.length) { aloud(nothingLine(q, { timedOut: r.timedOut, seconds: s.limits.findSeconds, drives: s.findDrives }), 'concerned'); flow.settle(); return; }
+  const me = found = { rows: r.rows, ctl: new AbortController(), id: ++foundSeq };
+  ui({ kind: 'found', id: me.id, total: r.total, said: q.said, more: r.total - r.rows.length, rows: r.rows.map((x, i) => ({ n: i + 1, name: x.name, folder: x.folder, where: x.where })) });
+  if (!flow.spoken()) { say(foundLine(r.rows, r.total), 'happy'); flow.settle(); return; }
+  const line = foundLine(r.rows, r.total, { voiced: true }), one = r.rows.length === 1;
+  let a;
+  try {
+    a = await answers.ask({ placeholder: line, spoken: line, choices: one ? ['Show it', 'No'] : ['Show the first', 'None'], clicks: [{ kind: 'pick', row: 0 }, { kind: 'none' }],
+      hint: one ? '"yes" or "no"' : '"the second one", a number, or its name', parse: (t) => pickRow(t, r.rows, { persona: personaName() }) }, me.ctl.signal);
+  } catch (e) { if (e?.name === 'Unanswered') return; throw e; } // no answer: the card stays, and nothing is shown in Finder
+  if (found !== me || !a) return; // closed, or picked by a click meanwhile
+  if (a.kind === 'pick') await foundPick(a.row, 'voice');
+  else { logLine('find_pick', { row: null, by: 'voice' }); foundDrop(); }
+}
+/** The owner picked a row (from 0): that file is shown in Finder, selected. Nothing is opened. */
+async function foundPick(row, by) {
+  const me = found, f = me?.rows[row];
+  if (!f) return;
+  if (by === 'click') me.ctl.abort(); // the question bubble, if one is open, goes: the click answered it
+  logLine('find_pick', { row: row + 1, by });
+  if (checkReveal(f.path, HOME, { keynote: !!f.keynote }).level !== SAFE) { foundTell(`I don't show ${f.name} in Finder.`, 'I don\'t show that one.', 'concerned'); return; } // safety.mjs, a second time
+  let r = null;
+  try { r = await handsWithInput(['reveal'], JSON.stringify({ path: f.path }), 10_000); } catch { /* said below */ }
+  if (!r) foundTell(`Finder couldn't be asked to show ${f.name}.`, 'Finder couldn\'t be asked to show it.', 'concerned');
+  else if (r.gone) foundTell(`${f.name} isn't there any more.`, 'It isn\'t there any more.', 'concerned');
+  else foundTell(`Showing ${f.name} in Finder.`, 'Showing it in Finder.', 'happy');
+}
 function leftAsked() {
   logLine('left_asked', {});
   aloud(ledger.left(), 'happy');
@@ -2232,7 +2282,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
   // The stand-down phrase and a closing phrase ("thanks") typed alone are taken as said (the owner, 2026-11-26).
   if (text?.trim() && isStandDown(text, ...standPhrase())) { standDownNow('typed'); return; }
-  if (text?.trim()) { standUp('typed'); if (!pi.bubble() && !answers.open() && flow.closing(text)) return; if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
+  if (text?.trim()) { standUp('typed'); if (!pi.bubble() && !answers.open() && flow.closing(text)) return; foundDrop(); const fq = finder.ask(text, personaName()); if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else if (fq) findAsked(fq).catch((e) => console.error('find', e?.name ?? 'error')); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
 }
 function onWriteTap() {
   if (onboarding) return;
@@ -2352,12 +2402,16 @@ async function onSpoken(text, area, window = null) {
   // it, anything else leaves it open. Either way no reply follows these words, so the shell is told they were dealt
   // with ("heard"): the listening pill by the cursor goes, instead of waiting for an answer that isn't coming.
   if (pi.heard(text) || answers.heard(text)) { ui({ kind: 'heard' }); return; }
+  foundDrop(); // Local-only build (feature 40): the next request takes the card of found files down
   // Local-only build (feature 18): "review my day" (daily.mjs, said alone) is the app's to answer, not the model's.
   if (!area?.file && isReviewAsk(text)) { ui({ kind: 'heard' }); reviewAsked(true); return; }
   // Local-only build (feature 31): "anything waiting?" (quiet.mjs, said alone): the quiet queue, given by the app.
   if (!area?.file && isWaitingAsk(text)) { ui({ kind: 'heard' }); waitingAsked(true); return; }
   // Local-only build (feature 32): "what left the Mac today?" (ledger.mjs, said alone): answered by code from the ledger.
   if (!area?.file && isLeftAsk(text)) { ui({ kind: 'heard' }); flow.start(); leftAsked(); return; }
+  // Local-only build (feature 40): "where is budget.xlsx?" and the like: answered by code from Spotlight, no model asked.
+  const fq = area?.file ? null : finder.ask(text, personaName());
+  if (fq) { ui({ kind: 'heard' }); flow.start(); findAsked(fq).catch((e) => console.error('find', e?.name ?? 'error')); return; }
   if (!area?.file) return enqueue(text, { interrupt: true, image: takeSnap(), byVoice: true });
   try {
     await fitImage(area.file);
@@ -2589,6 +2643,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   // A link clicked on the research card: web and mail links only.
   else if (m.type === 'open_link') { const v = checkLink(m.url); if (v.level === SAFE) openUrl(String(m.url)); else console.error('open_link blocked:', v.reason); }
   else if (m.type === 'list_toggle') toggleItem(String(m.id)).catch((e) => console.error('list', e));
+  else if (m.type === 'found_pick' && found && m.id === found.id && Number.isInteger(m.n)) foundPick(m.n - 1, 'click').catch((e) => console.error('find', e?.name ?? 'error')); // feature 40: a row of the card clicked
+  else if (m.type === 'found_closed' && found && m.id === found.id) { found.ctl.abort(); found = null; } // feature 40: its × or Esc
   else if (m.type === 'show_list') showList({ seconds: 20, toggle: true });
   // The overlay's drawing: a segment started, a wait for a click or hover ended, a card was closed, a button clicked.
   else if (m.type === 'draw_started') { ink.started(String(m.id), m.seg | 0); if (String(m.id) === showcase?.id) ob({ kind: 'showcase', phase: 'beat', beat: m.seg | 0 }); }
@@ -2597,7 +2653,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   else if (m.type === 'ink_closed') ink.closed(m.part);
   else if (m.type === 'ink_action') onInkButton(String(m.part));
   else if (m.type === 'quiz_done') onQuizDone(String(m.part), Array.isArray(m.picks) ? m.picks.slice(0, 12).map((v) => (Number.isInteger(v) ? v : -1)) : []);
-  else if (m.type === 'ink_cleared') { ink.cleared(); endShowcase('gone'); }
+  else if (m.type === 'ink_cleared') { ink.cleared(); endShowcase('gone'); if (found) { found.ctl.abort(); found = null; } } // feature 40: Esc took the card of found files too
   else if (m.type === 'user_click' && Number.isFinite(m.x) && Number.isFinite(m.y)) ink.userClick({ x: m.x, y: m.y, role: String(m.role ?? ''), app: String(m.app ?? ''), acts: m.acts === true });
   else if (m.type === 'update_status') onUpdateStatus(m);
   // Wayland: the guide or panel copies one of the commands to bind (only those, never other text).

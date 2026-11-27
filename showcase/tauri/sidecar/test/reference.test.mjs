@@ -63,12 +63,12 @@ assert.deepEqual(readNames, Object.keys(refSettings).sort(), 'loadSettings reads
 assert.deepEqual([...body.matchAll(/\braw\.(\w+)/g)].map((m) => m[1]), [], 'and none straight from the file, past the checks');
 assert.ok(body.includes('for (const name of Object.keys(defaults))') && body.includes('CLEAN[name](raw[name], defaults[name])'), 'each goes through its check');
 // the limits: all of them, each a default inside its range; every one is used somewhere, and nothing uses another
-assert.deepEqual(Object.keys(ref.limits), Object.keys(LIMITS)); assert.equal(Object.keys(LIMITS).length, 40); // feature 14's eight; 16, feature 22's five, feature 16's two, feature 24's fold point and page rebuild, feature 18's questions and open items, features 25 and 31's check-ins, their repeat, deadlines at risk and the queue's share, and feature 32's ledger days
+assert.deepEqual(Object.keys(ref.limits), Object.keys(LIMITS)); assert.equal(Object.keys(LIMITS).length, 42); // feature 40's two; feature 14's eight; 16, feature 22's five, feature 16's two, feature 24's fold point and page rebuild, feature 18's questions and open items, features 25 and 31's check-ins, their repeat, deadlines at risk and the queue's share, and feature 32's ledger days
 // a limit starts above 0, unless 0 is a value of its own, said in the reference file (pageRebuildQuietMinutes: never)
 assert.deepEqual(Object.keys(LIMITS).filter((n) => LIMITS[n].min === 0), ['pageRebuildQuietMinutes']); assert.equal(reference.limitRanges.pageRebuildQuietMinutes.zero, 'never');
 for (const [name, l] of Object.entries(LIMITS)) { assert.equal(ref.limits[name], l.default); assert.ok(l.min <= l.default && l.default <= l.max && (l.min > 0 || !!l.zero), `${name}: a positive range around its default`); assert.deepEqual(reference.limitRanges[name], { min: l.min, max: l.max, ...(l.whole ? { wholeNumber: true } : {}), ...(l.zero ? { zero: l.zero } : {}) }); }
 const used = new Set();
-for (const f of ['pi.mjs', 'notes.mjs', 'files.mjs', 'sidekick.mjs', 'calendar.mjs', 'flow.mjs', 'kokorovoice.mjs', 'daily.mjs', 'checkin.mjs', 'quiet.mjs']) for (const m of fs.readFileSync(path.join(src, f), 'utf8').matchAll(/\b(?:limits|limitsFor\(\w*\))\.(\w+)/g)) used.add(m[1]);
+for (const f of ['pi.mjs', 'notes.mjs', 'files.mjs', 'sidekick.mjs', 'calendar.mjs', 'flow.mjs', 'kokorovoice.mjs', 'daily.mjs', 'checkin.mjs', 'quiet.mjs', 'findany.mjs']) for (const m of fs.readFileSync(path.join(src, f), 'utf8').matchAll(/\b(?:limits|limitsFor\(\w*\))\.(\w+)/g)) used.add(m[1]);
 assert.deepEqual([...used].sort(), Object.keys(LIMITS).sort(), 'the limits the code uses are the limits there are');
 // what stays in code is there, built from the constants: the sandbox's lists as the profile really has them
 assert.match(reference.about, /never reads this file/i);

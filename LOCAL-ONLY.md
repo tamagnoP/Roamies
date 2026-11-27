@@ -14,6 +14,7 @@ agent) after you approve it. Roamies reads files in your project folders itself,
 | Keep the to-do list and reminders | As before |
 | Keep notes in your Obsidian vault | Writes only when you ask; can add to a note, and change one you name once you have seen the change and said save (the old version kept); never deletes one |
 | Read, list, find and search files in your project folders | Only in a request you type or speak; a file's text goes to the model only when your words name the file or you say yes to a bubble naming it (feature 14) |
+| Find a file or folder anywhere by name, and show the one you pick in Finder | Only when you ask where it is; answered by code from Spotlight, nothing sent to any model, nothing opened (feature 40) |
 | Hand a task to pi | Read-only tasks after a short countdown you can stop; tasks that can edit only after you say send |
 
 Upstream's file and command tools (`read_file`, `list_files`, `search_files`, `write_file`, `run_command`) and
@@ -354,6 +355,11 @@ setup guide is open, the bubble waits until it closes.
 - `fileContents`: `"ask"` (the default) or `"free"`. With `"ask"`, a file's text goes to a model only when your own
   words in that request name the file, or you said yes to a bubble naming exactly the files. With `"free"`, any read
   in a request you typed or spoke.
+- `findAnywhere`: `true` or `false` (`true` unless you set it). `false` sends "where is budget.xlsx?" and the like the
+  usual way, to the model (see "Finding a file anywhere").
+- `findDrives`: `true` or `false` (`true` unless you set it). `false` searches the home folder only, not the local
+  external drives.
+- `findLeaveOut`: a list of folders (`~` allowed) never searched for a file anywhere, besides those always left out.
 - `measurePageRebuild`: `true` or `false` (`false` unless you set it). With `true`, each fresh page after a quiet
   stretch (see "Where the character sits") is measured, numbers only, into the activity log
   (`~/.gg/sidekick/logs`) as `rebuild_measure` lines: from the moment it is asked for until 6 seconds after the old
@@ -431,6 +437,8 @@ setup guide is open, the bubble waits until it closes.
   | `filesPerRequest` | 10 | 1 to 50, whole | Reads (a part of a file, or a search's lines) in one request. |
   | `localFileChars` | 6000 | 1000 to 20000, whole | Characters of a file in one read on the local model's route. |
   | `noteEditLines` | 40 | 5 to 200, whole | Changed lines a note edit's bubble shows before "and N more lines". |
+  | `findMatches` | 8 | 1 to 20, whole | Matches on the card of a search for a file anywhere (feature 40). |
+  | `findSeconds` | 3 | 1 to 15 | How long Spotlight is waited for in that search. |
 - `calendar`: for the to-do list in Super Productivity (see "To-dos in Super Productivity"). Each part that is missing
   or can't be used takes its default and is named in the start-up bubble; leaving `calendar` out counts as one
   missing setting.
@@ -977,6 +985,59 @@ started (no `rg` or `grep`).
   doesn't look like one (a token inside a YAML file) can reach the model when you ask for that file. A folder in
   Desktop, Documents, Downloads or iCloud Drive can bring up macOS's one-time "Roamies would like to access" prompt.
 
+## Finding a file anywhere
+
+Feature 40 (the owner's plan and answers of 2026-11-27). "Where is budget.xlsx?", "find the file budget" and "which
+folder is the poster in?" are decided and answered by code alone (`findany.mjs`), on Claude's route and on the local
+model's alike: no model is asked, and no file name or path goes to any model. Nothing of it goes into the
+conversation, the activity record, the handover or the daily note.
+
+- **Which sentences.** "Where is …" (also "where's", "where did I put", "where can I find") only when the name looks
+  like a file or a folder: an extension ("budget.xlsx", "budget dot xlsx"), or a type word (file, folder, directory,
+  document, PDF, spreadsheet, presentation, slides, image, photo, screenshot, video, recording, script, notebook,
+  archive, zip). "Find the file …" (or "find the … folder", "find the budget PDF", "find budget.xlsx") and "which
+  folder is … in?" always are. Anything else goes the usual way: "where is my lab meeting?", "where are my photos?"
+  (a type word alone is no name) and "find my keys" go to the model. The filler words, "can you" and the persona's
+  name may stand around it. With no name ("find the file") the answer asks for the name with the request, by code.
+- **The search.** Spotlight, by name only, asked by the hands helper (`roamies-hands find`, started for the one
+  command like every hands command; its request comes on stdin, never in its arguments). Every word of the name must
+  be in the file's name, in any case and with or without accents; a type word narrows it (a folder, a PDF, a
+  spreadsheet). The home folder, and the local external drives when `findDrives` is on. Contents are never read.
+  macOS only: on Windows and Linux the answer says so and nothing is searched.
+- **Left out, always.** `~/Library` (iCloud Drive, Dropbox, Google Drive and OneDrive with it), hidden files and
+  folders (the Trash with them), the sandbox's blocked list, Roamies' own folders (`~/Documents/roamies-pi`,
+  `~/.gg`), the notes vault, what Roamies never reads (keys, passwords, `.env` files, other apps' data; a Keynote
+  presentation, whose name ends in `.key`, is known by its kind and kept), apps, the insides of packages, Time
+  Machine backups, network drives, `.git`, `node_modules`, `.venv`, `venv`, `__pycache__`, and the folders in
+  `findLeaveOut`.
+- **Ranked**, most likely first: the name is your words (with or without its extension), then it starts with them,
+  then each of your words is a whole word of it (split at `_`, `-`, `.`, spaces, capitals and digits), then each is
+  part of it. Within each: the one you opened last (as Spotlight knows it), then the one changed last, then the one
+  in fewer folders, then one in a project folder.
+- **The card** lists at most `limits.findMatches` (8): each row its number, its name (folders marked "folder") and
+  its folder (`~/Documents/Finance`, or "Backup › Finance" on a drive), and "and N more" when there are more. It stays
+  until you close it (× or Esc) or make your next request.
+- **What is said** is the count and the first one or two names only, never a folder: "I found 5; the first two are
+  budget-2026.xlsx and budget.numbers." In a spoken exchange it ends "Which one should I show?" (one match: "Shall I
+  show it in Finder?") and the answer window opens; typed, it ends "Click one to show it in Finder."
+- **The pick.** By voice in the answer window ("the second one", "number two", "two", "the last one", or its name:
+  "the numbers one"), or a click on a row of the card until it closes or the next request. One that fits no row or
+  more than one changes nothing; "none" closes the card. The picked file is checked again (`checkReveal` in
+  `safety.mjs`) and shown in Finder, selected (`roamies-hands reveal`); nothing is opened, and nothing happens without
+  a pick. If it has gone since: "It isn't there any more." A picked name is shown, not said.
+- **Nothing found** says the limits plainly: "I found no file called "budget". I look by name with Spotlight in your
+  home folder and on your drives; hidden folders, ~/Library and the folders you excluded from Spotlight (System
+  Settings, Spotlight, Search Privacy) aren't searched, and a drive Spotlight doesn't index can't be either." When
+  Spotlight takes longer than `limits.findSeconds` (3), what came in by then is shown; with nothing, it says so.
+- **Logged** as counts only: `find_file` (found, shown, left out, of another kind, milliseconds, drives, timed out)
+  and `find_pick` (the row and voice or click). Never what you said, a name or a folder. No ledger line: nothing is
+  sent.
+- **What to know.** Spotlight finds what it has indexed: a folder you excluded in System Settings, a drive it doesn't
+  index (many USB drives formatted exFAT) or a file made a moment ago may be missing. macOS may filter results from
+  Desktop, Documents, Downloads or removable drives until Roamies has been allowed there. A misheard name searches for
+  the wrong words; the card's header shows what was searched for. "Where is the presentation for the grant?" counts
+  as a search (a type word and a name), even if you meant a calendar event.
+
 ## The daily note
 
 Feature 18. Roamies keeps one note per day in the vault: `Daily/YYYY-MM-DD.md` (the `dailyFolder` setting). Code
@@ -1408,6 +1469,10 @@ request fails with a network error before any reply; and in private mode. A slow
 - `showcase/tauri/sidecar/notes.mjs` (new): the notes vault, its one writer, the task pages (feature 18), and changing
   a named note with its previous version kept (feature 14).
 - `showcase/tauri/sidecar/files.mjs` (new): Roamies' own file reading (feature 14).
+- `showcase/tauri/sidecar/findany.mjs` (new): finding a file anywhere by name, the card's rows and the pick (feature
+  40). `safety.mjs`: `checkReveal`. `tools.mjs`: `handsWithInput`, a hands command with its request on stdin.
+  `src-tauri/hands/main.swift`: the `find` (Spotlight, `NSMetadataQuery`) and `reveal` (Finder) commands, macOS only.
+  `roamies/ink.js` and `host.js`: the card of found files.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler
