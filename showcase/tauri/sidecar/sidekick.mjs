@@ -15,7 +15,8 @@ import {
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -51,6 +52,7 @@ import { createTiming } from './timing.mjs'; // feature 23, stage 5: measuring, 
 import { createModelServer } from './modelserver.mjs'; // feature 23, stage 6: the local model server, started by Roamies
 import { BACK_AGAIN, LOCAL_TAG, PRIVATE_OFF, PRIVATE_ON, PRIVATE_TAG, cantLocally, createAnnouncer, isNetworkError, privateAsk, routeFor } from './route.mjs'; // feature 23, stage 4
 import { readState, writeState } from './pi.mjs';
+import { WEB_OFF, assignNumbers, cleanMask, createMasker, isWebAsk, maskMessage, textKey, unmaskMessage } from './mask.mjs'; // Local-only build (feature 34): masking
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
 import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
@@ -435,6 +437,31 @@ const setPrivateNotes = (list) => { const dir = settingsNow().dir; writeState(di
 /** What Claude must never see: the titles and ids of the private to-dos and reminders, and the private notes' titles. */
 const privateWords = () => [...openCommitments().filter((c) => c.private).flatMap((c) => [c.text, c.id]), ...privateNotes()];
 const forClaude = (text) => redact(text, privateWords());
+// Local-only build (feature 34): masking (mask.mjs). `masker` is the list as of the last request, made again only when
+// the list changes, so the forms it sent are remembered for what comes back; `agentMasker` is the one the agent was
+// built with; `agentPlain` holds the owner's own messages as he made them, by their masked text.
+let masker = createMasker(), agentMasker = null, agentPlain = new Map(), maskUse = null;
+function maskNow() {
+  let s;
+  try { s = settingsNow(); } catch { return masker; }
+  const on = s.masking !== false, { entries, problems } = cleanMask(s.mask, { maxEntries: s.limits.maskEntries });
+  const st = readState(s.dir), r = assignNumbers(on ? entries : [], st.masks?.numbers);
+  if (r.changed) { try { writeState(s.dir, { ...st, masks: { ...(st.masks ?? {}), numbers: r.table } }); } catch (e) { console.error('masks', e); } }
+  const next = createMasker(entries, r.table, { on });
+  if (next.sig !== masker.sig) { masker = next; logLine('mask_list', { entries: next.size, ignored: problems.length }); }
+  return masker;
+}
+const maskOut = (text) => (agentMasker?.active ? agentMasker.out(text) : text);
+/** The claude program's transcript of a session it no longer continues (a list change): deleted. Only that file. */
+function dropTranscript(id) {
+  if (!/^[\w-]{8,80}$/.test(String(id ?? ''))) return false;
+  let gone = false;
+  try {
+    const root = path.join(claudeCodeEnv().CLAUDE_CONFIG_DIR, 'projects');
+    for (const d of readdirSync(root)) { const f = path.join(root, d, `${id}.jsonl`); if (existsSync(f)) { rmSync(f, { force: true }); gone = true; } }
+  } catch { /* none kept */ }
+  return gone;
+}
 const notes = createNotes({ userName, log: (kind, data) => logLine(kind, data), onNote: (title, task) => dailyDo('note', () => daily.noted(title, task)), todos: () => todoItems(), privateNow: () => privateRequest, onPrivate: (title) => { try { setPrivateNotes([...privateNotes(), title]); } catch (e) { console.error('private notes', e); } }, heard: () => ownWords, ask: (o) => answers.ask(o), counted: (kind, chars) => countText(kind, chars), onEdited: (title) => dailyDo('edited', () => daily.edited(title)), persona: () => personaNow()?.name ?? '' }); // Local-only build (feature 18): the to-dos, for their pages; feature 14: edit_note
 // Local-only build (feature 14): the file tools (files.mjs): only in a request the owner typed or spoke (ownWords), with
 // a bubble for a file his words don't name (fileContents "ask"), counted for the ledger.
@@ -615,7 +642,17 @@ tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...
 leanTools(tools, { describe: SHORT(userName) }); // Local-only build (feature 23, stage 1): short schemas for every model, our own descriptions in shorter words (lean.mjs)
 // Local-only build (feature 23): a tool's result for Claude never holds a private title or id (privacy.mjs). The local
 // route's calls carry { seePrivate: true } and get it whole.
-for (const t of tools) { const run = t.execute; t.execute = async (args, ctx, ...rest) => { const r = await run(args, ctx, ...rest); return ctx?.seePrivate ? r : redactResult(r, privateWords()); }; }
+// Feature 34: a call from the provider's agent (it has a toolCallId) runs with the words back in its arguments, and
+// its result goes back masked; images pass as they are.
+for (const t of tools) {
+  const run = t.execute;
+  t.execute = async (args, ctx, ...rest) => {
+    if (ctx?.seePrivate) return run(args, ctx, ...rest);
+    const mk = ctx?.toolCallId && agentMasker?.active ? agentMasker : null;
+    const r = redactResult(await run(mk ? mk.backDeep(args, maskUse) : args, ctx, ...rest), privateWords());
+    return mk ? mk.outDeep(r, maskUse) : r;
+  };
+}
 
 // ---------- local-only build (feature 33): stand down (standdown.mjs) ----------
 // The shell tells the page and this side at once, from the shortcut or the phrase (stand.rs), and closes the
@@ -965,7 +1002,7 @@ let frontNow = ''; // set just before each request (whereFront)
 let addressNow = false; // set just before each request: whether this reply carries the form of address (addressClock)
 const addressLine = () => addressRule(personaNow(), userName, addressNow) ?? ''; // local-only build
 const livePrompt = (context = '') => {
-  const facts = pickFacts(context, 40), total = listFacts().length;
+  const facts = pickFacts(agentMasker?.active ? agentMasker.back(context) : context, 40), total = listFacts().length; // feature 34: picked by his words
   lastFactIds = facts.map((f) => f.id);
   // Feature 24: the live state as named parts, so a request carries only the parts that changed (live.mjs).
   const parts = [
@@ -985,7 +1022,7 @@ ${facts.length ? `What you know about ${userName}${total > facts.length ? ` (${f
   // Local-only build (feature 23): no private title or id reaches Claude; a count says what it can't see.
   const hidden = privateCount(openCommitments().filter((c) => c.private).length, privateNotes().length);
   if (hidden) parts.push(['private', hidden]);
-  return parts.map(([k, v, ...o]) => [k, typeof v === 'string' ? forClaude(v) : v, ...o]);
+  return parts.map(([k, v, ...o]) => [k, typeof v === 'string' ? maskOut(forClaude(v)) : v, ...o]); // feature 34: masked
 };
 const system = () => stablePrompt();
 // Local-only build (feature 24): each request's live block holds only the parts that changed since the blocks
@@ -1018,7 +1055,10 @@ const requestBudget = () => Math.min(BUDGET_CAP, getContextWindow(config.model, 
 // Claude Code's session for this conversation, so a rebuilt agent continues it instead of starting over.
 let ccResume = null;
 // The Claude Code process when Anthropic is signed in with Claude (else null: the API, with a key or another provider).
+// Tests only: ROAMIES_FAKE_CLAUDE names a module whose query() stands in for the claude program (test/mask-cc-run).
+let fakeClaude = null;
 async function claudeCodeRoute() {
+  if (process.env.ROAMIES_FAKE_CLAUDE?.endsWith('.mjs') && config.provider === 'anthropic') { fakeClaude ??= await import(pathToFileURL(process.env.ROAMIES_FAKE_CLAUDE).href); return { executable: 'fake-claude', env: claudeCodeEnv(), query: fakeClaude.query }; }
   if (config.provider !== 'anthropic' || !(await auth.hasClaudeCodeLogin().catch(() => false))) return null;
   const executable = resolveClaudeCodeBinary();
   if (!executable) throw new Error(`Claude Code isn't installed anymore. Sign in with Claude again on the Model page in ${PANEL}.`);
@@ -1030,14 +1070,20 @@ const CHAT_THINKING = process.env.ROAMIES_THINKING === 'off' ? null : process.en
 function makeAgent(cc) {
   const m = getModel(config.model);
   controller = new AbortController();
-  const prior = forProvider(session?.messages ?? [], session?.provider, config.provider);
-  if (session) { session.provider = config.provider; session.model = config.model; }
+  let prior = forProvider(session?.messages ?? [], session?.provider, config.provider);
+  // Feature 34: the agent gets the conversation masked with the list as it is now; reasoning made under another list
+  // is dropped (it is signed, so it can't be masked again).
+  const mk = agentMasker = masker;
+  if ((session?.maskSig ?? '') !== mk.sig) prior = prior.map((x) => (x.role === 'assistant' && Array.isArray(x.content) ? { ...x, content: x.content.filter((p) => p.type !== 'thinking') } : x));
+  agentPlain = new Map();
+  if (mk.active) prior = prior.map((x) => { const y = maskMessage(x, mk); if (x.role === 'user') agentPlain.set(textKey(y.content), x.content); return y; });
+  if (session) { session.provider = config.provider; session.model = config.model; session.maskSig = mk.sig; }
   agentRoute = cc ? 'claude-code' : 'api';
   const common = {
     model: config.model,
-    system: system(),
+    system: mk.active ? `${mk.out(system())}\n${mk.note}` : system(),
     priorMessages: prior,
-    tools,
+    tools: mk.active ? tools.map((t) => { const d = mk.out(t.description ?? ''); return d === (t.description ?? '') ? t : { ...t, description: d }; }) : tools,
     maxTurns: 24,
     transformContext: (msgs, o) => {
       const fitted = fitContext(msgs, { budgetTokens: requestBudget(), force: o?.force });
@@ -1045,6 +1091,8 @@ function makeAgent(cc) {
       if (o?.fresh) liveBlocks.clear();
       // The newest request gets the parts of the live state that changed; older requests keep the block they had.
       const out = withLive(fitted);
+      // Feature 34: the stand-ins in the live state this request sends, counted once for its ledger line.
+      if (maskUse && !maskUse.live && mk.active) { maskUse.live = true; const last = out.findLast((x) => x.role === 'user'), lead = /^<live-state>[\s\S]*?<\/live-state>/.exec(textKey(last?.content)); if (lead) maskUse.swaps += mk.standIns(lead[0]); }
       touchFacts(lastFactIds);
       return out;
     },
@@ -1054,7 +1102,7 @@ function makeAgent(cc) {
   if (cc) {
     const sid = session?.id;
     agent = new ClaudeCodeAgent({
-      ...common, executable: cc.executable, env: cc.env, cwd: HOME, keepWarm: true,
+      ...common, executable: cc.executable, env: cc.env, cwd: HOME, keepWarm: !cc.query, ...(cc.query ? { query: cc.query } : {}),
       resume: ccResume?.session === sid ? ccResume.state : null,
       onResume: (state) => { ccResume = { session: sid, state }; },
     });
@@ -1066,7 +1114,7 @@ function makeAgent(cc) {
     // One hour on Anthropic (falls back to 5 min elsewhere); the key keeps one conversation on one cache.
     cacheRetention: 'long',
     promptCacheKey: session?.id ? `roamies-${session.id}` : undefined,
-    webSearch: ['anthropic', 'openai', 'gemini'].includes(config.provider),
+    webSearch: !mk.active && WEB_SEARCH.includes(config.provider), // feature 34: off while the masking list has words
     resolveCredentials: async () => {
       const c = await credsFor();
       return { apiKey: c.accessToken, ...(c.accountId !== undefined ? { accountId: c.accountId } : {}) };
@@ -1075,6 +1123,7 @@ function makeAgent(cc) {
   });
 }
 let credsBaseUrl;
+const WEB_SEARCH = ['anthropic', 'openai', 'gemini'];
 
 // One run at a time: a new request waits for (or interrupts) the current one. Folding waits until none is left.
 let queued = 0;
@@ -1170,7 +1219,8 @@ const withoutLive = (msgs) => msgs.map((m) => {
 });
 const syncSession = () => {
   if (!session || !agent) return;
-  session.messages = forDisk(withoutLive(agent.getMessages()));
+  const mine = withoutLive(agent.getMessages());
+  session.messages = forDisk(agentMasker?.active ? mine.map((m) => unmaskMessage(m, agentMasker, agentPlain)) : mine); // feature 34: kept in his words
   session.lastActiveAt = Date.now();
   if (pendingFold?.session === session) applyPendingFold(); else saveSession(session);
 };
@@ -1196,7 +1246,7 @@ function maybeCompact() {
   compacting = (async () => {
     try {
       const facts = listFacts();
-      const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('fold'), system: foldPrompt(userName), text: forClaude(foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName })) });
+      const { text, model } = await sideShot({ ...(await sideRoute()), onUsage: sideUse('fold'), system: foldPrompt(userName), text: forClaude(foldInput({ facts, summary: plan.summary, turns: transcript(plan.folded, userName, stripNote), name: userName })) });
       const out = parseBrain(text, { knownIds: facts.map((f) => f.id), wantSummary: true });
       const learned = await learnFacts(out.facts);
       if (s !== session) { logLine('compact_dropped', { session: s.id, why: 'new conversation' }); return; }
@@ -1240,7 +1290,7 @@ async function memoryPass(s, why) {
   const t0 = Date.now();
   try {
     const facts = listFacts();
-    const { text, model } = await oneShot({ ...(await sideRoute()), onUsage: sideUse('memory'), system: memoryPrompt(userName), text: forClaude(memoryInput({ facts, turns })) });
+    const { text, model } = await sideShot({ ...(await sideRoute()), onUsage: sideUse('memory'), system: memoryPrompt(userName), text: forClaude(memoryInput({ facts, turns })) });
     const out = parseBrain(text, { knownIds: facts.map((f) => f.id) });
     const learned = await learnFacts(out.facts);
     logLine('memory', { why, session: s.id, model, ms: Date.now() - t0, facts: learned.length, replaced: out.facts.filter((f) => f.replaces).length });
@@ -1310,6 +1360,21 @@ const usageToday = { day: '', requests: 0, tokens: 0 };
 // Local-only build (feature 32): the ledger, beside usage.jsonl: one line per request to any model, never its content.
 const ledger = createLedger({ file: path.join(path.dirname(USAGE_FILE), 'ledger.jsonl'), keepDays: () => limitsFor(HOME).ledgerDays, log: (kind, data) => logLine(kind, data) });
 const sideUse = (kind) => (u) => ledger.record({ kind: u.own ? 'own' : kind, where: 'provider', ...u });
+/** Feature 34: a side call (the fold, the memory pass, the handover's part two) masked on the way out, its answer
+ *  with the words back before anything is kept; the swaps are counted on its ledger lines. */
+async function sideShot(o) {
+  const mk = maskNow();
+  if (!mk.active) return oneShot(o);
+  const use = { swaps: 0, swapsBack: 0 }, lines = [];
+  const text = mk.out(o.text, use);
+  try {
+    const r = await oneShot({ ...o, system: mk.out(o.system), text, onUsage: (u) => lines.push(u) });
+    return { ...r, text: mk.back(r.text, use) };
+  } finally {
+    const last = lines.findLastIndex((u) => !u.own);
+    lines.forEach((u, i) => o.onUsage?.(u.own ? u : { ...u, swaps: use.swaps, swapsBack: i === last ? use.swapsBack : 0 }));
+  }
+}
 // Feature 32: what the claude program reports it requested by itself, beyond the request's own turns.
 const ownUse = (e) => { if (e.type === 'own_usage') for (const [model, tokens] of Object.entries(e.byModel)) ledger.record({ kind: 'own', where: 'provider', provider: 'claude-code', model, tokens }); else logLine('own_usage_unseen', {}); };
 // Local-only build (feature 23, stage 3): the local model. The app's own tools by their real names, the open to-dos
@@ -1458,7 +1523,7 @@ function recordRequest(err = null) {
   const l = ledgerUse; ledgerUse = null;
   if (!l) return;
   const u = l.use;
-  ledger.record({ kind: err && signInFailed(err) ? 'signInFailed' : l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names), ...(l.texts ?? {}) });
+  ledger.record({ kind: err && signInFailed(err) ? 'signInFailed' : l.kind, where: 'provider', provider: l.provider, model: u.model, tokens: { new: u.in, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, out: u.out }, marked: l.marked, ...countTools(u.names), ...(l.texts ?? {}), swaps: l.mask?.swaps ?? 0, swapsBack: l.mask?.swapsBack ?? 0 });
 }
 /** Feature 14: a file's or a note's text given to the model in the request being made, counted for its ledger line. */
 function countText(kind, chars) {
@@ -1496,6 +1561,13 @@ async function readyAgent() {
   if (!session) { session = newSession(config.provider, config.model); liveBlocks.clear(); agent = null; pruneSessions(); }
   if (agentStale && agent) { agent = null; }
   agentStale = false;
+  // Feature 34: the list changed: the agent is made again from the conversation, masked with the new list, and the
+  // claude program starts a fresh session (the one it replaces has its transcript deleted).
+  if (agentMasker && maskNow().sig !== agentMasker.sig) {
+    const old = ccResume?.state?.sessionId;
+    ccResume = null; agent = null; closeSpare();
+    logLine('mask_changed', { transcriptDeleted: old ? dropTranscript(old) : false });
+  } else if (!agentMasker) maskNow();
   let cc;
   try { cc = await claudeCodeRoute(); } catch (e) { return e.message; }
   if (agent && agentRoute !== (cc ? 'claude-code' : 'api')) agent = null; // signed in or out of Claude meanwhile
@@ -1550,7 +1622,7 @@ async function dayTurn(byVoice) {
   let two, model;
   try {
     const known = new Set(todoItems().map((t) => t.id));
-    const r = await oneShot({ ...(await sideRoute()), onUsage: sideUse('handover'), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: forClaude(handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() })) });
+    const r = await sideShot({ ...(await sideRoute()), onUsage: sideUse('handover'), signal: AbortSignal.timeout(PART_TWO_SECONDS * 1000), system: handoverPrompt(userName), text: forClaude(handoverInput({ turns: transcript(old.messages.filter((m) => !isHandover(m)), userName, stripNote), items: handover.openItems() })) });
     two = parsePartTwo(r.text, { known: (id) => known.has(id) }); model = r.model;
   } catch (e) {
     logLine('handover_failed', { ms: Date.now() - t0, error: String(e?.message ?? e).slice(0, 300) });
@@ -1593,6 +1665,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   let problem = await readyAgent();
   if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
   if (problem) { aloud(problem, 'concerned'); flow.settle(); return; } // Local-only build: said too, in an exchange started by voice; feature 31: its quiet time starts, so it ends (and the quiet queue is given)
+  const mk = agentMasker?.active ? agentMasker : null; // Local-only build (feature 34): masking
+  if (ownAsk && mk && agentRoute === 'api' && WEB_SEARCH.includes(config.provider) && isWebAsk(text)) { logLine('web_off', {}); aloud(WEB_OFF, 'concerned'); flow.settle(); return; } // web search is off while the list has words
   busy = true; quiet = false; autoTurn = null;
   flow.activity(); // Local-only build (feature 22): the exchange's quiet time starts again after this reply
   let replyDone = null; // resolves when the overlay reports that this reply has finished playing
@@ -1637,7 +1711,8 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     const turn = nextTurn();
     logLine('request', { turn, model: config.model, chars: text.length, image: !!image, session: session?.id });
     const use = { t: Date.now(), model: config.model, calls: 0, tools: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0, names: [] };
-    ledgerUse = { use, kind: briefing ? 'briefing' : kind, marked: image ? 1 : 0, provider: agentRoute === 'claude-code' ? 'claude-code' : config.provider };
+    maskUse = { swaps: 0, swapsBack: 0 }; // feature 34: what this request swaps, for its ledger line
+    ledgerUse = { use, kind: briefing ? 'briefing' : kind, marked: image ? 1 : 0, provider: agentRoute === 'claude-code' ? 'claude-code' : config.provider, mask: maskUse };
     const soon = frontSoon; frontSoon = null;
     const where = soon && Date.now() - soon.at < limitsFor(HOME).frontReuseSeconds * 1000 ? await soon.p : await whereFront(); // Local-only build: whereFront, not whereNow
     frontNow = guard.front(where.line, where.app); // Local-only build: an app on the never-look list isn't named; its name decides
@@ -1646,6 +1721,12 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}`;
     // An area snap rides along as an image in the same message.
     const content = image ? [{ type: 'text', text: `${stamped}\n(Attached: the area of the screen I ${note ? 'marked' : 'selected'}.${note ? ` ${note}` : ''})` }, image] : stamped;
+    // Feature 34: sent masked; kept as he made it (agentPlain, for the saved conversation).
+    const sent = mk ? maskMessage({ role: 'user', content }, mk, { use: maskUse }).content : content;
+    if (mk) agentPlain.set(textKey(sent), content);
+    const unText = mk?.stream(maskUse), unThink = mk?.stream(null); // the words back in the reply as it streams
+    const toScreen = (raw) => { const t = echo.push(raw); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; };
+    const heldBack = () => { const t = unText?.flush(); if (t) toScreen(t); };
     lastReply = ''; lastFailed = false; lastInput = null;
     let fresh = false; // the reply that matters is the last turn's text (after any tool calls)
     let writing = null; // the beat timer while a tool call is being written
@@ -1655,13 +1736,14 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     const ctl = controller;
     watch = stallWatch(STALL_MS, () => { stalled = true; logLine('stalled', { turn, ms: Date.now() - use.t }); ctl.abort(); });
     timing.sent();
-    for await (const e of agentEvents(agent.prompt(content))) {
+    for await (const e of agentEvents(agent.prompt(sent))) {
       watch.event(e);
       if (e.type === 'text_delta') timing.firstText();
-      if (e.type === 'text_delta') { const t = echo.push(e.text); reply.push(t); if (fresh) { lastReply = ''; fresh = false; } lastReply += t; }
+      if (e.type === 'text_delta') toScreen(unText ? unText.push(e.text) : e.text);
       else if (e.type === 'own_usage' || e.type === 'own_usage_unseen') ownUse(e);
       else if (e.type === 'turn_end') {
         doneWriting();
+        heldBack();
         fresh = true;
         { const t = echo.flush(); reply.push(t); lastReply += t; }
         reply.endTurn();
@@ -1675,15 +1757,18 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
         use.calls++; use.in += u.inputTokens ?? 0; use.cacheRead += u.cacheRead ?? 0; use.cacheWrite += u.cacheWrite ?? 0; use.out += u.outputTokens ?? 0;
         if (process.env.ROAMIES_USAGE) console.error(`[usage] in=${u.inputTokens ?? '?'} cacheRead=${u.cacheRead ?? 0} cacheWrite=${u.cacheWrite ?? 0} out=${u.outputTokens ?? '?'}`);
       }
-      else if (e.type === 'thinking_delta') ui({ kind: 'agent', e: { type: 'thinking', text: e.text } });
+      else if (e.type === 'thinking_delta') ui({ kind: 'agent', e: { type: 'thinking', text: unThink ? unThink.push(e.text) : e.text } });
       // The opening line's last sentence waits for more text before it's spoken; a tool call starting means none is
       // coming, so say it now rather than once the call has fully streamed (a drawing can take 15 s on some models).
       else if (e.type === 'toolcall_delta') {
+        heldBack();
         spoken?.flush();
         // Still writing a tool call after a second with nothing said (a drawing on a slow model): a short beat.
         writing ??= setTimeout(() => { if (busy && turnVoice === voice) voice?.beat(); }, 1000); // not after the request ended
       }
       else if (e.type === 'tool_call_start') {
+        if (mk) e.args = mk.backDeep(e.args ?? {}); // feature 34: shown and logged with his words
+        heldBack();
         doneWriting();
         spoken?.flush(); // a beat before a tool is said now, not after the tool
         releaseBeat(true);
@@ -1695,6 +1780,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
         ui({ kind: 'agent', e: { type: 'tool', id: e.toolCallId, anim: anim(e.name, e.args ?? {}) } });
         if (activity.start(e.toolCallId, e.name, e.args ?? {})) panel();
       } else if (e.type === 'tool_call_end') {
+        if (mk && typeof e.result === 'string') e.result = mk.back(e.result);
         activity.end(e.toolCallId, e.isError); panel();
         logLine(e.isError ? 'tool_error' : 'tool_done', { turn, id: e.toolCallId, name: toolNames.get(e.toolCallId) ?? '', ms: e.durationMs, chars: resultLength(e.result) });
         if (e.isError && toolNames.get(e.toolCallId) !== 'plan_steps') trail.error(typeof e.result === 'string' ? e.result : '');
@@ -1706,7 +1792,9 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
       else if (e.type === 'error') throw e.error;
     }
     doneWriting();
+    heldBack();
     { const t = echo.flush(); reply.push(t); lastReply += t; }
+    if (mk) { const left = mk.leftovers(lastReply); if (left) logLine('mask_leftover', { count: left }); } // feature 34: shaped like a stand-in, matched none
     // Feature 23: given a list or count of the to-dos with private ones left out, the app adds its own line after
     // the reply (Claude is never asked to say it, and it never goes into Claude's conversation).
     if (!controller.signal.aborted && !stalled && lastReply.trim() && listedTodos(use.names, lastReply)) { const after = privateAfter(openCommitments().filter((c) => c.private).length); if (after) { reply.finish(); reply.emit({ type: 'text', text: `\n\n${after}` }); logLine('private_after', {}); } }

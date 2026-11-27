@@ -114,7 +114,7 @@ console.log('speech text tests: passed');
   assert.deepEqual(out, ['On it, drawing the engine now.']);
   const { readFileSync } = await import('node:fs');
   const side = readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
-  assert.match(side, /e\.type === 'toolcall_delta'\) \{\s*spoken\?\.flush\(\)/, 'speech is flushed as soon as a tool call starts streaming');
+  assert.match(side, /e\.type === 'toolcall_delta'\) \{\s*(?:heldBack\(\);\s*)?spoken\?\.flush\(\)/, 'speech is flushed as soon as a tool call starts streaming (feature 34: after a stand-in held back is let through)');
 }
 
 // Auto-listen: only a reply whose last words are a question opens the mic.

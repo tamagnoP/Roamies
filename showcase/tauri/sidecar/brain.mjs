@@ -31,7 +31,7 @@ async function once({ system, text, provider, model, cc, credsFor, cwd, signal, 
   const thinking = sideThinking(provider, model, chatThinking);
   const common = { model, system, tools: [], maxTurns: 1, thinking, signal };
   const agent = cc
-    ? new ClaudeCodeAgent({ ...common, executable: cc.executable, env: cc.env, cwd })
+    ? new ClaudeCodeAgent({ ...common, executable: cc.executable, env: cc.env, cwd, ...(cc.query ? { query: cc.query } : {}) })
     : new Agent({
       ...common, provider,
       resolveCredentials: async () => { const c = await credsFor(model); return { apiKey: c.accessToken, ...(c.accountId !== undefined ? { accountId: c.accountId } : {}) }; },
