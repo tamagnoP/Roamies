@@ -56,7 +56,7 @@ Last updated: 2026-11-25.
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Agreed 2026-11-27; planned only after 40 is built and merged (the owner) | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
-| 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | Plan with the owner (2026-11-27, nine questions); nothing built; before 34 | |
+| 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | Built on `find-anywhere` (2026-11-27), `test:all` passed; waiting for the owner's review, then `TESTS.md` group 2 | `47335b9`, `bc7e500`, `fee1f7a` |
 
 Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
@@ -1354,6 +1354,13 @@ Finder, selected, nothing opened. Names and places only; counts in the log.
   the cloud folders, the vault, apps and network drives left out; picks as proposed; macOS only. What he said is never
   logged; the card shows at most `limits.findMatches`; only the count and the first one or two names are said. Build on
   a branch off `next`.
+- **Built 2026-11-27** on `find-anywhere`: `roamies-hands find` (`NSMetadataQuery`, request on stdin, ~/Library and
+  hidden parts passed over early) and `reveal` (`NSWorkspace.activateFileViewerSelecting`); `findany.mjs` (the
+  sentence, what is left out, the ranking, the pick, the lines); the card of found files in `ink.js`; `checkReveal`
+  in `safety.mjs`; settings `findAnywhere`, `findDrives`, `findLeaveOut`, `limits.findMatches`, `limits.findSeconds`;
+  guarantees 2 and 6 as agreed. Tests: `findany`, `found-card` (the page), `findany-run` (the sidecar: nothing to
+  either model, counts only in the log), safety cases, the helper's self-test (a real Spotlight query on the system's
+  own apps). Report: `~/Documents/roamies-reports/2026-11-27_1210_feature-40-report.md`.
 
 ### 34. Masking
 
@@ -2098,9 +2105,13 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   Feature 40 (find a file anywhere) before 34 (masking): plan 40 first, build nothing; plan 34 only after 40 is built
   and merged. His words: `2026-11-27_1057_owner-review-feature-14-and-features-40-34.md`.
 
+- **2026-11-27 11:25 (the owner).** Feature 40's plan accepted with yes to guarantees 2 and 6; built on a branch off
+  `next`; feature 34 planned only after 40 is accepted and merged.
+
 ## 6. Still to test
 
 - [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
+- [ ] Feature 40 on `find-anywhere`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone
