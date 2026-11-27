@@ -34,7 +34,7 @@ Last updated: 2026-11-25.
 | 11 | pi confined by a macOS sandbox | Done | `0213e20`, `1dc723c` |
 | 12 | Home position on the desktop | Done | `f8ad515` |
 | 13 | To-dos, calendar blocks and the Eisenhower matrix in Super Productivity | Done | `5b563a8`, `1bb136c`, `02471e1`, `ec067fe`, `6d91f9c`, `d42f3ba`, `a5efb88`, `f5a30af` |
-| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note | Built on `roamies-read` (2026-11-27), `test:all` passed; waiting for the owner's review, then `TESTS.md` group 2 | `a3aefa6`, `eea32e3`, `de51de5` |
+| 14 | Roamies reads files in permitted folders at the owner's request, and edits a named note | In `next` (review accepted 2026-11-27 with three changes); waiting for `TESTS.md` group 2 | `a3aefa6`, `eea32e3`, `de51de5`, `273a442`, `d3a25fe` |
 | 15 | Search mode in a dedicated browser | In design (Prompt C, draft), after 28 | |
 | 16 | Natural local voice (Kokoro), built with the personality (21a) | Done | `c857a0b` (plan: `1a6b92c`) |
 | 17 | Double clap, then "Jarvis", then speak (hands-free wake) | Decided, not designed; after 21 | |
@@ -54,9 +54,11 @@ Last updated: 2026-11-25.
 | 31 | Speaking budget and quiet queue | In `next` with 25 (`ca766c8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
+| 34 | Masking: private words swapped for stand-ins before anything goes to the provider | Agreed 2026-11-27; planned only after 40 is built and merged (the owner) | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
+| 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | Plan with the owner (2026-11-27, nine questions); nothing built; before 34 | |
 
-Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27.
+Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 29, 30, 19, 21, 17, 28, 15, 20, 27.
 
 ## 1. Done
 
@@ -900,7 +902,8 @@ As built:
 
 ## 3. Queued, in this order
 
-Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 29, 30, 19, 21, 17, 28, 15, 20, 27. The owner's order of
+Build order: 24, 18, 33, 25 with 31, 23 with 32, 14, 40, 34, 29, 30, 19, 21, 17, 28, 15, 20, 27. 40 and 34 put after 14
+by the owner on 2026-11-27 (40 "before 34"; their place against 29 and 30 as he says). The owner's order of
 2026-11-25, after his order of 2026-11-18 (24 moved ahead of 18 on 2026-11-21). 24, 18, 33, 25 and 31 are in
 section 2; the subsections below follow the rest, in order.
 
@@ -1334,6 +1337,23 @@ search text. Includes reading a project's `TODO.md`; only pi writes that file.
   that is a tool call written out as text is never shown, spoken or run, found by its shape.
 - **Follow-up (the owner, 2026-11-27): note edits are not on the local route**, so a private note can't be edited
   by either model (Claude can't see it; the local model has no `edit_note`). Not built; to be designed with him.
+
+### 40. Find a file anywhere and show its folder
+
+"Where is <name>?", "find the file <name>", "which folder is <name> in?": decided and answered by code alone on both
+routes, no model asked, no name or path sent to any model. Spotlight by file name (the hands helper, `NSMetadataQuery`),
+the home folder and external drives; never the sandbox's blocked list, Roamies' own folders or `~/Library`. A card of
+the best matches (`limits.findMatches`, 8), the first one or two said; his pick by voice or click shows that file in
+Finder, selected, nothing opened. Names and places only; counts in the log.
+- **Plan 2026-11-27** (`~/Documents/roamies-reports/2026-11-27_1106_feature-40-plan.md`): the hands helper started per
+  command (no new program; the voice helper the alternative), the ranking, the exclusions, five settings, a sentence
+  each in guarantees 2 and 6 (his yes needed), nine questions. Nothing built.
+
+### 34. Masking
+
+Agreed 2026-11-27: private words in `settings.json`, grouped, swapped by code for stable stand-ins before anything goes
+to the provider and swapped back before anything is shown, spoken, written or passed to a tool; the local route not
+masked; the ledger counts swaps. **Planned only after 40 is built and merged** (the owner).
 
 ### 29. Run watcher
 
@@ -2067,9 +2087,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   words "undo", "revert", "restore" or "put back"; the local route reads but doesn't edit notes; the note edits work
   while pi works, the file tools don't. Guarantee 2 in its new wording (CLAUDE.md), as answer 8 asked.
 
+- **2026-11-27 (the owner, after the feature 14 report).** Review accepted with three changes (one-word names; the
+  local route's actions by code alone; calls written out as text never shown); then `test:all`, merge into `next`.
+  Feature 40 (find a file anywhere) before 34 (masking): plan 40 first, build nothing; plan 34 only after 40 is built
+  and merged. His words: `2026-11-27_1057_owner-review-feature-14-and-features-40-34.md`.
+
 ## 6. Still to test
 
-- [ ] Feature 14 on `roamies-read`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
+- [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone

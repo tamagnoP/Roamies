@@ -34,3 +34,21 @@ differently. Read this file at the start of each feature (CLAUDE.md, "How to wor
 - **Do differently:** tune on A and B only. Never change a set, the prompt, the tools or the checks because of what C,
   D, E or F show; report their numbers as they are. Write a new set, committed before its first run, whenever an
   untuned measure is needed again.
+
+## A model's raw output reported as a bench miss (feature 14, 2026-11-27)
+
+- **What went wrong:** after the feature 14 bench, a local reply that was a tool call written out as text
+  (`unschedule_block{todo:<|"|>…}`) would have reached the owner as the spoken reply; I reported it as a miss to
+  decide on, and the owner had to ask for it never to be shown, spoken or run.
+- **Why:** I read the bench as a score, and didn't ask what the owner would see and hear from that reply.
+- **Do differently:** for each bench miss, say what reaches him (shown, spoken, saved, run); anything that isn't
+  meant for him is a defect to fix in code by its shape (not tuned to the set), and reported as such.
+
+## A file named by one common word (feature 14, 2026-11-27)
+
+- **What went wrong:** "what's the plan for today?" counted as naming `plan.md`, so its text could be sent with no
+  bubble; the review had to narrow it.
+- **Why:** `namedIn` was written for the cases in the answers ("segment", "the data loader") without asking which
+  everyday sentences also fit them.
+- **Do differently:** for every rule that lets something through without a yes, write the everyday sentences that
+  must not pass (a one-word name, a common word) as tests next to the ones that must.
