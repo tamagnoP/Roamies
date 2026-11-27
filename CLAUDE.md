@@ -51,8 +51,9 @@ These are the reasons the fork exists. A change that weakens one needs the owner
    `ps` in its fixed script. Only recorded groups are ended, and none whose number now belongs to a process started
    at another time. For the undo snapshot before a hand-off that can edit, and to compare the project with it when pi
    stops (feature 41), it starts git by its full path, `/usr/bin/git` (on Windows, `git` from the PATH), with fixed
-   arguments, never through a shell, in the project folder only: only the snapshot's name and time vary, file names go
-   in on stdin, and the comparison writes no branch, index or file of the project (a temporary index, removed after).
+   arguments, never through a shell, in the project folder only: only the snapshot's name, its time and git's own
+   object ids vary, file names go in on stdin, and the comparison writes no branch, ref, index or working file, only
+   git's own objects, through a temporary index removed after.
    The only files it
    writes are notes inside the Obsidian vault (`notes.mjs`; the daily note too, `daily.mjs`, written by code alone), where it can create and append, and change a note the owner names, once he has seen the change and said save; it never deletes one.
    Roamies keeps the previous version of each note it changes in its own folder, `~/Documents/roamies-pi/note-versions`,
