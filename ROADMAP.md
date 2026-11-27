@@ -1408,6 +1408,13 @@ what he has to do next; commands stay on screen; each update one small request, 
   the closing summary becomes one small side request instead of a full chat turn; settings `piUpdates`,
   `piUpdatesOwnWork`, `piWatch` and six limits; ledger kind `piUpdate`. Seven questions, including git in guarantee 2
   and an optional guarantee 10. Nothing built.
+- **Answers 2026-11-27 19:01** (`~/Documents/roamies-reports/2026-11-27_1901_owner-answers-feature-41-and-env.md`):
+  up to three short sentences for the closing summary, two for an update; spoken replies off: no request, code's
+  lines above pi's reply; a folder he named covers what is inside it; command words only, the limit stated in
+  LOCAL-ONLY.md and the reference; a push, deletion or move, install or network command brings the update forward to
+  within 20 seconds; the shell clears more variables (done first, `57f94b1`); yes to git in guarantee 2 (full path,
+  fixed arguments, the snapshot and the comparison) and to guarantee 10 (naming what code cannot see). Built on
+  `pi-updates`.
 
 ### 29. Run watcher
 
@@ -2159,6 +2166,9 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   `next`, push. Then plan feature 41 (pi's updates in plain words), building nothing. His words:
   `2026-11-27_1815_owner-accepts-feature-34-env-rule-and-plan-41.md`.
 - **2026-11-27 18:38.** Feature 41 placed after 34 in the build order (the owner asked for its plan next).
+- **2026-11-27 19:01.** Environment work and feature 41's plan accepted. The shell now also clears `NODE_OPTIONS`,
+  the proxy and certificate variables, every `ANTHROPIC_*` and `OPENAI_*` variable and `ROAMIES_BG` (`57f94b1`; none
+  is set on this Mac, so sign-in and the claude program are unaffected). Feature 41 to be built.
 
 ## 6. Still to test
 
