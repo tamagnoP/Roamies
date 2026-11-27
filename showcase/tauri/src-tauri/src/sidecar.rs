@@ -16,10 +16,31 @@ pub(crate) const TEST_ONLY_ENV: &[&str] =
 pub(crate) const RELEASE_CLEARS: &[&str] = &["ROAMIES_DATA_DIR"];
 /// Set by the shell on Linux only; elsewhere an inherited value is taken out.
 const LINUX_ONLY_ENV: &[&str] = &["ROAMIES_SESSION", "ROAMIES_LAUNCH"];
+/// Local-only build (the owner, 2026-11-27 19:01): variables that load code, redirect or intercept traffic, or log
+/// requests, taken out for the sidecar and every helper. ROAMIES_BG turned background mode off for opening apps and
+/// the hands helpers; it had no setting, so background mode is now always on.
+pub(crate) const CLEARED_ENV: &[&str] = &[
+    "NODE_OPTIONS",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "ROAMIES_BG",
+];
+/// Every variable starting with one of these, in any case: the API keys, addresses, headers and logging the
+/// Anthropic and OpenAI libraries read.
+pub(crate) const CLEARED_PREFIXES: &[&str] = &["ANTHROPIC_", "OPENAI_"];
 
-pub(crate) fn without_test_switches(cmd: &mut Command) -> &mut Command {
-    for k in TEST_ONLY_ENV {
+/// What every process the shell starts loses from the shell's own environment: the test switches, the traffic
+/// redirects, and (outside Linux) the Linux-only values.
+pub(crate) fn clean_env(cmd: &mut Command) -> &mut Command {
+    for k in TEST_ONLY_ENV.iter().chain(CLEARED_ENV) {
         cmd.env_remove(k);
+    }
+    for (k, _) in std::env::vars_os() {
+        let name = k.to_string_lossy().to_ascii_uppercase();
+        if CLEARED_PREFIXES.iter().any(|p| name.starts_with(p)) {
+            cmd.env_remove(&k);
+        }
     }
     if !cfg!(debug_assertions) {
         for k in RELEASE_CLEARS {
@@ -34,7 +55,7 @@ pub(crate) fn without_test_switches(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// The sidecar's command: Node, the script, what the shell sets, and the test switches taken out.
+/// The sidecar's command: Node, the script, what the shell sets, and clean_env's variables taken out.
 fn sidecar_command(node: &std::path::Path, script: &std::path::Path, version: &str, hands: &str) -> Command {
     let mut cmd = Command::new(node);
     hide_console(&mut cmd);
@@ -42,7 +63,7 @@ fn sidecar_command(node: &std::path::Path, script: &std::path::Path, version: &s
     // Linux: "x11" or "wayland", for what the sidecar offers and how it words things (platform.mjs).
     #[cfg(target_os = "linux")]
     cmd.env("ROAMIES_SESSION", crate::linux::session().name()).env("ROAMIES_LAUNCH", crate::linux::launch_command());
-    without_test_switches(&mut cmd);
+    clean_env(&mut cmd);
     cmd
 }
 
@@ -148,11 +169,19 @@ mod tests {
     // The shell takes the test switches out of the sidecar's environment: what the started process sees.
     #[cfg(unix)]
     #[test]
-    fn the_shell_clears_test_switches_for_the_sidecar() {
+    fn the_shell_clears_test_switches_and_redirects_for_the_sidecar() {
         for k in TEST_ONLY_ENV.iter().chain(RELEASE_CLEARS).chain(LINUX_ONLY_ENV) {
             std::env::set_var(k, "/tmp/roamies-test-switch.mjs");
         }
+        for k in CLEARED_ENV {
+            std::env::set_var(k, "http://proxy.example:8080");
+        }
+        let prefixed = ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_LOG", "ANTHROPIC_CUSTOM_HEADERS", "OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_LOG", "OPENAI_ORG_ID", "anthropic_lowercase"];
+        for k in prefixed {
+            std::env::set_var(k, "http://elsewhere.example");
+        }
         std::env::set_var("ROAMIES_SAY_VOICE", "Daniel");
+        std::env::set_var("ROAMIES_ANTHROPIC_NOTE", "kept");
         // `env env` prints the environment it was given: the sidecar's command with env in Node's and the script's place.
         let env = std::path::Path::new("/usr/bin/env");
         let out = sidecar_command(env, env, "9.9.9", "/x/roamies-hands").output().expect("env runs");
@@ -162,6 +191,11 @@ mod tests {
             assert!(!has(k), "{k} reached the sidecar");
         }
         assert!(!has("ROAMIES_FAKE_CLAUDE"));
+        for k in CLEARED_ENV.iter().chain(&prefixed) {
+            assert!(!has(k), "{k} reached the sidecar");
+        }
+        assert!(!seen.lines().any(|l| { let u = l.to_ascii_uppercase(); u.starts_with("ANTHROPIC_") || u.starts_with("OPENAI_") }));
+        assert!(has("ROAMIES_ANTHROPIC_NOTE"), "only names that start with the prefix go");
         assert_eq!(has("ROAMIES_DATA_DIR"), cfg!(debug_assertions), "ROAMIES_DATA_DIR: debug builds only");
         for k in LINUX_ONLY_ENV {
             assert_eq!(has(k), cfg!(target_os = "linux"), "{k}: Linux only, set by the shell");
@@ -169,22 +203,27 @@ mod tests {
         assert!(seen.lines().any(|l| l == "ROAMIES_VERSION=9.9.9") && seen.lines().any(|l| l == "ROAMIES_HANDS=/x/roamies-hands"));
         assert!(seen.lines().any(|l| l == "ROAMIES_SAY_VOICE=Daniel"), "the rest passes through");
         // The helpers the shell starts go through the same function.
-        let out = without_test_switches(&mut Command::new(env)).output().expect("env runs");
+        let out = clean_env(&mut Command::new(env)).output().expect("env runs");
         let seen = String::from_utf8_lossy(&out.stdout).into_owned();
-        for k in TEST_ONLY_ENV {
+        for k in TEST_ONLY_ENV.iter().chain(CLEARED_ENV).chain(&prefixed) {
             assert!(!seen.lines().any(|l| l.starts_with(&format!("{k}="))), "{k} reached a helper");
         }
+        for k in TEST_ONLY_ENV.iter().chain(RELEASE_CLEARS).chain(LINUX_ONLY_ENV).chain(CLEARED_ENV).chain(&prefixed) {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("ROAMIES_SAY_VOICE");
+        std::env::remove_var("ROAMIES_ANTHROPIC_NOTE");
     }
 
-    // Every process the shell starts from one of Roamies' own programs goes through without_test_switches.
+    // Every process the shell starts from one of Roamies' own programs goes through clean_env.
     #[test]
-    fn every_helper_start_clears_the_test_switches() {
+    fn every_helper_start_goes_through_clean_env() {
         let src = |f: &str| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(f)).unwrap();
         for (file, starts) in [("main.rs", 4), ("voice.rs", 1)] {
             let text = src(file);
-            let cleared = text.matches("without_test_switches(").count();
+            let cleared = text.matches("clean_env(").count();
             let all = text.matches("Command::new(bin)").count();
-            assert_eq!((cleared, all), (starts, starts), "{file}: every Command::new(bin) clears the test switches");
+            assert_eq!((cleared, all), (starts, starts), "{file}: every Command::new(bin) goes through clean_env");
         }
     }
 }

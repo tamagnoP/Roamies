@@ -1581,6 +1581,11 @@ request fails with a network error before any reply; and in private mode. A slow
   `ROAMIES_FAKE_CLAUDE`, `ROAMIES_COMPACT_AT`, `ROAMIES_THINKING`, `ROAMIES_USAGE`, `ROAMIES_VOICE_DRYRUN`,
   `ROAMIES_VOICE_DRYRUN_TEXT`; `ROAMIES_DATA_DIR` in release builds; `ROAMIES_SESSION` and `ROAMIES_LAUNCH` outside
   Linux), and reads `ROAMIES_NODE` in debug builds only. `bench/realrun.sh` therefore runs a debug bundle.
+  Since 2026-11-27 19:01 (the owner) it also takes out, for the sidecar and every helper (`clean_env`), `NODE_OPTIONS`,
+  `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` in both cases, `NODE_EXTRA_CA_CERTS`,
+  `NODE_TLS_REJECT_UNAUTHORIZED`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `ROAMIES_BG` (background mode is always on), and
+  every variable starting `ANTHROPIC_` or `OPENAI_`. A Mac that needs a proxy to reach the internet gets no proxy in
+  Roamies' requests. pi starts through a login shell, so a proxy set in your shell's login files still reaches pi.
 - `showcase/tauri/sidecar/guard.mjs` (new): the never-look list.
 - `showcase/tauri/sidecar/calendar.mjs` (new): the to-do list mirrored in Super Productivity, and the sync.
 - `showcase/tauri/sidecar/answers.mjs` (new): yes/no bubbles that take a spoken answer; which words count; filler

@@ -167,7 +167,9 @@ The reset is what makes macOS ask again.
   exists for tests (an environment variable, a file, an argument) is either taken out by the shell before it
   starts the sidecar or a helper (`TEST_ONLY_ENV` in `src-tauri/src/sidecar.rs`, with its test there), read by the
   shell in debug builds only (`#[cfg(debug_assertions)]`), or overwritten by the shell (`ROAMIES_HANDS`). A new one
-  goes on that list, with the test updated, in the same commit.
+  goes on that list, with the test updated, in the same commit. The shell also takes out, for the sidecar and every
+  helper, the variables that load code into Node, redirect or intercept traffic, or change what the Anthropic and
+  OpenAI libraries send or log (`CLEARED_ENV`, `CLEARED_PREFIXES`; the owner, 2026-11-27 19:01).
 - **Update `LOCAL-ONLY.md`** in the same commit as the behaviour it describes.
 - **If a test fails, find the cause.** Do not weaken or delete a test to get a pass; say what failed.
 - **Update `ROADMAP.md`** in the same commit as any change of status: when a feature is started, finished, merged,
