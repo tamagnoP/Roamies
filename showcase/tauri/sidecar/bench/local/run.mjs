@@ -33,6 +33,8 @@ const RESULTS = {
   search_notes: () => 'Found 1 note: "Confocal booking".',
   read_note: () => 'Lab meeting: bring the slides.',
   open: (a) => `Opened ${a.target}.`,
+  read_file: (a) => `~/Projects/thesis/${a.path} (96 bytes):\n\nThe segment step splits each image into cells and writes one mask per image.\n\n[End of the file.]`, // feature 14
+  find_files: (a) => `~/Projects/thesis/src/${a.name}`, // feature 14
 };
 const seen = [];
 const tool = (n) => (RESULTS[n] ? { execute: async (a) => { seen.push({ n, a }); return RESULTS[n](a); } } : null);

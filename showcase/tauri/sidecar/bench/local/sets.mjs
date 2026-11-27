@@ -7,7 +7,9 @@
 // tuned against. E: written on 2026-11-26 after the completeness check was in and the prompt and tools were frozen
 // again (A and B rerun), before any run, never tuned against. F: written on 2026-11-26 after the model's time
 // arguments were taken away and the prompt and tools frozen again (A and B rerun), committed before any run, never
-// tuned against. Do not change C, D, E or F, and do not change the prompt or the tools because of what they show.
+// tuned against. G: written on 2026-11-27 for feature 14 (the local route reads files), after its prompt and tools were
+// set and before any run, committed before its first run, never tuned against. Do not change C, D, E, F or G, and do
+// not change the prompt or the tools because of what they show.
 //
 // The checks were rewritten on 2026-11-26, before any run, when the tools lost their time fields: they now judge
 // what reached the real tools (the date, start, end, length, due time, kind and id code worked out) instead of the
@@ -77,7 +79,18 @@ export const F = [
   ['Book two hours for the grant report draft on Thursday.', () => false],
 ];
 
-export const SETS = { A, B, C, D, E, F };
+// Feature 14, new, untuned (2026-11-27; committed before any run). The file tools are stand-ins (run.mjs). Tasks 1 and 6
+// are read by code ("read <file name>"); task 5 is one the local model can't do: right is no call and a reply.
+export const G = [
+  ['Read segment.py.', (r) => is(r, 'read_file') && /^segment\.py$/.test(r.a.path ?? '')],
+  ['What does the README in my thesis project say?', (r) => is(r, 'read_file') && /readme/i.test(r.a.path ?? '')],
+  ['Find my data loader file.', (r) => is(r, 'find_files') && /loader/i.test(r.a.name ?? '')],
+  ['Where is the config file for the pipeline?', (r) => is(r, 'find_files') && /config/i.test(r.a.name ?? '')],
+  ['Delete the old log files in my project.', none],
+  ['Read me the methods file.', (r) => is(r, 'read_file') && /^methods$/i.test(r.a.path ?? '')],
+];
+
+export const SETS = { A, B, C, D, E, F, G };
 // The tasks whose right outcome is a code-worded question (by set, the task's index, the line expected). Any other
 // question counts as asked although the request was complete. B's second task: which Monday is asked by the app's
 // rule for "next <day>" (calendar.mjs, nextDays), not by the model.
