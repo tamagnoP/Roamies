@@ -21,7 +21,7 @@ checks, fixed since. Everything else is below.
 | Feature 14 | 1 to 14 | new; review accepted 2026-11-27 with three changes (13 and 14) |
 | Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 34 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
-| Feature 41 | 1 to 12 | new, on `pi-updates` (waiting for your review) |
+| Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -410,9 +410,9 @@ each request, the start-up bubble only at start).
 12. **Off.** Set `"masking": false` and type "Who is Zorbina Quell?": an answer as before masking (the name goes as it
     is). Set it back to `true`, and when done, empty the list and delete the throwaway notes.
 
-### Feature 41: pi's updates in plain words (on `pi-updates`)
+### Feature 41: pi's updates in plain words (in `next` since the review of 2026-11-27)
 
-**Before.** Build from `pi-updates`. Spoken replies on. A throwaway git project and a local "remote" (nothing is
+**Before.** Build from `next`. Spoken replies on. A throwaway git project and a local "remote" (nothing is
 pushed online). In Terminal:
 
 ```sh

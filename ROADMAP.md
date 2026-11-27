@@ -55,7 +55,7 @@ Last updated: 2026-11-25.
 | 32 | Ledger: every request to the provider recorded locally, never its content | Built 2026-11-26 with 23 (stage 2, branch `offline-ledger`); "what left the Mac today?" answered by code; showing it in 21 not built | |
 | 33 | Stand down: one phrase or shortcut stops everything and keeps Roamies quiet | In `next` (review accepted 2026-11-25 with three changes, `deb6bd8`); waiting for test session 1 (`TESTS.md`) | `next` |
 | 34 | Masking: private words swapped for stand-ins before anything goes to the provider | In `next` (review accepted 2026-11-27 with one change: the shell clears the test-only switches); `TESTS.md` group 2, checks 1 to 12 | `next` |
-| 41 | pi's updates in plain words: a code digest, one or two sentences worded by the model, events always mentioned | Built 2026-11-27 on `pi-updates`, `test:all` passed; waiting for his review; `TESTS.md` group 2, checks 1 to 12 | |
+| 41 | pi's updates in plain words: a code digest, one or two sentences worded by the model, events always mentioned | Built 2026-11-27, review accepted, in `next`; `TESTS.md` group 2, checks 1 to 12 | |
 | 37 | Lessons: three lines after each mistake found in review or testing, read at the start of each feature | Started 2026-11-26 (`LESSONS.md`, rule in `CLAUDE.md`) | `next` |
 | 40 | Find a file anywhere (Spotlight, by name) and show its folder in Finder, by code alone | In `next` (review accepted 2026-11-27 with the choices in the report); `TESTS.md` group 2, checks 1 to 12 | `47335b9`, `bc7e500`, `fee1f7a` |
 
@@ -1421,6 +1421,9 @@ what he has to do next; commands stay on screen; each update one small request, 
   `sidekick.mjs` (`piWords`, `piUpdate`, the closing summary as one small request, the summary in the live state);
   ledger kind `piUpdate`; guarantee 2 names git, guarantee 10 added. Tests: `piwatch`, `piupdates-run` (both routes).
   Report: `~/Documents/roamies-reports/2026-11-27_1952_feature-41-report.md`.
+- **Review accepted 2026-11-27 20:16**, with the report's deviations
+  (`~/Documents/roamies-reports/2026-11-27_2016_owner-accepts-feature-41-and-settings-fault.md`). `test:all` passed;
+  `pi-updates` merged into `next` (fast-forward, `3496f87`) and pushed.
 
 ### 29. Run watcher
 
@@ -2175,13 +2178,19 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - **2026-11-27 19:01.** Environment work and feature 41's plan accepted. The shell now also clears `NODE_OPTIONS`,
   the proxy and certificate variables, every `ANTHROPIC_*` and `OPENAI_*` variable and `ROAMIES_BG` (`57f94b1`; none
   is set on this Mac, so sign-in and the claude program are unaffected). Feature 41 to be built.
+- **2026-11-27 20:16.** Feature 41 accepted and merged into `next`. A fault on his Mac: a `settings.json` that isn't
+  valid JSON left a request hanging, threw out of an event handler and a timer, and showed him nothing. To be fixed on a
+  small branch off `next`: a code-worded line with the line and column at start-up and on every request while it is
+  broken; every place that reads the settings handled; a run test. What Roamies does meanwhile (refuse requests, or run
+  on defaults) waits for his answer. The log kind `fish_account` to be renamed, with no Fish Audio name left in a log
+  kind or a message he can see.
 
 ## 6. Still to test
 
 - [ ] Feature 14 (in `next`): checks 1 to 14 in `TESTS.md` (group 2).
 - [ ] Feature 40 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
 - [ ] Feature 34 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
-- [ ] Feature 41 on `pi-updates`: checks 1 to 12 in `TESTS.md` (group 2), after its review.
+- [ ] Feature 41 (in `next`): checks 1 to 12 in `TESTS.md` (group 2).
 - [ ] Feature 18 on `daily-note`: the checks in `TESTS.md` (group 1).
 - [ ] Feature 33 in `next`: the checks in `TESTS.md` (group 1).
 - [ ] Features 25 and 31 on `check-ins` (after review): the checks in `TESTS.md` (group 1), with the microphone
