@@ -167,7 +167,7 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   assert.match(tick, /const given = \{ kind: b\.kind, given: false \};\n\s*briefingWaiting = true;/);
   assert.match(tick, /, \{ briefing: given \}\)\.then\(\(\) => \(given\.given && b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'its questions only when it was given');
   assert.match(side, /if \(busy \|\| queued \|\| briefingWaiting \|\| loggingIn/, 'no second one chosen meanwhile');
-  assert.match(side, /if \(stood\?\.on\(\)\) \{ if \(briefing\) logLine\('stand_down_held', \{ what: 'briefing', kind: briefing\.kind \}\); else logLine\('stand_down_dropped', \{ what: 'request' \}\); return; \}\n(?:.*\n){0,3}\s*if \(briefing\) \{ pi\.briefing\.done\(briefing\.kind\); briefing\.given = true; logLine\('briefing', \{ kind: briefing\.kind \}\); \}/, 'held while stood down, marked given when made');
+  assert.match(side, /if \(stood\?\.on\(\)\) \{ if \(briefing\) logLine\('stand_down_held', \{ what: 'briefing', kind: briefing\.kind \}\); else logLine\('stand_down_dropped', \{ what: 'request' \}\); return; \}\n(?:.*\n){0,4}\s*if \(briefing\) \{ pi\.briefing\.done\(briefing\.kind\); briefing\.given = true; logLine\('briefing', \{ kind: briefing\.kind \}\); \}/, 'held while stood down, marked given when made');
   assert.match(side, /if \(briefing\) briefingWaiting = false;/, 'its turn over, the next minute may choose it again');
   // the line left by a stand down that ended at the day turn: after a typed request's reply, or a spoken exchange's end
   assert.match(side, /if \(own && !flow\.spoken\(\)\) queue\?\.exchanged\(\);/); assert.match(side, /ended: \(\) => queue\?\.exchanged\(\),/);

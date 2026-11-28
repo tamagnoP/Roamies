@@ -22,7 +22,7 @@ checks, fixed since. Everything else is below.
 | Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 34 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
-| Settings that can't be used | 1 to 11 | new, 2026-11-28 (the fault on your Mac) |
+| Settings that can't be used | 1 to 12 | new, 2026-11-28 (the fault on your Mac; 12 added at 12:06) |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -477,7 +477,7 @@ pypi.org.
 ### Settings that can't be used (the fault of 2026-11-27, fixed 2026-11-28)
 
 **Before.** Build from `next`. Spoken replies on. Keep a copy of your settings first, and put it back at the end
-(check 11):
+(check 12):
 
 ```sh
 cp ~/Documents/roamies-pi/settings.json ~/Documents/roamies-pi/settings.backup.json
@@ -510,7 +510,10 @@ cp ~/Documents/roamies-pi/settings.json ~/Documents/roamies-pi/settings.backup.j
 10. **A wrong value that protects nothing:** set `"closingReply": ""` and save.
     You should see: nothing said. Requests are answered. At the next start, the usual notice names `closingReply`.
     Set it back.
-11. **The log, then clean up.** In the activity log, `~/.gg/sidekick/logs/<today>.log`: `settings_refused`,
+11. **A protecting setting taken out:** delete the `"findDrives"` line (mind the comma before it) and save.
+    You should see, once: "findDrives was taken out of settings.json, so it now takes its default: true." Requests
+    are answered. Put the line back: nothing is said.
+12. **The log, then clean up.** In the activity log, `~/.gg/sidekick/logs/<today>.log`: `settings_refused`,
     `settings_reminder`, one `settings_unreadable` for each kind skipped, and no `uncaught`, `error prompt`,
     `daily_failed` or `calendar_error` from the time it was broken. Then put your settings back:
     `mv ~/Documents/roamies-pi/settings.backup.json ~/Documents/roamies-pi/settings.json`.

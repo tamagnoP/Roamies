@@ -247,10 +247,15 @@ something, is not run on defaults. Until it is fixed:
   and with `speakNotices` off (neither can be read). Lines are said one after another, never cutting one off.
 - **No request to any model**: not the provider, not the summary model, not the local model. A model request already
   running makes no further call; its error line is the same line.
+- **Every tool call is refused** (the owner, 2026-11-28 12:06), on every route: the check is the first step of the one
+  wrapper all tools go through. The first refusal also ends the request it belongs to, so Claude's program can't take
+  a next step by itself; the tool calls after it in that step never start. The request ends with the line.
 - **The reminders you set still come, at their time**, shown and said, followed by the line.
 - **What runs by itself is skipped**, with one `settings_unreadable {from}` line each in the activity log until the
   file can be used again: the daily note and its plan, calendar sync and its start-up step, check-ins, the quiet
   queue, briefings, page rebuilds, the warm-up, the fold, the memory pass and pi's updates.
+- **The memory pass of a conversation closed meanwhile** (New conversation, the day turn) is kept, up to five, and
+  made once the file can be used again (logged `memory_later {why}`). It is lost if Roamies quits first.
 - **A pi task approved before** runs on. Its summary isn't requested: the line, then code's lines for the events and
   pi's reply word for word, as with text replies.
 - **Still working**: Quit, the panel (the line stays in its note until the file can be used), stop speaking, the
@@ -263,6 +268,11 @@ something, is not run on defaults. Until it is fixed:
   it usable says nothing. No restart and no request is needed. If a request finds it mended before the watch does,
   that line comes with the request instead, once. The natural voice and the calendar's start-up step, if they waited,
   start then.
+- **A save that takes out a setting that protects something**, which the file had at its last usable read, gets one
+  notice naming it and the default it now takes, for example "findDrives was taken out of settings.json, so it now
+  takes its default: true." No refusal. A list shows its entries, an object points to settings.default.json, and
+  `mask` says no word is masked. A setting that protects nothing, taken out, says nothing (it is in the start-up
+  notice as before). Logged `settings_removed {names}`.
 
 **The settings that protect something** (`PROTECTING` in `pi.mjs`, and `refusedWhenWrong` in settings.default.json):
 `mask` (and any entry on it that would leave a word unmasked, while `masking` is on: one that isn't text, is under 2

@@ -52,6 +52,8 @@ export function query({ prompt, options }) {
       yield { type: 'assistant', parent_tool_use_id: null, message: { id: mid, model, content: [{ type: 'tool_use', id, name: `mcp__gg__${name}`, input: args }] } };
       yield ev({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 40, output_tokens: 20 } }, sid);
       yield ev({ type: 'message_stop' }, sid);
+      // test/settings-broken-tools-run.test.mjs: the settings file breaks between the model's step and the tool call
+      if (process.env.FAKE_CLAUDE_BREAK && /plate scans/.test(texts.at(-1) ?? '')) fs.writeFileSync(process.env.FAKE_CLAUDE_BREAK, '{,\n');
       const got = await call('tools/call', { name, arguments: args, _meta: { 'claudecode/toolUseId': id } });
       const content = got.result?.content ?? [];
       rec.results.push(content); keep({ tool: name, args, result: content });

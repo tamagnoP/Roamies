@@ -2210,6 +2210,14 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   (b) `mission-control`, with his sixteen answers (guarantee 2 unchanged, no undo button; guarantee 11 in his
   wording; `orb.size` 80–140 in settings.json; `voices` dropped; the working-day dial; sounds deleted; no Windows or
   Linux work).
+- **2026-11-28, `settings-followups`.** (1) A save that takes out a setting that protects something, which the file
+  had at its last usable read, gets one notice naming it and its default (`removedProtecting`, `removedNotice` in
+  `reference.mjs`; logged `settings_removed`); no refusal. (2) The memory pass of a conversation closed while the file
+  was broken is kept (up to five) and made once it can be used (`memory_later`). (3) Every tool call is refused while
+  the file can't be used: the check is the first step of the one wrapper every tool goes through on every route; the
+  first refusal ends the request (so Claude's program takes no next step by itself) with the settings line. Run test
+  `settings-broken-tools-run.test.mjs` (in `test:all`): both routes, plus the memory pass, the notice and a pi task
+  finishing while broken. TESTS.md check 11 added (now 1 to 12).
 
 ## 6. Still to test
 

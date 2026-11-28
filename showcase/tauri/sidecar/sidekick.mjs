@@ -56,7 +56,7 @@ import { BACK_AGAIN, LOCAL_TAG, PRIVATE_OFF, PRIVATE_ON, PRIVATE_TAG, cantLocall
 import { readState, writeState } from './pi.mjs';
 import { WEB_OFF, assignNumbers, cleanMask, createMasker, isWebAsk, maskMessage, textKey, unmaskMessage } from './mask.mjs'; // Local-only build (feature 34): masking
 import { createFlow } from './flow.mjs'; // Local-only build (feature 22): the exchange, the answer window, pending questions
-import { heldNotice, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
+import { heldNotice, removedNotice, removedProtecting, startupSettings } from './reference.mjs'; // Local-only build: settings.default.json and the start-up notice
 import { createNotes } from './notes.mjs';
 import { createFiles } from './files.mjs'; // Local-only build (feature 14): Roamies reads files at the owner's request
 import { createDaily, isReviewAsk } from './daily.mjs'; // Local-only build (feature 18): the daily note
@@ -249,9 +249,9 @@ function settingsSay(shown, spoken, mood = 'concerned') {
   }).catch((e) => failed('settings line', e));
 }
 /** The line for a request of the owner's while the settings can't be used. */
-function refuse(p, byVoice) {
+function refuse(p, byVoice, by = byVoice ? 'voice' : 'typed') {
   settingsBad = true;
-  logLine('settings_refused', { by: byVoice ? 'voice' : 'typed', kind: p.problem?.kind ?? 'read' });
+  logLine('settings_refused', { by, kind: p.problem?.kind ?? 'read' });
   if (byVoice) ui({ kind: 'heard' });
   settingsSay(p.message, p.spoken);
 }
@@ -272,6 +272,18 @@ function readableAgain(spokenToo) {
   if (spokenToo) voiceLine(READABLE_AGAIN, false, true);
   afterReadable();
 }
+// The owner, 2026-11-28: a tool call while the settings can't be used is refused, every one, whichever route made it;
+// the first also ends the request it belongs to (Claude's program would otherwise go on to its next step by itself),
+// which then ends with the settings line.
+let brokeDuring = null;
+function refuseTool(p, name) {
+  logLine('settings_tool_refused', { tool: name });
+  if (!brokeDuring) { brokeDuring = p; settingsBad = true; try { controller?.abort(); } catch { /* none running */ } }
+  throw p;
+}
+// A conversation closed while the settings couldn't be used: its memory pass, done once they can (the owner, 2026-11-28).
+const memoryLater = [];
+function memoryAgain() { for (const { s, why } of memoryLater.splice(0)) memoryPass(s, why).catch((e) => failed('memory pass', e)); }
 const kokoro = createKokoro({
   settings: settingsNow, home: HOME,
   log: (kind, data) => logLine(kind, data),
@@ -727,6 +739,7 @@ leanTools(tools, { describe: SHORT(userName) }); // Local-only build (feature 23
 for (const t of tools) {
   const run = t.execute;
   t.execute = async (args, ctx, ...rest) => {
+    { const p = trouble(); if (p) refuseTool(p, t.name); }
     if (ctx?.seePrivate) return run(args, ctx, ...rest);
     const mk = ctx?.toolCallId && agentMasker?.active ? agentMasker : null;
     const r = redactResult(await run(mk ? mk.backDeep(args, maskUse) : args, ctx, ...rest), privateWords());
@@ -1367,7 +1380,7 @@ async function learnFacts(facts) {
   return added;
 }
 async function memoryPass(s, why) {
-  if (trouble()) { skipped('memory pass'); return []; } // the owner, 2026-11-28
+  if (trouble()) { skipped('memory pass'); if (memoryLater.length < 5) { memoryLater.push({ s, why }); logLine('memory_later', { why }); } return []; } // the owner, 2026-11-28: done once the settings can be used
   const turns = transcript(s.messages.filter((m) => !isSummary(m) && !isHandover(m)), userName, stripNote); // Local-only build (feature 18): nor the handover
   if (!turns.trim() || !config.model) return [];
   const t0 = Date.now();
@@ -1560,7 +1573,7 @@ async function liftPrivate(title, byVoice) {
  *  'private'. Nothing here sends anything to the provider. */
 let localLast = null;
 async function localPrompt(text, byVoice, why, priv) {
-  localLast = null;
+  localLast = null; brokeDuring = null;
   busy = true; quiet = false; flow.activity(); menu();
   controller = new AbortController();
   const ctl = controller, t0 = Date.now();
@@ -1578,13 +1591,15 @@ async function localPrompt(text, byVoice, why, priv) {
       localLast = out;
       if (out.problem) { reply = out.problem; mood = 'concerned'; } else { reply = out.reply; first = announcer.before('local', why); }
     }
+    if (brokeDuring) throw brokeDuring;
     if (ctl.signal.aborted) return;
     timing.firstText(); timing.replied(); timing.done({ route: priv ? 'local-private' : 'local', tools: localLast?.calls?.map((c) => c.name) ?? [] });
     const full = [first, reply].filter(Boolean).join(' ');
     ui({ kind: 'say', text: sir(full), mood, tag: priv ? PRIVATE_TAG : LOCAL_TAG });
     if (byVoice || flow.spoken()) voiceLine(forVoice(full));
   } catch (e) {
-    if (!ctl.signal.aborted) { console.error('local request', e); ui({ kind: 'say', text: sir('The local model ran into a problem; nothing was sent.'), mood: 'concerned', tag: priv ? PRIVATE_TAG : LOCAL_TAG }); }
+    if (brokeDuring || (isSettingsProblem(e) && !ctl.signal.aborted)) refuse(brokeDuring ?? e, byVoice, 'during'); // the owner, 2026-11-28
+    else if (!ctl.signal.aborted) { console.error('local request', e); ui({ kind: 'say', text: sir('The local model ran into a problem; nothing was sent.'), mood: 'concerned', tag: priv ? PRIVATE_TAG : LOCAL_TAG }); }
   } finally {
     logLine('local_done', { why, private: !!priv, ms: Date.now() - t0 });
     busy = false; menu();
@@ -1774,6 +1789,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   // The owner, 2026-11-28: no request to any model while the settings can't be used. His own gets the line (if the file
   // broke after it was queued); one the app makes is skipped.
   { const p = trouble(); if (p) { if (!briefing && !text.startsWith('(')) refuse(p, byVoice); else skipped(briefing ? 'briefing' : kind); flow.settle(); return; } }
+  brokeDuring = null;
   if (briefing) { pi.briefing.done(briefing.kind); briefing.given = true; logLine('briefing', { kind: briefing.kind }); }
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
   // Local-only build (feature 23, stage 4): which model answers, decided by code (route.mjs).
@@ -1925,6 +1941,7 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
       else if (e.type === 'server_tool_result') { ui({ kind: 'agent', e: { type: 'tool_end', id: e.toolUseId ?? e.id, isError: false } }); activity.end(e.toolUseId ?? e.id, false); panel(); }
       else if (e.type === 'error') throw e.error;
     }
+    if (brokeDuring) throw brokeDuring;
     doneWriting();
     heldBack();
     { const t = echo.flush(); reply.push(t); lastReply += t; }
@@ -1961,12 +1978,13 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     if (ownAsk && !lastReply && !controller.signal.aborted && !stalled && isNetworkError(err) && local.address && local.whenOffline) { logLine('switch_local', { why: 'network' }); running = running.then(() => localPrompt(text, byVoice, 'offline', false)).catch((e) => console.error('local request', e)); return; }
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
-    if (isSettingsProblem(err) && !controller.signal.aborted) { // the owner, 2026-11-28: the settings broke during the request
-      settingsBad = true; logLine('settings_refused', { by: 'during', kind: err.problem?.kind ?? 'read' });
+    const during = brokeDuring ?? (isSettingsProblem(err) && !controller.signal.aborted ? err : null);
+    if (during) { // the owner, 2026-11-28: the settings broke during the request
+      settingsBad = true; logLine('settings_refused', { by: 'during', kind: during.problem?.kind ?? 'read' });
       spoken?.flush();
-      if (voice) voice.say(err.spoken); else if (speech.on) { speech.setVoice(''); const v = speech.start(); v.say(err.spoken); v.end(); }
-      replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end();
-      ui({ kind: 'agent', e: { type: 'error', message: err.message } });
+      if (voice && !controller.signal.aborted) voice.say(during.spoken); else if (speech.on) { voice?.abort(); speech.setVoice(''); const v = speech.start(); v.say(during.spoken); v.end(); }
+      replyDone = whenPlayed(voice && !controller.signal.aborted ? voice.mark() : speech.mark()); voice?.end();
+      ui({ kind: 'agent', e: { type: 'error', message: during.message } });
       return;
     }
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
@@ -3049,19 +3067,26 @@ setInterval(() => { try { if (stood.turned()) standUp('day'); } catch (e) { fail
 const SETTINGS_WATCH_MS = 2000;
 const settingsStamp = () => { try { const st = statSync(settingsPath(HOME)); return `${st.ino}:${st.size}:${st.mtimeMs}`; } catch (e) { return `none:${e?.code ?? ''}`; } };
 let settingsSeen = settingsStamp();
+// The protecting settings the file lacked at the last read that could be used (null: not known yet). A save that takes
+// out one it had gets a notice naming it and the default it now takes; no refusal (the owner, 2026-11-28).
+let protectMissing = (() => { try { return loadSettings(HOME).missing; } catch { return null; } })();
 setInterval(() => {
   const now = settingsStamp();
   if (now === settingsSeen) return;
   settingsSeen = now;
   try {
     const p = trouble();
-    if (p) { settingsBad = true; logLine('settings_notice', { chars: p.message.length, refused: true, from: 'save' }); settingsSay(p.message, p.spoken); }
-    else if (settingsBad) readableAgain(noticesOn());
+    if (p) { settingsBad = true; logLine('settings_notice', { chars: p.message.length, refused: true, from: 'save' }); settingsSay(p.message, p.spoken); return; }
+    if (settingsBad) readableAgain(noticesOn()); else memoryAgain();
+    const missing = loadSettings(HOME).missing, gone = removedProtecting(protectMissing, missing);
+    protectMissing = missing;
+    if (gone.length) { logLine('settings_removed', { names: gone }); unasked({ kind: 'notice', text: removedNotice(gone, HOME), mood: 'concerned' }); }
   } catch (e) { failed('settings watch', e); }
 }, SETTINGS_WATCH_MS);
-/** What waited while the settings couldn't be used, once they can: the natural voice, the calendar's start-up step,
- *  and the stand-down shortcut as the file has it. */
+/** What waited while the settings couldn't be used, once they can: the memory passes, the natural voice, the
+ *  calendar's start-up step, and the stand-down shortcut as the file has it. */
 function afterReadable() {
+  memoryAgain();
   try { startKokoro(); } catch (e) { failed('kokoro', e); }
   try { calStart(); } catch (e) { failed('calendar', e); }
   try { if (JSON.stringify(standKeys()) !== standKeysSent) sendKeys(); } catch (e) { failed('stand down', e); }

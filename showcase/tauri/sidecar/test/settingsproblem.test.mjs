@@ -121,4 +121,43 @@ assert.ok(broken > 400, `many mutations break it (${broken})`);
   // no request while it can't be used
   for (const f of ['piUpdate', 'maybeCompact', 'memoryPass', 'warmUp']) assert.match(side.slice(side.indexOf(`function ${f}(`), side.indexOf(`function ${f}(`) + 400), /trouble\(\)/, f);
 }
+// ---- the owner, 2026-11-28 (12:06): every tool call refused while it can't be used, on every route
+{
+  const src = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
+  const side = fs.readFileSync(path.join(src, 'sidekick.mjs'), 'utf8');
+  // the one wrapper every tool goes through (Claude's route, Claude Code's bridge and the local route call these same
+  // objects), its first step; set up after the list is final, and nothing is added to the list after it
+  const wrap = side.indexOf('for (const t of tools) {\n  const run = t.execute;\n  t.execute = async (args, ctx, ...rest) => {\n    { const p = trouble(); if (p) refuseTool(p, t.name); }\n');
+  assert.ok(wrap > 0, 'the refusal is the wrapper\'s first step');
+  assert.ok(side.lastIndexOf('tools.splice(') < wrap && side.indexOf('leanTools(tools') < wrap, 'after the list is final');
+  assert.doesNotMatch(side.slice(wrap), /\btools\.(push|splice|unshift)\(/, 'nothing added after it');
+  assert.match(side, /tool: \(name\) => tools\.find\(\(t\) => t\.name === name\) \?\? null,/, 'the local route calls the wrapped tools');
+  // the first refusal ends the request (Claude's program would otherwise take its next step by itself) with the line
+  assert.match(side, /if \(!brokeDuring\) \{ brokeDuring = p; settingsBad = true; try \{ controller\?\.abort\(\); \}/);
+  assert.match(side, /if \(brokeDuring\) throw brokeDuring;\n\s*doneWriting\(\);/);
+  assert.match(side, /const during = brokeDuring \?\? \(isSettingsProblem\(err\) && !controller\.signal\.aborted \? err : null\);/);
+  // the memory pass of a conversation closed meanwhile is made once it can be used
+  assert.match(side, /memoryLater\.push\(\{ s, why \}\)/);
+  assert.match(side, /function afterReadable\(\) \{\n\s*memoryAgain\(\);/);
+}
+
+// ---- a save that takes out a setting that protects something (reference.mjs)
+{
+  const { removedProtecting, removedNotice } = await import('../reference.mjs');
+  assert.deepEqual(removedProtecting(null, ['sandbox']), [], 'not known before: nothing');
+  assert.deepEqual(removedProtecting([], ['sandbox', 'closingReply', 'limits.maskEntries']), ['sandbox', 'limits.maskEntries']);
+  assert.deepEqual(removedProtecting(['sandbox'], ['sandbox']), [], 'it wasn\'t there before');
+  assert.deepEqual(removedProtecting(['local'], ['local.start']), [], 'its group wasn\'t there before');
+  assert.deepEqual(removedProtecting([], ['local']), ['local'], 'a whole group');
+  assert.deepEqual(removedProtecting([], ['calendar.dayStart', 'speaking']), [], 'settings that protect nothing');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'removed-'));
+  assert.equal(removedNotice(['sandbox', 'neverLook', 'mask', 'local', 'autoSendReadOnly'], home), [
+    'sandbox was taken out of settings.json, so it now takes its default: true.',
+    `neverLook was taken out of settings.json, so it now takes its default: ${((t) => (t.length > 80 ? `${t.slice(0, 79)}…` : t))(JSON.stringify(settingsDefaults(home).neverLook))}.`,
+    'mask was taken out of settings.json, so it now takes its default: an empty list, so no word is masked.',
+    'local was taken out of settings.json, so it now takes its default: the values under it in settings.default.json.',
+    `autoSendReadOnly was taken out of settings.json, so it now takes its default: ${settingsDefaults(home).autoSendReadOnly}.`,
+  ].join('\n'));
+  fs.rmSync(home, { recursive: true, force: true });
+}
 console.log('settings problem tests: passed');

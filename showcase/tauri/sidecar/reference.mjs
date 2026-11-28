@@ -7,7 +7,7 @@
 // If settings.json lacks a setting, or holds a value that can't be used, Roamies says so once per start-up, in a bubble.
 import fs from 'node:fs';
 import os from 'node:os';
-import { codeReference, loadSettings, readState, referenceFile, settingsDefaults, writeState } from './pi.mjs';
+import { codeReference, loadSettings, protects, readState, referenceFile, settingsDefaults, writeState } from './pi.mjs';
 import { cleanMask, everydayForms, everydayLine } from './mask.mjs'; // feature 34
 import { RATE, SAY } from './localvoice.mjs';
 
@@ -40,6 +40,30 @@ export function settingsNotice(home = os.homedir()) {
   // Feature 34: what on the masking list can't be used (these lines name words: shown, never logged).
   if (s.masking !== false) lines.push(...cleanMask(s.mask, { maxEntries: s.limits.maskEntries }).problems);
   return lines.join('\n');
+}
+
+/** The owner, 2026-11-28: a save that takes out a setting that protects something, which the file had before. before
+ *  and after: loadSettings's `missing` at the two reads (before null: not known, so nothing is said). → the settings
+ *  taken out, each named once, the outermost only. */
+export function removedProtecting(before, after) {
+  if (!Array.isArray(before) || !Array.isArray(after)) return [];
+  const had = (name) => !before.some((m) => name === m || name.startsWith(`${m}.`));
+  return after.filter((name) => protects(name) && had(name) && !after.some((m) => m !== name && name.startsWith(`${m}.`)));
+}
+const valueAt = (o, name) => name.split('.').reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), o);
+/** The default a setting takes, in words for the notice. */
+function defaultWords(name, value) {
+  if (name === 'mask') return 'an empty list, so no word is masked';
+  if (Array.isArray(value)) return value.length ? shown(value) : 'an empty list';
+  if (value && typeof value === 'object') return 'the values under it in settings.default.json';
+  if (value === '') return 'empty ("")';
+  return shown(value);
+}
+/** The notice for settings taken out (removedProtecting), one line each; '' for none. No refusal: each takes its
+ *  default. */
+export function removedNotice(names, home = os.homedir()) {
+  const d = settingsDefaults(home);
+  return names.map((n) => `${n} was taken out of settings.json, so it now takes its default: ${defaultWords(n, valueAt(d, n))}.`).join('\n');
 }
 
 /** At start-up: the reference file is written and the notice worked out. Never throws; → the notice ('' for none). */
