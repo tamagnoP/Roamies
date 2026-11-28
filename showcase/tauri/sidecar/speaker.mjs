@@ -143,8 +143,9 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, MacV
 
   return {
     /** Spoken replies can be made on this computer (macOS has the voice): the check is answered here, with no request
-     *  (speech_ready), and the beats are made. */
-    enable() { if (on) return; on = true; log('speech_ready', { ok: true }); warm(); },
+     *  (speech_ready), and the beats are made, after the code that called it has run (sidekick.mjs calls it while it
+     *  is still loading, before its log is ready). */
+    enable() { if (on) return; on = true; Promise.resolve().then(() => { log('speech_ready', { ok: true }); warm(); }); },
     setVoice(v) { if ((v || '') !== voice) beats = new Map(); voice = v || ''; if (on) warm(); },
     get ready() { return beats.size; },
     get on() { return on; },

@@ -87,3 +87,15 @@ differently. Read this file at the start of each feature (CLAUDE.md, "How to wor
   clock, starting at a fixed time (`page({ wall })`); and for every new timer that follows the wall clock, ask what a
   test running across that moment would see.
 
+## A start-up that threw, caught only by the run tests (feature 21, 2026-11-28)
+
+- **What went wrong:** after the cloud voice was taken out, the sidecar threw at start ("Cannot access 'logLine'
+  before initialization") and the page got nothing; every unit test had passed, and only `rebuild-run` in `test:all`
+  showed it.
+- **Why:** the speaker's new `enable()` logged at once, while sidekick.mjs was still loading; the old code logged after
+  an awaited check, so the order had never mattered. The unit tests build the speaker on its own, not inside the
+  sidecar.
+- **Do differently:** after any change to what sidekick.mjs runs while it loads, start the real sidecar once in a
+  throwaway home and read its error stream before the full run; and keep a module's first log or callback out of the
+  caller's loading (after a microtask), as the code it replaces did.
+
