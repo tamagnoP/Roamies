@@ -41,7 +41,7 @@ Last updated: 2026-11-25.
 | 18 | Daily note (plan, log, review) and task pages | In `next` at `be67580` (review accepted 2026-11-25, with the 70 % rule removed); waiting for test session 1 (`TESTS.md`) | `next` |
 | 19 | Roles and helpers: coder, reviewer, and small single-task helpers | Queued (Prompt F, draft), after 30 | |
 | 20 | Literature toolbox and roles | Held, not designed; after 15 | |
-| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); the orb's design agreed; the rest not designed; after 19 | |
+| 21 | The new look and manner: one orb, bubbles and panel restyled, a personality | 21a done with 16 (`c857a0b`); design delivered 2026-11-27 (`roamies-design`); plan for both parts written 2026-11-28, waiting for his go | |
 | 22 | Conversation flow: spoken questions, answer window, pending questions | Done | `4916c04`, `dd039b9`, `12fb0eb`, `898237b`, `9fcb136`, `bfa3138`, `981001e`, `3190ef8` |
 | 23 | Offline mode with a local model | Planned 2026-11-25 (branch `offline-ledger`); measured and built 2026-11-26: times taken from code, ask before saving what the model decided (C to F: no wrong save), stages 1 to 6 built; waiting for the owner's tests (TESTS.md group 2) | |
 | 24 | Lean running | Fixes 1 to 6, the helper's hour and sleep, and pi's leftovers done; `lean-running` fast-forwarded into `local-only` at `86149ef` (2026-11-24, after the owner's checks). Still to check live: fix 4 (a quit during a spoken reply). The page rebuild without the orb moving: `rebuild-still` (`e3fdb19`) fast-forwarded into `local-only` (2026-11-25, after the owner's check) | `local-only` |
@@ -2194,6 +2194,12 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   again." after one that mends it); a wrong value in a setting that protects something refuses like a broken file
   (`PROTECTING` in `pi.mjs`, listed in LOCAL-ONLY.md). Built on `settings-fault` with `settingsproblem.mjs`, a unit test
   and a run test (`settings-broken-run.test.mjs`, in `test:all`). Next: feature 21's plan (both parts), no build.
+- **2026-11-28 11:47.** `test:all` passed; `settings-fault` merged into `next` (fast-forward, `7a4816d`) and pushed.
+  Report: `~/Documents/roamies-reports/2026-11-28_1147_settings-fault-report.md`.
+- **2026-11-28 11:52.** Feature 21's plan for both parts, (a) the orb and the bubbles and (b) Mission Control:
+  `~/Documents/roamies-reports/2026-11-28_1152_feature-21-plan.md`. It supersedes the 2026-11-15 decision to keep
+  upstream's characters hidden (the spec's rule 6 deletes them). Sixteen questions, among them two guarantee changes
+  (the undo button against guarantee 2; a new guarantee 11). Nothing built; waiting for his go.
 
 ## 6. Still to test
 
