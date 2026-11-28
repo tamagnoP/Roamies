@@ -38,8 +38,6 @@ import { faviconFor } from './draw.mjs';
 import { stripNote } from './intro.mjs'; // feature 21: the guide's chat, tour and showcase went; what notes the model may add is still taken out
 import { SpeechText, CueFilter, VOICE_CUES, endsWithQuestion } from './speech.mjs';
 import { createSpeaker } from './speaker.mjs';
-import { FISH_CHOICES } from './fish.mjs';
-import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
@@ -142,6 +140,7 @@ const OAUTH = {
   // The current sign-in's ID token skips OpenAI's account picker.
   openai: async (cb) => { const previous = await auth.getCredentials(OPENAI_CHATGPT_KEY).catch(() => null); return loginChatGPT(cb, previous ? { previous } : {}); },
 };
+const GUIDE_PROVIDERS = ['anthropic']; // the setup guide's (the owner, 2026-11-28); the menu and the panel are part (b)
 const PROVIDER_LABELS = Object.fromEntries(AUTH_PROVIDERS.map((p) => [p.value, p.label]));
 const MENU_PROVIDERS = ['anthropic', 'openai', ...AUTH_PROVIDERS.map((p) => p.value)].filter((v, i, a) => a.indexOf(v) === i);
 const FAST = { anthropic: 'claude-haiku-5-5', openai: 'gpt-6-luna', gemini: 'gemini-3.8-flash' };
@@ -154,8 +153,7 @@ const DEFAULT_KEYS = process.platform === 'win32'
 const DEFAULTS = {
   provider: null, model: null, sound: true, allowActions: false, voice: true,
   onboarded: false, onboardStep: 0, filesAsked: false, keys: DEFAULT_KEYS, muteWhileTalking: true, autoListen: false, setupVersion: 0,
-  replies: 'text', // 'voice': spoken with Fish Audio as well as shown
-  fishModel: FISH_CHOICES[0].id, // Drama 3 (most expressive) or S2.1 Pro (natural pace, cheaper)
+  replies: 'text', // 'voice': spoken (the Mac's voice or the natural one) as well as shown
 };
 const LINUX = process.platform === 'linux';
 // Linux: "x11" or "wayland" (the app says which). Wayland keeps apps from seeing the pointer over other apps and
@@ -181,7 +179,10 @@ let diagnosing = false; // a diagnostics file is being made (diagnostics.mjs)
 let shellInfo = null; // resolves the shell's reply to it: screens, tray, panel, helpers, permissions, microphones
 {
   const saved = readJson(CONFIG_PATH, { backup: true }); // an unreadable file is set aside, never overwritten
-  if (saved && typeof saved === 'object' && !Array.isArray(saved)) config = { ...DEFAULTS, ...saved };
+  // Only what is still read is kept (2026-11-28): what was left by the cloud voice and the looks goes with the next
+  // save, and is not in diagnostics.
+  const KNOWN = new Set([...Object.keys(DEFAULTS), 'openAtLogin']);
+  if (saved && typeof saved === 'object' && !Array.isArray(saved)) config = { ...DEFAULTS, ...Object.fromEntries(Object.entries(saved).filter(([k]) => KNOWN.has(k))) };
 }
 const saveConfig = () => writeJson(CONFIG_PATH, config, { backup: true });
 
@@ -190,10 +191,7 @@ const saveConfig = () => writeJson(CONFIG_PATH, config, { backup: true });
 // error reports, feedback uploads and self-updates, so only the conversation itself goes to Anthropic.
 for (const k of ['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY', 'DISABLE_ERROR_REPORTING', 'DISABLE_BUG_COMMAND', 'DISABLE_FEEDBACK_COMMAND', 'DISABLE_AUTOUPDATER']) process.env[k] = '1';
 
-// ---------- spoken replies (local-only build: the Mac's own voice, see localvoice.mjs) ----------
-// The key is the user's own: in the Keychain (macOS), DPAPI-encrypted (Windows) or the desktop's keyring (Linux),
-// never in the config or logs.
-const secrets = createSecrets({ hands: process.env.ROAMIES_HANDS || '', dataDir: path.join(path.dirname(CONFIG_PATH), 'sidekick') });
+// ---------- spoken replies (local-only build: the Mac's own voice, see localvoice.mjs, or the natural one) ----------
 let voiceProblemAt = 0;
 // Local-only build (feature 16): the natural voice's helper (kokorovoice.mjs). When it can't start or stops, that is
 // said once, and the macOS voice speaks for the rest of the session.
@@ -288,14 +286,8 @@ const speech = createSpeaker({
   },
 });
 speech.setVoice(voiceNow());
-speech.setModel(config.fishModel);
-// Read once, and again later if the keychain couldn't be read yet (locked at login, or its prompt unanswered): before,
-// one failed read left spoken replies off until the app restarted.
-// Linux: reading the keyring can pop up an "unlock your keyring" dialog (an auto-login desktop leaves it locked), so it's
-// only read once a key has been saved there (fishKeySaved).
-// Local-only build: there is no Fish Audio key to read. "local" only switches the speaker on (macOS has the voice).
-if (process.platform === 'darwin') speech.setKey('local');
-const fishKeyLoaded = Promise.resolve();
+// Spoken replies are made on this computer, so they need macOS's voice: off elsewhere (replies are text there).
+if (process.platform === 'darwin') speech.enable();
 
 // ---------- shortcuts ----------
 const MOD_ORDER = ['control', 'option', 'shift', 'command'];
@@ -1035,7 +1027,7 @@ function anim(name, args = {}) {
 // is fresh. The live block is never saved.
 // Tools that take long enough to need a spoken beat first (a web search runs on the provider's side).
 const SLOW_TOOLS = new Set(['fetch_url', 'see_photo', 'take_screenshot', 'read_window', 'act_in_app', 'run_command', 'search_files', 'list_windows']);
-// How replies are written: for bubbles (text only), or for the ear (spoken with Fish Audio, details on screen).
+// How replies are written: for bubbles (text only), or for the ear (spoken, details on screen).
 const VOICE_ON = () => config.replies === 'voice' && speech.on;
 const replyStyle = () => restyle(VOICE_ON() ? VOICE_STYLE : TEXT_STYLE, personaNow(), userName); // local-only build (feature 21a): the persona's length and manner
 const TEXT_STYLE = `You talk through small speech bubbles, so keep replies short: one to three sentences unless asked for detail. Light markdown shows properly (**bold** for the key word, \`code\` for commands and file names, [links](https://…)), but skip headings and tables in a bubble, and never narrate actions like *waves*. One exception: when you search the web or fetch a page, or the answer is genuinely a list, it shows on a card beside you instead of a bubble. Then start with a one-sentence answer, follow with 3 to 6 short points as "- " lines (one fact each, under 20 words), and if you used the web this turn, end with a line "Sources: " and the site names as [name](url) links. Markdown renders on the card (bold, \`code\`, links, headings, tables, code blocks), so use what helps, but no preamble. Everything else stays a short bubble with no "- " lines. Amounts, a comparison, a place, dates, a process and maths are drawn, not listed: for those use draw (see "Show, don't just tell") and write no "- " lines. An emoji now and then is fine; the bubbles show them. `;
@@ -1045,7 +1037,7 @@ Before anything slow (reading a file, looking at the screen, acting in an app, r
 `;
 // Local-only build (feature 21a): who is speaking, and how, comes from the persona (persona.mjs), not from the look.
 const stablePrompt = () => `${opening(personaNow(), userName)} You live in Roamies, a desktop app by Ken Kai (Mac, Windows and Linux) that puts little companions on your screen; this is Roamies ${VERSION}. ${nameRule(personaNow())}
-About Roamies, for when ${userName} asks about you or the app: ${MAC ? 'it lives in the menu bar at the top of the screen (no Dock icon)' : LINUX ? 'it lives in the system tray (no window of its own); GNOME shows tray icons only with the AppIndicator extension, and opening Roamies again from the app list opens the panel, tray or not' : 'it lives in the system tray at the bottom right of the taskbar (no taskbar button); Windows may tuck the icon behind the ^ arrow next to the clock, and dragging it onto the taskbar keeps it in view'}. ${LINUX ? 'Clicking the tray icon shows a short menu (Open Panel,' : `Clicking the ${MAC ? 'menu bar' : 'tray'} icon opens the Roamies panel; right-clicking it shows a short menu (Open Panel,`} Show ${lookName()}, Ask ${lookName()}…, ${SNAP_OK ? 'Ask About an Area…, ' : ''}Stop, Quit Roamies). The panel has a header (your name, the Roamies version with one update button beside it: Check for Updates, which becomes Update to <version> when one is out and installs it and restarts in one go; By Ken Kai under the name; and Quit at the top right, which asks to confirm) and a sidebar of pages; long lists show a page at a time, with arrows in the page's footer. Home: a list of what you did recently (questions, files read, searches, reminders), today's usage, and buttons for Ask, Show List (reminders and commitments on screen: Today and Later; tick them off there; finished ones clear at midnight)${SNAP_OK ? ', Ask About an Area' : ''}, Stop and New Conversation. Memory: two tabs, What I Remember (everything you remember about them, each with Forget, a search once there's more than a page, and Forget Everything in the footer) and Commitments (their open commitments, Done or Drop). Then the settings pages: Model (pick the AI provider and model, and sign in to providers), Voice (Replies: Text Only, or Voice and Text, which speaks replies out loud with Fish Audio and needs their own Fish Audio API key, added right there; Voice Model: Drama 3, the most expressive (acts out feelings, slower, pricier) or S2.1 Pro (a natural, quicker pace with less emotion, cheaper), billed to their own Fish Audio account${VOICE_OK ? `; Voice Control, ${HOTKEYS_OK ? 'hold the talk keys to talk' : 'press the talk shortcut to talk'}` : ''}), Behavior (Sound Effects, Allow File Edits & Commands, ${VOICE_OK ? 'Auto-listen (open the mic when you end on a question), ' : ''}Open at Login), and About (who made Roamies with links, Setup Guide, Show Logs, Save Diagnostics). Updates are signature-checked${LINUX ? '; they install by themselves when Roamies runs as an AppImage; installed from a .deb or .rpm, the update button opens the download page instead' : ''}. When something isn't working (the microphone, voice, the panel, a crash, an error), tell them to use Save Diagnostics (in About, or the tray icon's menu): it saves one .log file in Downloads with the logs, system and microphone details, keys and personal details removed, for them to attach to a GitHub issue at github.com/KenKaiii/Roamies/issues or send to Ken. Sign-in is shared with GG Coder. Downloads and source: github.com/KenKaiii/Roamies. Don't invent features or settings that aren't listed here.
+About Roamies, for when ${userName} asks about you or the app: ${MAC ? 'it lives in the menu bar at the top of the screen (no Dock icon)' : LINUX ? 'it lives in the system tray (no window of its own); GNOME shows tray icons only with the AppIndicator extension, and opening Roamies again from the app list opens the panel, tray or not' : 'it lives in the system tray at the bottom right of the taskbar (no taskbar button); Windows may tuck the icon behind the ^ arrow next to the clock, and dragging it onto the taskbar keeps it in view'}. ${LINUX ? 'Clicking the tray icon shows a short menu (Open Panel,' : `Clicking the ${MAC ? 'menu bar' : 'tray'} icon opens the Roamies panel; right-clicking it shows a short menu (Open Panel,`} Show ${lookName()}, Ask ${lookName()}…, ${SNAP_OK ? 'Ask About an Area…, ' : ''}Stop, Quit Roamies). The panel has a header (your name, the Roamies version with one update button beside it: Check for Updates, which becomes Update to <version> when one is out and installs it and restarts in one go; By Ken Kai under the name; and Quit at the top right, which asks to confirm) and a sidebar of pages; long lists show a page at a time, with arrows in the page's footer. Home: a list of what you did recently (questions, files read, searches, reminders), today's usage, and buttons for Ask, Show List (reminders and commitments on screen: Today and Later; tick them off there; finished ones clear at midnight)${SNAP_OK ? ', Ask About an Area' : ''}, Stop and New Conversation. Memory: two tabs, What I Remember (everything you remember about them, each with Forget, a search once there's more than a page, and Forget Everything in the footer) and Commitments (their open commitments, Done or Drop). Then the settings pages: Model (pick the AI provider and model, and sign in to providers), Voice (Replies: Text Only, or Voice and Text, which speaks replies out loud on this Mac, in the Mac's own voice or the natural voice set in settings.json; nothing to sign up for or pay${VOICE_OK ? `; Voice Control, ${HOTKEYS_OK ? 'hold the talk keys to talk' : 'press the talk shortcut to talk'}` : ''}), Behavior (Sound Effects, Allow File Edits & Commands, ${VOICE_OK ? 'Auto-listen (open the mic when you end on a question), ' : ''}Open at Login), and About (who made Roamies with links, Setup Guide, Show Logs, Save Diagnostics). Updates are signature-checked${LINUX ? '; they install by themselves when Roamies runs as an AppImage; installed from a .deb or .rpm, the update button opens the download page instead' : ''}. When something isn't working (the microphone, voice, the panel, a crash, an error), tell them to use Save Diagnostics (in About, or the tray icon's menu): it saves one .log file in Downloads with the logs, system and microphone details, keys and personal details removed, for them to attach to a GitHub issue at github.com/KenKaiii/Roamies/issues or send to Ken. Sign-in is shared with GG Coder. Downloads and source: github.com/KenKaiii/Roamies. Don't invent features or settings that aren't listed here.
 ${replyStyle()}Your body does the acting: to act out a feeling, start your reply with one tag, which is never shown: ${EMOTES.map((e) => `[${e}]`).join(' ')}. hype marks a real win, remind goes with a reminder, wave is hello or goodbye; upset and motivate are not used. Most replies need no tag.
 Lead with the answer: the fact, number, pick or result they asked for, then only the context that makes it useful, then stop. A count or total gathered over several pages, files or results: note each one's count in a few words as you go ("Page 1: two."), add those up, and check the total you lead with against the items you then name. No opener about checking, looking or searching ("Let me see…", "I found…").
 After using a tool, never repeat what you already said; only add what's new.
@@ -1644,7 +1636,6 @@ let lastReply = '', lastFailed = false;
 // The agent for the next request, made or rebuilt if needed: null when ready, else what to tell the user.
 async function readyAgent() {
   await resumed;
-  await fishKeyLoaded;
   await refreshAuth();
   if (!ensureModel()) return `Sign in to an AI provider first: the Model page in ${PANEL}. Then ask me again!`;
   if (!session) { session = newSession(config.provider, config.model); liveBlocks.clear(); agent = null; pruneSessions(); }
@@ -2068,8 +2059,7 @@ function openUrl(url) {
 // ---------- replies: text only, or voice and text ----------
 
 async function setReplies(mode) {
-  await fishKeyLoaded;
-  if (mode === 'voice' && !speech.on) return fishKeyLogin({ thenVoice: true });
+  if (mode === 'voice' && !speech.on) return say("This build speaks only with a Mac's own voice, so replies are text on this computer.", 'happy');
   if (config.replies === mode) return;
   config.replies = mode; saveConfig();
   agentStale = true; // the spoken and written styles are different prompts
@@ -2085,41 +2075,6 @@ function speakLine(text, mood = 'happy') {
   const v = config.replies === 'voice' ? speech.start() : null;
   if (v && onboarding) guideVoices.add(v.id); // heard in the setup guide, where it was switched on
   if (v) { v.say(text); v.end(); }
-}
-
-async function removeFishKey() {
-  return say("This build speaks with your Mac's own voice, so there's no key to remove.", 'happy'); // local-only build
-  try { await secrets.delete('fish-audio'); } catch { return say(`I couldn't remove the key${MAC ? ' from your Keychain' : LINUX ? ' from your keyring' : ''}. Try again in a moment.`, 'concerned'); }
-  speech.setKey(null); speech.stop();
-  if (config.fishKeySaved) { config.fishKeySaved = false; saveConfig(); }
-  if (config.replies === 'voice') { config.replies = 'text'; saveConfig(); agentStale = true; }
-  menu();
-  say('Fish Audio key removed. Replies are text only.', 'happy');
-}
-
-// note(text, bad): typed into the panel or the setup guide, so how it went shows there too, next to the field.
-async function fishKeyLogin({ thenVoice = false, given = null, note = null } = {}) {
-  const say = note ? (text, mood) => { sayOut(text, mood); note(text, mood === 'concerned'); } : sayOut;
-  return say(MAC ? "This build speaks with your Mac's own voice, so no key is needed." : "This build speaks only with a Mac's own voice, so replies are text on this computer.", 'happy'); // local-only build
-  const key = (given ?? (await ask({ prompt: 'Paste your Fish Audio API key', placeholder: 'Fish Audio API key', mask: true })))?.trim();
-  if (!key) return note?.('Paste your Fish Audio key first.', true);
-  if (!/^[\x21-\x7e]{8,512}$/.test(key)) return say("That doesn't look like a Fish Audio key. Copy it again from fish.audio.", 'concerned');
-  const prev = await secrets.get('fish-audio').catch(() => null);
-  speech.setKey(key);
-  const a = await speech.check();
-  if (!a.ok) {
-    speech.setKey(prev);
-    return say(a.reason === 'key' ? "That key didn't work. Copy it again from fish.audio and retry." : "I couldn't reach Fish Audio. Check the connection and try again.", 'concerned');
-  }
-  try { await secrets.set('fish-audio', key); if (!config.fishKeySaved) { config.fishKeySaved = true; saveConfig(); } } catch (e) {
-    console.error('fish key save', e.message);
-    speech.setKey(prev);
-    return say(`I couldn't save the key safely${MAC ? ' in your Keychain' : LINUX ? `: ${String(e?.message ?? 'no keyring').slice(0, 140)}` : ''}, so voice stays off.`, 'concerned');
-  }
-  if (thenVoice || config.replies !== 'voice') { config.replies = 'voice'; saveConfig(); agentStale = true; }
-  menu(); if (onboarding) obState();
-  note?.('Fish Audio key saved. Voice is on.');
-  speakLine(speech.model.endsWith('-free') ? "Voice is on, on Fish Audio's free model since the account has no credit." : 'Voice is on. This is how I sound.');
 }
 
 // ---------- updates ----------
@@ -2239,7 +2194,7 @@ async function saveDiagnostics() {
       version: VERSION, provider: config.provider, model: config.model, signedIn: [...signedIn].filter(([, on]) => on).map(([p]) => p),
       busy, sidecarUpMinutes: Math.round(process.uptime() / 6) / 10,
       voice: { on: VOICE_OK && config.voice !== false, needsModel: NEEDS_MODEL, model: { status: voiceModel.status, error: voiceModel.error ?? undefined }, hotkeys: HOTKEYS_OK, keys: keys() },
-      replies: config.replies, fishKey: speech.on, hands: hasHands(process.platform, process.env.ROAMIES_HANDS), handsPath: process.env.ROAMIES_HANDS ? 'set' : 'none',
+      replies: config.replies, canSpeak: speech.on, hands: hasHands(process.platform, process.env.ROAMIES_HANDS), handsPath: process.env.ROAMIES_HANDS ? 'set' : 'none',
       update: { available: update.available, result: update.result }, onboarded: config.onboarded, orbSize: orbSize(),
     };
     const sections = [
@@ -2328,8 +2283,7 @@ function panelState() {
     facts: listFacts().slice().reverse().map((f) => ({ id: f.id, text: f.text })),
     commitments: openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, when: c.due ? fmtWhen(c.due) : '', overdue: !!(c.due && c.due < Date.now()) })),
     name: lookName(),
-    replies: config.replies === 'voice' ? 'voice' : 'text', fishKey: speech.on,
-    fishModel: speech.pick, fishModels: [], fishFree: false, // local-only build: the Mac's voice has no models to pick
+    replies: config.replies === 'voice' ? 'voice' : 'text', canSpeak: speech.on,
     voice: VOICE_OK ? {
       on: !!config.voice, keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen,
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
@@ -2505,11 +2459,6 @@ async function onMenu(id) {
   else if (id.startsWith('key:')) apiKeyLogin(id.slice(4));
   else if (id === 'replies:text') setReplies('text');
   else if (id === 'replies:voice') setReplies('voice');
-  else if (id.startsWith('fishmodel:') && FISH_CHOICES.some((c) => c.id === id.slice(10))) {
-    config.fishModel = id.slice(10); saveConfig(); speech.setModel(config.fishModel); menu();
-  }
-  else if (id === 'fishkey') fishKeyLogin();
-  else if (id === 'fishkey_remove') removeFishKey();
   else if (id === 'sound') { config.sound = !config.sound; saveConfig(); voiceConfig(); menu(); } // the voice helper's own cues (the page has no sounds since feature 21)
   else if (id === 'actions') {
     config.allowActions = !config.allowActions; saveConfig(); menu(); // live section picks this up
@@ -2622,8 +2571,9 @@ function obState() {
     // global shortcuts (bind: the commands to bind in the desktop's settings instead) and no Cursor size.
     snap: SNAP_OK, circle: CIRCLE_OK, session: SESSION, bind: HOTKEYS_OK ? null : BIND,
     step: config.onboardStep ?? 0,
-    oauth: signInCards(Object.keys(OAUTH), (id) => oauthOn.get(id), PROVIDER_LABELS),
-    apikey: keyCards(AUTH_PROVIDERS, (id) => keyOn.get(id)),
+    // The owner, 2026-11-28: the guide offers Anthropic only (its sign-in through Claude Code, or its API key).
+    oauth: signInCards(GUIDE_PROVIDERS, (id) => oauthOn.get(id), PROVIDER_LABELS),
+    apikey: keyCards(AUTH_PROVIDERS.filter((p) => GUIDE_PROVIDERS.includes(p.value)), (id) => keyOn.get(id)),
     connected: current && signedIn.get(config.provider) ? { provider: PROVIDER_LABELS[config.provider] ?? config.provider, model: current.name } : null,
     keys: keys(),
     actions: config.allowActions,
@@ -2633,7 +2583,7 @@ function obState() {
     voiceModel: NEEDS_MODEL ? { status: voiceModel.status, done: voiceModel.done, total: voiceModel.total, error: voiceModel.error, size: sizeLabel() } : null,
     filesAsked: config.filesAsked,
     replies: config.replies === 'voice' ? 'voice' : 'text',
-    fishKey: speech.on,
+    canSpeak: speech.on,
   });
 }
 
@@ -2654,18 +2604,14 @@ async function filesStatus(request) {
 
 let keysBefore = null;
 async function onGuide(m) {
-  if (m.type === 'ob_hello') { onboarding = true; await refreshAuth(); await fishKeyLoaded; obState(); }
+  if (m.type === 'ob_hello') { onboarding = true; await refreshAuth(); obState(); }
   else if (m.type === 'ob_closed') { onboarding = false; guideClosed = true; offerSettingsNotice(); offerKokoroNotice(); } // Local-only build: the held settings notice, and the natural voice's
   else if (m.type === 'ob_step') { config.onboardStep = Math.max(0, Math.min(7, m.step | 0)); saveConfig(); }
-  // Voice needs a working key first: without one, the guide asks for it (ob_fishkey) instead.
-  else if (m.type === 'ob_replies' && (m.mode === 'text' || (m.mode === 'voice' && speech.on))) { await fishKeyLoaded; await setReplies(m.mode); }
-  else if (m.type === 'ob_fishkey' && typeof m.key === 'string') {
-    const note = (text, bad) => ob({ kind: 'fish', ok: !bad, error: bad ? text : null });
-    await fishKeyLogin({ given: m.key.slice(0, 1000), thenVoice: true, note }).catch((e) => note(`Couldn't save the key: ${String(e?.message ?? e).slice(0, 80)}`, true));
-  }
-  else if (m.type === 'ob_login' && OAUTH[m.provider]) oauthLogin(m.provider, typeof m.id === 'string' ? m.id.slice(0, 40) : undefined);
+  // Voice only where this computer can speak (macOS): elsewhere the guide offers text only.
+  else if (m.type === 'ob_replies' && (m.mode === 'text' || (m.mode === 'voice' && speech.on))) await setReplies(m.mode);
+  else if (m.type === 'ob_login' && GUIDE_PROVIDERS.includes(m.provider)) oauthLogin(m.provider, typeof m.id === 'string' ? m.id.slice(0, 40) : undefined);
   else if (m.type === 'ob_login_cancel') cancelLogin(typeof m.id === 'string' ? m.id : undefined);
-  else if (m.type === 'ob_apikey') apiKeyLogin(m.provider, String(m.key ?? '')).catch((e) => ob({ kind: 'login', provider: m.provider, phase: 'error', error: String(e?.message ?? e).slice(0, 120) }));
+  else if (m.type === 'ob_apikey' && GUIDE_PROVIDERS.includes(storageKeyProvider(String(m.provider ?? '')))) apiKeyLogin(m.provider, String(m.key ?? '')).catch((e) => ob({ kind: 'login', provider: m.provider, phase: 'error', error: String(e?.message ?? e).slice(0, 120) }));
   else if (m.type === 'ob_files') ob({ kind: 'files', status: await filesStatus(!!m.request) });
   else if (m.type === 'set_actions') { config.allowActions = !!m.on; saveConfig(); menu(); obState(); }
   else if (m.type === 'set_login') setLogin(!!m.on);
@@ -2719,8 +2665,7 @@ function shellMessage(m) {
     if (storageKeyProvider(id) !== m.provider) return;
     apiKeyLogin(id, m.key.slice(0, 1000)).then(() => panelNote(signedIn.get(m.provider) ? `${label} is connected.` : `That ${label} key didn't work.`, !signedIn.get(m.provider)))
       .catch((e) => panelNote(`That ${label} key didn't work: ${String(e?.message ?? e).slice(0, 80)}`, true));
-  } else if (m.type === 'panel_fishkey' && typeof m.key === 'string') fishKeyLogin({ given: m.key.slice(0, 1000), note: panelNote }).catch((e) => console.error('fish key', e));
-  else if (m.type === 'answer') { pending.get(m.id)?.(m.text ?? null); pending.delete(m.id); }
+  } else if (m.type === 'answer') { pending.get(m.id)?.(m.text ?? null); pending.delete(m.id); }
   else if (m.type === 'ui_ready') {
     const keep = pageRebuild?.ready(); // Local-only build (feature 24, fix 6): a page rebuilt after a quiet stretch is not greeted
     retired.then((notes) => { if (notes.length) { retired = Promise.resolve([]); say(`${notes.join(' ')} Do it on the Model page in ${PANEL}.`, 'concerned'); } });

@@ -24,7 +24,7 @@ checks, fixed since. Everything else is below.
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Settings that can't be used | 1 to 12 | new, 2026-11-28 (the fault on your Mac; 12 added at 12:06) |
 | The natural voice at start | 1 and 2 | new, 2026-11-28 |
-| Feature 21 (a): the orb and the bubbles | 1 to 14 | new; how it looks is yours to judge |
+| Feature 21 (a): the orb and the bubbles | 1 to 14 | new; how it looks is yours to judge; 14 changed at 14:09 |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -569,7 +569,9 @@ looks: no test can judge them.
     You should hear: nothing from the page (the voice helper's own listening chime still plays if Sound is on).
 13. **Cards and the research card** (a list, the day, found files, a web answer): the same style as the bubbles.
 14. **The setup guide** (the panel's "Setup guide" link): Welcome, Permissions, Connect AI, Replies, Shortcuts, Find me; the orb
-    beside it; no look or size picker, no chat, no drawing demo; and no tour on the desktop after Done.
+    beside it; no look or size picker, no chat, no drawing demo; and no tour on the desktop after Done. Connect AI
+    shows Claude and, under "Use an API key instead", Anthropic only. Replies has no key form, no affiliate link and
+    no billing note.
 
 ## Group 4: features 17, 28, 15, 20 and 27
 

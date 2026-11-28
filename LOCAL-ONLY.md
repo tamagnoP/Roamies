@@ -604,7 +604,17 @@ faces, hands, acts and sounds are deleted. The credit stays: "Based on Roamies b
   snap of a circle).
 - **The setup guide** keeps Welcome, Permissions, Connect AI, Replies, Shortcuts and Find me, restyled, with the orb
   beside it. The look and size pickers, the get-to-know-you chat (and its menu item), the drawing demo and the tour
-  after the guide are deleted.
+  after the guide are deleted. Connect AI offers Anthropic only (the owner, 14:09): Claude's sign-in through Claude
+  Code, or an Anthropic API key; ChatGPT and the thirteen other key providers are gone from it, and the sidecar takes
+  no other sign-in or key from the guide. (The menu and the panel still list them until part (b).)
+- **The cloud voice from upstream is deleted** (the owner, 14:09), not only hidden: its key form, the "Get a free key
+  (affiliate link)" button and its link, the billing note, the sidecar's key handling (`ob_fishkey`, the panel's and
+  the menu's), the voice model picker, the socket and its MessagePack code (`fish.mjs`, `msgpack.mjs`), the recorded
+  beats in its voices (`beats/`, 11 MB, and the script that made them), the keychain store for its key
+  (`secrets.mjs`) and the macOS helper's `secret-get`, `secret-set` and `secret-delete` commands. What sidekick.json
+  still holds from it (and from the looks) is dropped at its next save. `test/no-cloud-voice.test.mjs` checks that
+  nothing the app ships or shows says "fish", apart from the fish shell in the safety rules (its history file, its
+  config folder, a shell never run) and pi's watch, which protect something.
 - **What the page is told** (sidecar → page; settings, so a page rebuild passes them on): `orb` (the size), `dial`
   (the working day and today's blocks, in minutes from midnight, sent when they change, looked at every 30 s), `pi`
   (pi working or not). All from what is known on the Mac: no request.
@@ -1655,10 +1665,9 @@ The logs record what kind of change a sync made (which fields), never a title.
 Voice input is unchanged: on macOS 26 it is Apple's on-device speech recognition.
 
 The speaker's start-up check, `speech_ready` in the activity log (`fish_account` before 2026-11-27), is answered on the
-computer and makes no request (`localAccount` in `speaker.mjs`; Fish Audio's account check isn't in the app). The
-speech log lines name the voice (`mac` or `natural`), not a Fish Audio model. No log kind, and nothing this build shows
-or says, names Fish Audio: on Windows and Linux, where it has no voice for replies, the setup guide and the panel say
-replies use a Mac's own voice instead of asking for a key (tested in `test/localvoice.test.mjs`).
+computer and makes no request (`speaker.mjs` `enable()`). The speech log lines name the voice (`mac` or `natural`).
+Since 2026-11-28 the cloud voice's code is deleted (see "The look"); on Windows and Linux, where this build has no
+voice for replies, the setup guide and the panel say replies use a Mac's own voice.
 
 ## The local model and the ledger (features 23 and 32)
 
@@ -1809,7 +1818,7 @@ request fails with a network error before any reply; and in private mode. A slow
 - `showcase/tauri/sidecar/kokoro_server.py` (new): the helper's script, copied into the app by `bundle.sh`.
 - `showcase/tauri/sidecar/persona.mjs` (new): the manner: the model's instructions, the form of address on lines
   worded by the app, and the parts of upstream's reply style it replaces.
-- `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no Fish key, Claude Code switches;
+- `showcase/tauri/sidecar/sidekick.mjs`: wires pi in, the new rules, no update checks, no cloud voice, Claude Code switches;
   its own look-up of what is in front (`whereFront`), giving the never-look list the app's name; the start-up
   settings bubble; starts and stops the natural voice and shows its failure bubble; the persona in the model's
   instructions in place of upstream's opening, personality line, voice cues and beats; the form of address on the
@@ -1856,7 +1865,8 @@ request fails with a network error before any reply; and in private mode. A slow
 - `showcase/roamies/host.js`: takes the `home` setting; Esc isn't held while the character only rests; a bubble
   with buttons stays on screen as it is while you talk; reports marks; shows the "Heard" line.
 - `showcase/desktop.html`: loads `home.js`.
-- `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the Fish key controls and update button are gone.
+- `showcase/panel/panel.js`, `showcase/onboarding/onboarding.js`: the cloud voice's key controls and the update button are gone.
+- Deleted (2026-11-28): `sidecar/fish.mjs`, `msgpack.mjs`, `secrets.mjs`, `beats/`, and the helper's keychain commands.
 - `showcase/tauri/src-tauri/tauri.conf.json`: no updater endpoints or artifacts.
 - `showcase/tauri/sidecar/test/pi.test.mjs`, `test/leftovers.test.mjs`, `test/pi-extension.test.mjs`, `test/notes.test.mjs`, `test/guard.test.mjs`, `test/localvoice.test.mjs`,
   `test/settings.test.mjs`, `test/sandbox.test.mjs`, `test/home.test.mjs`, `test/home-page.test.mjs`,

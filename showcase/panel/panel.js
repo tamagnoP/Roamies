@@ -14,7 +14,7 @@
   const act = (id, away = false) => { if (away) hide(); send({ type: 'menu', id }); };
 
   let state = null, tab = 'home', deferred = false;
-  // What's open in the panel itself: a key field (provider id or 'fish'), the row action waiting for its
+  // What's open in the panel itself: a key field (provider id), the row action waiting for its
   // Confirm, each long list's page (pg) and how many rows fit on one (per, measured), Memory's tab and its search.
   const ui = { key: null, kind: {}, arm: null, pg: {}, per: {}, mtab: 'facts', q: '', bindShown: new Set() };
   let armTimer = 0;
@@ -101,21 +101,6 @@
   };
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)');
   const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-  // Why pick each voice model: a line under the choice, and more in its tooltip with the cost.
-  const WHY = { 'drama-3': 'More emotion. Slower, and costs more.', 's2.1-pro': 'Natural pace. Less emotion, costs less.' };
-  const WHY_LONG = {
-    'drama-3': 'The most expressive: whispers, laughs and real excitement. It talks slower, with pauses between sentences.',
-    's2.1-pro': 'A natural, quicker pace. Feelings only come through lightly.',
-  };
-  // A spoken reply is about 200 characters (1 to 3 short sentences), so 100 replies are about 20,000. The offer's
-  // last day is shown in Pacific time, as Fish states it (it ends Dec 1, 00:00 PT).
-  const price = (c) => {
-    const per100 = (perM) => `$${(perM * 0.02).toFixed(2)}`;
-    const promo = c.promo && Date.now() < Date.parse(c.promo.until)
-      ? ` (${per100(c.promo.perM)} until ${new Date(Date.parse(c.promo.until) - 1).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'America/Los_Angeles' })})` : '';
-    return `$${c.perM} per million characters: about ${per100(c.perM)} per 100 replies${promo}. Billed to your Fish Audio account.`;
-  };
-  const where = () => (state?.os === 'mac' ? 'your Keychain' : state?.os === 'win' ? 'Windows, encrypted for your account' : state?.os === 'linux' ? 'your keyring' : 'this computer');
 
   // ---------------------------------------------------------------- header
   function head() {
@@ -385,7 +370,7 @@
   const refresh = (focusKey) => (tab === 'memory' && ui.mtab === 'facts' && document.activeElement?.id === 'find-facts' ? refreshFacts() : render(focusKey));
 
   // ---------------------------------------------------------------- Settings
-  // A masked key field that opens in place. id: a provider, or 'fish'. kinds: the kinds of key it takes
+  // A masked key field that opens in place. id: a provider. kinds: the kinds of key it takes
   // (Kimi and Xiaomi: a plan key or a pay-per-token key), picked above the field; onsave gets the kind's id.
   function keyForm(id, label, onsave, kinds = null) {
     const kind = kinds?.find((x) => x.id === ui.kind[id]) ?? kinds?.[0];
@@ -435,16 +420,9 @@
     return [
       group('Spoken replies', 'Hear me as well as read me.', null,
         picks('Replies', [['text', 'Text only'], ['voice', 'Voice and text']], state.replies, (x) => {
-          if (x === 'voice' && !state.fishKey) { ui.key = 'fish'; render('key-fish'); note("Spoken replies use a Mac's own voice, so replies are text on this computer."); return; }
+          if (x === 'voice' && !state.canSpeak) { note("Spoken replies use a Mac's own voice, so replies are text on this computer."); return; }
           act(`replies:${x}`);
         }, 'replies'),
-        state.replies === 'voice' && state.fishModels?.length ? [
-          el('p', { className: 'sub', textContent: 'Voice model' }),
-          picks('Voice model', state.fishModels.map((c) => [c.id, c.name]), state.fishModel, (x) => act(`fishmodel:${x}`), 'fishmodel',
-            Object.fromEntries(state.fishModels.map((c) => [c.id, `${WHY_LONG[c.id] ?? ''} ${price(c)}`.trim()]))),
-          el('p', { className: `why${state.fishFree ? ' late' : ''}`, textContent: state.fishFree ? "No credit left, so it's on Fish's free tier" : WHY[state.fishModel] ?? '' }),
-        ] : null,
-        // Local-only build: no Fish Audio key. Replies are spoken by the Mac's own voice.
         el('div', { className: 'setting' },
           el('span', {}, 'Voice', el('small', { textContent: "Your Mac's built-in voice. Nothing leaves this computer." })))),
       v ? group('Talking to me', 'Speak instead of typing.', null,
@@ -687,8 +665,7 @@
       commitments: [{ id: 'c1', text: 'Send the launch email', when: 'Fri 7 Nov, 10:00', overdue: false }, { id: 'c2', text: 'Book the dentist', when: 'Mon 3 Nov, 09:00', overdue: true }],
       name: 'Roamie', look: 'classic', looks: [['classic', 'Roamie'], ['jarvis', 'JARVIS'], ['anime', 'Anime Girl'], ['sarah', 'Sarah'], ['adrian', 'Adrian']],
       size: 'default', sizes: [['default', 'Default'], ['small', 'Small'], ['cursor', 'Cursor']],
-      replies: 'voice', fishKey: true, fishModel: 'drama-3', fishFree: false,
-      fishModels: [{ id: 'drama-3', name: 'Drama 3', perM: 50, promo: { perM: 10, until: '2026-12-01T08:00:00Z' } }, { id: 's2.1-pro', name: 'S2.1 Pro', perM: 15 }],
+      replies: 'voice', canSpeak: true,
       voice: { on: true, keys: '⌃⌥', ready: true, mac: true, mute: true, download: null }, askKeys: '⌥⌘',
       sound: true, actions: false, login: { on: true },
       update: { available: new URLSearchParams(location.search).has('update') ? '0.9.1' : null, installing: false, checking: false, result: null },

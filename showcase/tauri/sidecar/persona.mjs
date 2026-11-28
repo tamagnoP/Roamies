@@ -55,7 +55,7 @@ export const SWAPS = [
   { name: 'spoken length', find: /Say one to three short sentences, the way you'd talk to a friend: plain words, contractions, about 6 to 20 words each\./, with: (p, u) => `Say ${lengthRule(p, u)}: plain words, about 6 to 20 words each.` },
   { name: 'bubble length', find: /keep replies short: one to three sentences unless asked for detail\./, with: (p, u) => `keep replies short: ${lengthRule(p, u)}.` },
   { name: 'emoji', find: /An emoji now and then is fine; the bubbles show them\. /, with: () => 'No emoji. ' },
-  // Cues in square brackets were performed by Fish Audio only. This build's voices don't act them, so they aren't asked for.
+  // Cues in square brackets were performed by upstream's cloud voice only. This build's voices don't act them, so they aren't asked for.
   { name: 'voice cues', find: /Your voice carries feeling: [^\n]*\n/, with: () => '' },
   // The short line before something slow is the app's own (persona.beats, picked by code), not the model's.
   { name: 'beats', find: /Before anything slow \([^\n]*\n/, with: () => 'Before anything slow (looking at the screen, acting in an app), say nothing first and call the tool: the app says a short line by itself. Never describe your steps.\n' },

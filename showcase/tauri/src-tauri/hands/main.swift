@@ -1424,19 +1424,6 @@ func runGuide(_ rest: [String]) -> Never {
     exit(0)
 }
 
-// ---------- secrets ----------
-// The user's own API keys (Fish Audio) live in their login keychain: encrypted at rest, locked with their Mac
-// login, and readable without a prompt only by this signed helper. A secret comes in on stdin and goes out on
-// stdout, never in arguments (other processes can read those).
-let secretService = "com.kenkai.roamies"
-func secretName(_ i: Int) -> String {
-    guard args.count > i, args[i].range(of: "^[a-z0-9-]{1,40}$", options: .regularExpression) != nil else { fail("bad secret name") }
-    return args[i]
-}
-func secretQuery(_ name: String) -> [String: Any] {
-    [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: secretService, kSecAttrAccount as String: name]
-}
-
 // ---------- finding files by name (feature 40) ----------
 // Spotlight's own index, asked in this process (NSMetadataQuery): names only, nothing opened or read. The words and
 // the path come in on stdin, never in arguments (other processes can read those). The sidecar (findany.mjs) leaves
@@ -2155,36 +2142,6 @@ case "act":
 
 case "guide":
     runGuide(Array(args.dropFirst()))
-
-case "secret-get":
-    var q = secretQuery(secretName(1))
-    q[kSecReturnData as String] = true
-    q[kSecMatchLimit as String] = kSecMatchLimitOne
-    var item: CFTypeRef?
-    let st = SecItemCopyMatching(q as CFDictionary, &item)
-    if st == errSecItemNotFound { out(["ok": true, "found": false]) }
-    guard st == errSecSuccess, let data = item as? Data, let value = String(data: data, encoding: .utf8) else { fail("keychain read failed (\(st))") }
-    out(["ok": true, "found": true, "value": value])
-
-case "secret-set":
-    let name = secretName(1)
-    let raw = FileHandle.standardInput.readDataToEndOfFile()
-    guard let text = String(data: raw, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, text.utf8.count <= 4096 else { fail("no secret on stdin") }
-    let data = Data(text.utf8)
-    var st = SecItemUpdate(secretQuery(name) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-    if st == errSecItemNotFound {
-        var add = secretQuery(name)
-        add[kSecValueData as String] = data
-        add[kSecAttrLabel as String] = "Roamies (\(name))"
-        st = SecItemAdd(add as CFDictionary, nil)
-    }
-    guard st == errSecSuccess else { fail("keychain save failed (\(st))") }
-    out(["ok": true])
-
-case "secret-delete":
-    let st = SecItemDelete(secretQuery(secretName(1)) as CFDictionary)
-    guard st == errSecSuccess || st == errSecItemNotFound else { fail("keychain delete failed (\(st))") }
-    out(["ok": true])
 
 // Feature 40: files and folders whose name holds every word, in the home folder and on the local external drives.
 // Names, kinds and dates only; the sidecar filters and ranks them and logs counts only.

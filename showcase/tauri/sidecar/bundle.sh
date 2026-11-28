@@ -16,8 +16,6 @@ rm -rf dist && mkdir -p dist/node_modules/@bokuweb
   --banner:js="import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" \
   --log-level=warning
 cp -R node_modules/@bokuweb/zstd-wasm dist/node_modules/@bokuweb/
-# The recorded beats (beats/make.mjs): the audio and its index, not the script.
-mkdir -p dist/beats && cp beats/index.json beats/*.pcm dist/beats/
 # Local-only build (feature 16): the natural voice's helper script, run with the Python named in settings.json.
 cp kokoro_server.py dist/
 echo '{"type":"module"}' > dist/package.json

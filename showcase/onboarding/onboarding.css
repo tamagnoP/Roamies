@@ -203,7 +203,6 @@ h2 { margin: 0; font: 600 14px/1.35 var(--sans); color: var(--ink); }
 .label-row label { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label-row .link { flex: none; padding: 0; }
 .link[hidden] { display: none; }
-#fish-change { margin: -6px 0 10px; }
 .note { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--ink-3); }
 .field-row { display: flex; gap: 8px; }
 .field { display: flex; flex: 1; min-width: 0; --bc: var(--line-hi); --fill: #06090F; }

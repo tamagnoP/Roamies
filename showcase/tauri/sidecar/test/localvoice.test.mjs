@@ -40,7 +40,7 @@ const run = (lines, opts = {}) => new Promise((done) => {
   v.end();
 });
 
-// Voice cues are Fish's: never read out.
+// Voice cues are never read out.
 assert.equal(spoken('[warm] Hello there. [chuckling] Ha!'), 'Hello there. Ha!');
 assert.equal(spoken('[break]'), '');
 
@@ -52,13 +52,13 @@ assert.equal(spoken('[break]'), '');
   assert.ok(!/One|Two|Three/.test(args), 'the text is not on the command line');
   assert.match(args, /--data-format=LEI16@44100/);
 }
-{ // the look's voice is passed to say; one that isn't installed falls back to the system voice, once
+{ // the voice in the settings is passed to say; one that isn't installed falls back to the system voice, once
   const log = path.join(dir, 'args.log');
   fs.rmSync(log, { force: true });
   assert.equal(heardText((await run(['Hi.'], { voice: 'Daniel (Enhanced)' })).got), 'Hi.');
   assert.deepEqual(JSON.parse(fs.readFileSync(log, 'utf8').trim()).slice(0, 2), ['-v', 'Daniel (Enhanced)']);
   fs.rmSync(log, { force: true });
-  await run(['Hi.'], { voice: '933563129e564b19a115bedd57b7406a' }); // a Fish Audio id is not a Mac voice
+  await run(['Hi.'], { voice: '' }); // no voice named: the system voice
   assert.ok(!JSON.parse(fs.readFileSync(log, 'utf8').trim()).includes('-v'));
   fs.rmSync(log, { force: true });
   const errs = []; const realErr = console.error; console.error = (...a) => errs.push(a.join(' '));
@@ -104,12 +104,11 @@ assert.throws(() => wavPcm(Buffer.from('not a wav file at all')), /no audio/);
 const left = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('roamies-voice-')).flatMap((n) => fs.readdirSync(path.join(os.tmpdir(), n)));
 assert.deepEqual(left, []);
 
-{ // the speaker, with its defaults, is the local voice: on without a Fish key, and a reply plays through it
+{ // the speaker, with its defaults, is the local voice: on once enabled, and a reply plays through it
   const out = [];
-  const sp = createSpeaker({ emit: (m) => out.push(m), beatPhrases: [], FishVoiceImpl: class extends LocalVoice { constructor(o) { super({ ...o, sayBin: fake, platform: 'darwin' }); } } });
+  const sp = createSpeaker({ emit: (m) => out.push(m), beatPhrases: [], MacVoice: class extends LocalVoice { constructor(o) { super({ ...o, sayBin: fake, platform: 'darwin' }); } } });
   assert.equal(sp.on, false);
-  sp.setKey('local');
-  assert.deepEqual(await sp.check(), { ok: true, credit: null });
+  sp.enable();
   const v = sp.start(); v.say('Hello.'); v.end();
   await new Promise((r) => { const t = setInterval(() => { if (out.some((m) => m.end)) { clearInterval(t); r(); } }, 20); });
   const pcm = out.filter((m) => m.pcm);
@@ -117,14 +116,13 @@ assert.deepEqual(left, []);
   assert.equal(pcm[0].rate, 44100);
 }
 
-{ // the voice check is answered on this computer: no request, and no Fish Audio name in its log line or any log kind
+{ // the voice check is answered on this computer: no request, and no cloud voice's name in its log line or any log kind
   const calls = [], logs = [], fetch0 = globalThis.fetch, WS0 = globalThis.WebSocket;
   globalThis.fetch = async (u) => { calls.push(['fetch', String(u)]); throw new Error('no requests'); };
   globalThis.WebSocket = class { constructor(u) { calls.push(['socket', String(u)]); throw new Error('no sockets'); } };
   try {
-    const sp = createSpeaker({ emit: () => {}, beatPhrases: [], log: (kind, data) => logs.push([kind, data]), FishVoiceImpl: class extends LocalVoice { constructor(o) { super({ ...o, sayBin: fake, platform: 'darwin' }); } } });
-    sp.setKey('local');
-    assert.deepEqual(await sp.check(), { ok: true, credit: null });
+    const sp = createSpeaker({ emit: () => {}, beatPhrases: [], log: (kind, data) => logs.push([kind, data]), MacVoice: class extends LocalVoice { constructor(o) { super({ ...o, sayBin: fake, platform: 'darwin' }); } } });
+    sp.enable();
     const v = sp.start(); v.say('Hi.'); v.end();
     await new Promise((r) => setTimeout(r, 300));
   } finally { globalThis.fetch = fetch0; globalThis.WebSocket = WS0; }
@@ -136,25 +134,6 @@ assert.deepEqual(left, []);
   const kinds = fs.readdirSync(src).filter((f) => f.endsWith('.mjs')).flatMap((f) => [...fs.readFileSync(path.join(src, f), 'utf8').matchAll(/\b(?:log|logLine)\(\s*['"`]([^'"`]+)['"`]/g)].map((m) => m[1]));
   assert.ok(kinds.length > 50 && kinds.includes('speech_ready'));
   assert.deepEqual(kinds.filter((k) => /fish/i.test(k)), []);
-  assert.doesNotMatch(fs.readFileSync(path.join(src, 'speaker.mjs'), 'utf8'), /import[^;]*\baccount\b[^;]*fish\.mjs/, 'the Fish Audio account check is not imported');
-}
-
-{ // what this build can show or say about the voice names no Fish Audio (the code after the early returns never runs)
-  const src = path.join(path.dirname(new URL(import.meta.url).pathname), '..'), read = (f) => fs.readFileSync(path.join(src, f), 'utf8');
-  const sk = read('sidekick.mjs'), between = (text, from, to) => { const i = text.indexOf(from); assert.ok(i >= 0, from); return text.slice(i, text.indexOf(to, i)); };
-  const shown = [
-    between(sk, '  onProblem: (what) => {', '\n  },'),
-    between(sk, 'async function removeFishKey() {', '\n  try {'),
-    between(sk, 'async function fishKeyLogin(', '\n  const key ='),
-    between(read('../../panel/panel.js'), 'function voicePage() {', '\n  }\n').replace(/state\.fishModels\?\.length \? \[[\s\S]*?\] : null,/, ''), // the model picker: fishModels is always [] (below)
-    between(read('../../onboarding/onboarding.js'), 'const CARDS = [', '];'),
-    between(read('../../onboarding/onboarding.js'), '    choose(id) {', '\n    },'),
-  ].join('\n').split('\n').filter((l) => !/^\s*\/\//.test(l)).map((l) => l.replace(/\/\/.*$/, '')).join('\n');
-  const words = [...shown.matchAll(/(['"`])((?:\\.|(?!\1).)*)\1/g)].map((m) => m[2]).filter((t) => / /.test(t));
-  assert.ok(words.some((t) => /Mac's own voice/.test(t)));
-  assert.deepEqual(words.filter((t) => /fish/i.test(t)), []);
-  assert.match(sk, /fishModels: \[\], fishFree: false,/, 'the panel never gets models to pick');
-  assert.match(read('../../onboarding/onboarding.js'), /\$\('fish-form'\)\.hidden = true;/, 'the key form (Fish Audio label, link, note) is never shown');
 }
 
 // Cards: no web lookups unless a test passes its own fetch.

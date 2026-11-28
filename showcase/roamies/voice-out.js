@@ -1,4 +1,4 @@
-// Plays spoken replies: 16-bit mono PCM chunks from the brain (Fish Audio), scheduled back to back so a
+// Plays spoken replies: 16-bit mono PCM chunks from the brain (the Mac's voice or the natural one), scheduled back to back so a
 // reply plays without gaps or clicks. A new reply's id replaces the old one at once; "stop" fades out fast.
 // level() is the live loudness, for the body to move with the voice.
 (() => {
@@ -28,7 +28,7 @@
 
   const ctx = () => {
     if (!ac) {
-      // Fish sends 44.1 kHz; a context at the same rate avoids resampling every chunk (older WebKit can't set it).
+      // The Mac's voice sends 44.1 kHz; a context at the same rate avoids resampling its chunks (older WebKit can't set it).
       try { ac = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' }); } catch { ac = new AudioContext({ latencyHint: 'interactive' }); }
       out = ac.createGain();
       meter = ac.createAnalyser(); meter.fftSize = 512; buf = new Float32Array(meter.fftSize);

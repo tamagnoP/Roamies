@@ -1,21 +1,13 @@
-// Speaks replies with Fish Audio and hands the audio to the overlay ({ kind: 'speech' } messages).
-// - The model is the one the user picked (Drama 3 or S2.1 Pro) while the account has credit, the free tier
-//   otherwise (checked when the key is set, at start and after a failure). If a reply's voice fails before any
-//   audio, it's retried on the next model down from the pick, never a pricier one (Drama 3 → S2.1 Pro → free;
-//   S2.1 Pro → free) with everything said so far, and one that works is kept from then on; if it fails after
-//   audio, the rest stays text only.
+// Speaks replies and hands the audio to the overlay ({ kind: 'speech' } messages). Local-only build: the voice is the
+// Mac's own (localvoice.mjs), or the natural one (kokorovoice.mjs) when sidekick.mjs's pickVoice gives it.
 // - Each reply has its own id, so audio from one that was stopped can never play over the next.
+// - A reply's voice that fails before any audio is opened again (the voice asked afresh, so a natural voice that went
+//   down gives way to the Mac's) with everything said so far, up to TRIES times; one that fails after audio leaves
+//   the rest as text only.
 // - Beats: when something slow starts (a web search, a page, the screen) and the model hasn't said anything,
 //   a short line ("One sec.", "On it." and 32 more, picked at random) plays so it's never silent. They're made once
 //   in the voice and kept, so they play instantly.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { DEFAULT_VOICE, FISH_MODELS, FREE_MODEL, RATE } from './fish.mjs';
-// Local-only build: the voice is the Mac's own (localvoice.mjs). Fish Audio's socket and account check are no longer
-// imported, so they aren't in the app; the names below (FishVoiceImpl, account, key) are kept so the rest reads the same.
-import { LocalVoice } from './localvoice.mjs';
-const localAccount = async () => ({ ok: true, credit: null });
+import { LocalVoice, RATE } from './localvoice.mjs';
 
 // One or two words each, so a beat never sounds canned; any of them must fit before a search, a page, the screen or a drawing.
 export const BEATS = [
@@ -25,39 +17,19 @@ export const BEATS = [
   'Moment.', 'Okay, checking.', 'Sure, checking.', 'Okie-dokie.',
 ];
 const RECENT = 8; // a beat isn't picked again until this many others have played
+const TRIES = 3; // a reply's voice opened at most this many times before any audio
 
-// The beats shipped with the app (beats/make.mjs), next to this file or the bundle: (voice, model) → Map of phrase →
-// { rate, pcm } (base64), or null for a voice or model not recorded. The free tier uses the S2.1 Pro takes.
-export function bundledBeats(dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'beats')) {
-  let index = null;
-  try { index = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); } catch { return () => null; }
-  const sets = new Map();
-  return (voice, model) => {
-    const k = `${voice}:${model === FREE_MODEL ? 's2.1-pro' : model}`, set = index.sets?.[k];
-    if (!set) return null;
-    if (!sets.has(k)) {
-      let all = null;
-      try { all = fs.readFileSync(path.join(dir, set.file)); } catch {}
-      sets.set(k, all && new Map(Object.entries(set.beats).map(([phrase, [at, n]]) => [phrase, { rate: index.rate, pcm: all.subarray(at, at + n).toString('base64') }])));
-    }
-    return sets.get(k);
-  };
-}
-
-export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl: FixedVoice = LocalVoice, pickVoice = null, account = localAccount, beatPhrases = BEATS, bundled = () => null }) {
+export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, MacVoice: FixedVoice = LocalVoice, pickVoice = null, beatPhrases = BEATS }) {
   // Local-only build (feature 16): which voice a reply uses is asked when it is made (pickVoice: the natural voice
   // while its helper is up, else nothing, which means the macOS voice), and the audio's rate comes from the voice.
   const voiceImpl = (o) => pickVoice?.(o) ?? FixedVoice;
   const voiceName = (I) => (I === FixedVoice ? 'mac' : 'natural'); // for the log: which of this build's voices
   const beatRate = new Map(); // phrase → the rate its kept audio was made at
   const beatVoice = new Map(); // Local-only build (feature 24): phrase → the voice its kept audio was made in
-  let key = null, voice = DEFAULT_VOICE, pref = FISH_MODELS[0], model = pref, seq = 0, current = null, checking = null;
-  // The pick and the cheaper ones after it (FISH_MODELS runs from priciest to free).
-  const chain = () => FISH_MODELS.slice(Math.max(0, FISH_MODELS.indexOf(pref)));
-  let beats = new Map(), recent = [], warming = null; // phrase → [base64 PCM chunks], for the current key and voice
+  let on = false, voice = '', seq = 0, current = null;
+  let beats = new Map(), recent = [], warming = null; // phrase → [base64 PCM chunks], for the current voice
   // A random beat, not one of the last few: one that's already made if there is one, so it plays instantly.
-  const shipped = () => bundled(voice, model);
-  const ready = (p) => beats.has(p) || !!shipped()?.has(p);
+  const ready = (p) => beats.has(p);
   const pickBeat = () => {
     const fresh = beatPhrases.filter((p) => !recent.includes(p));
     const pool = [fresh.filter(ready), beatPhrases.filter(ready), fresh, beatPhrases].find((x) => x.length);
@@ -66,37 +38,23 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     return phrase;
   };
 
-  // Make the beats once, one at a time (well under Fish's concurrency limit). Failures just leave a gap:
-  // that beat is then spoken live instead.
+  // Make the beats once, one at a time. Failures just leave a gap: that beat is then spoken live instead.
   function warm() {
-    const k = key, vo = voice, list = beatPhrases; // local-only build: a list that was replaced (setBeats) is no longer made
+    const vo = voice, list = beatPhrases; // a list that was replaced (setBeats) is no longer made
     warming ??= (async () => {
       for (const phrase of list) {
-        if (key !== k || voice !== vo || beatPhrases !== list) break;
-        if (beats.has(phrase) || bundled(vo, model)?.has(phrase)) continue; // shipped with the app
+        if (!on || voice !== vo || beatPhrases !== list) break;
+        if (beats.has(phrase)) continue;
         const Impl = voiceImpl();
         const chunks = await new Promise((done) => {
           const got = [];
-          const v = new Impl({ key: k, voice: vo, model, onAudio: (pcm) => { beatRate.set(phrase, v.rate ?? RATE); got.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')); }, onEnd: () => done(got), onError: () => done(null) }).open();
+          const v = new Impl({ voice: vo, onAudio: (pcm) => { beatRate.set(phrase, v.rate ?? RATE); got.push(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')); }, onEnd: () => done(got), onError: () => done(null) }).open();
           v.say(phrase); v.end();
         });
-        if (chunks?.length && key === k && voice === vo && beatPhrases === list) { beats.set(phrase, chunks); beatVoice.set(phrase, Impl); }
+        if (chunks?.length && on && voice === vo && beatPhrases === list) { beats.set(phrase, chunks); beatVoice.set(phrase, Impl); }
       }
     })().finally(() => { warming = null; });
     return warming;
-  }
-
-  // Returns the account check: { ok, credit } or { ok: false, reason: 'key' | 'network' }.
-  async function check() {
-    if (!key) return { ok: false, reason: 'key' };
-    checking ??= account(key).then((a) => {
-      // No credit: the free tier. Credit again: back to the best model, else keep the paid one that worked.
-      if (a.ok) model = a.credit != null && a.credit <= 0.01 ? FREE_MODEL : model === FREE_MODEL ? pref : model;
-      log('speech_ready', { ok: a.ok, reason: a.reason }); // local-only build: a local answer, no request (localAccount)
-      if (a.ok) warm();
-      return a;
-    }).finally(() => { checking = null; });
-    return checking;
   }
 
   // Local-only build (feature 22). A mark asks the overlay to say when everything handed over before it has finished
@@ -114,9 +72,9 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     emit({ kind: 'speech', stop: true });
   }
 
-  /** A new reply's voice, its socket opening now. say(sentence) as they come, then end(). */
+  /** A new reply's voice, opened now. say(sentence) as they come, then end(). */
   function start() {
-    if (!key) return null;
+    if (!on) return null;
     stopAll();
     const id = `s${++seq}`, said = [];
     let ended = false, tries = 0, v = null, heard = false, done = false, beat = false, t0 = Date.now(), Impl = null;
@@ -128,11 +86,10 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         if (done || beat || said.length || heard) return false;
         beat = true;
         // Local-only build (feature 24): a beat kept in another voice than this reply's is said in this one instead.
-        const phrase = pickBeat(), shippedBeat = shipped()?.get(phrase), kept = beats.get(phrase), chunks = kept && (!beatVoice.has(phrase) || beatVoice.get(phrase) === Impl) ? kept : null;
-        if (!shippedBeat && !chunks) { me.say(phrase); return true; }
+        const phrase = pickBeat(), kept = beats.get(phrase), chunks = kept && (!beatVoice.has(phrase) || beatVoice.get(phrase) === Impl) ? kept : null;
+        if (!chunks) { me.say(phrase); return true; }
         log('speech_beat', { id, ms: Date.now() - t0 });
-        if (shippedBeat) emit({ kind: 'speech', id, rate: shippedBeat.rate, pcm: shippedBeat.pcm });
-        else for (const pcm of chunks) emit({ kind: 'speech', id, rate: beatRate.get(phrase) ?? RATE, pcm });
+        for (const pcm of chunks) emit({ kind: 'speech', id, rate: beatRate.get(phrase) ?? RATE, pcm });
         return true;
       },
       end() { if (done || ended) return; ended = true; v.end(); },
@@ -151,28 +108,24 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
       emit({ kind: 'speech', id, end: true, ...(chars ? { chars } : {}) });
       if (current === me) current = null;
     };
-    const connect = (m) => {
+    const connect = () => {
       tries++;
       Impl = voiceImpl({ reply: true });
       v = new Impl({
-        key, voice, model: m,
+        voice,
         onAudio: (pcm) => {
           if (done) return;
-          if (!heard) { heard = true; if (m !== model) model = m; log('speech_first_audio', { id, voice: voiceName(Impl), ms: Date.now() - t0 }); }
+          if (!heard) { heard = true; log('speech_first_audio', { id, voice: voiceName(Impl), ms: Date.now() - t0 }); }
           emit({ kind: 'speech', id, rate: v.rate ?? RATE, pcm: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64') });
         },
         onEnd: () => finish(true),
         onError: async (err) => {
           if (done) return;
           log('speech_error', { id, voice: voiceName(Impl), heard: err.heard, message: err.message });
-          if (!err.heard && !heard && tries < chain().length) {
-            const a = await check();
+          if (!err.heard && !heard && tries < TRIES) {
+            await Promise.resolve();
             if (done) return;
-            if (!a.ok && a.reason === 'key') { onProblem('key'); return finish(); }
-            // Retry: the free tier when there's no credit, else the next model down (the free one again once at the bottom).
-            const c = chain();
-            const next = a.ok && model === FREE_MODEL ? FREE_MODEL : c[Math.min(c.indexOf(m) + 1, c.length - 1)];
-            connect(next);
+            connect();
             for (const s of said) v.say(s);
             if (ended) v.end();
             return;
@@ -182,27 +135,19 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         },
       }).open();
     };
-    connect(model);
+    connect();
     log('speech_start', { id, voice: voiceName(Impl) });
     current = me;
     return me;
   }
 
   return {
-    setKey(k) { if ((k || null) !== key) { beats = new Map(); if (!k) stopAll(); } key = k || null; if (key) check(); },
-    // The user's pick. Beats are remade in it; with no credit it stays on the free tier until there is some.
-    setModel(m) {
-      if (!FISH_MODELS.includes(m) || m === FREE_MODEL || m === pref) return;
-      pref = m; beats = new Map();
-      if (model !== FREE_MODEL) model = m;
-      if (key) warm();
-    },
-    get pick() { return pref; },
-    setVoice(v) { if ((v || DEFAULT_VOICE) !== voice) beats = new Map(); voice = v || DEFAULT_VOICE; if (key) warm(); },
-    get ready() { return beats.size + beatPhrases.filter((p) => !beats.has(p) && shipped()?.has(p)).length; },
-    get model() { return model; },
-    get on() { return !!key; },
-    check,
+    /** Spoken replies can be made on this computer (macOS has the voice): the check is answered here, with no request
+     *  (speech_ready), and the beats are made. */
+    enable() { if (on) return; on = true; log('speech_ready', { ok: true }); warm(); },
+    setVoice(v) { if ((v || '') !== voice) beats = new Map(); voice = v || ''; if (on) warm(); },
+    get ready() { return beats.size; },
+    get on() { return on; },
     start,
     stop: stopAll,
     mark, hush,
@@ -212,7 +157,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
       const same = Array.isArray(list) && list.length === beatPhrases.length && list.every((p, i) => p === beatPhrases[i]);
       if (!Array.isArray(list) || !list.length || (same && !again)) return;
       beatPhrases = [...list]; beats = new Map(); recent = [];
-      if (key) (warming ?? Promise.resolve()).then(() => warm());
+      if (on) (warming ?? Promise.resolve()).then(() => warm());
     },
   };
 }

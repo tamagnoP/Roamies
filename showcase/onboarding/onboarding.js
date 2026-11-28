@@ -460,17 +460,14 @@
   });
 
   // ---------------------------------------------------------------- step 3: how replies come
-  // Text only, or Voice + text (spoken with Fish Audio). Voice needs the user's own Fish Audio key: picking it
-  // opens the field, and the key is checked before voice turns on.
-  // Ken's Fish Audio affiliate link (sign-up lands on their site; keys are under Developers). It's disclosed in
-  // the UI: the #fish-link button in index.html reads "Get a free key (affiliate link)".
-  const FISH_URL = 'https://fish.audio/?fpr=o3gtlu';
+  // Text only, or Voice + text, spoken on this computer (the Mac's voice or the natural one): only where it can speak
+  // (canSpeak: macOS).
   const replies = {
-    pick: null, saving: false, changing: false, // changing: replacing a key that's already saved
+    pick: null,
     mode: () => replies.pick ?? (state?.replies === 'voice' ? 'voice' : 'text'),
-    ready: () => replies.mode() === 'text' || (!!state?.fishKey && state.replies === 'voice'),
+    ready: () => replies.mode() === 'text' || (!!state?.canSpeak && state.replies === 'voice'),
     render() {
-      const mode = replies.mode(), on = state?.replies === 'voice' && state?.fishKey;
+      const mode = replies.mode(), on = state?.replies === 'voice' && state?.canSpeak;
       const CARDS = [
         ['text', 'Text only', 'Answers in my bubbles'],
         ['voice', 'Voice + text', on ? 'Voice is on' : mode === 'voice' ? "Needs a Mac's own voice" : 'Said out loud too'],
@@ -483,32 +480,17 @@
         b.onclick = () => replies.choose(id);
         return b;
       }));
-      const saved = !!state?.fishKey;
-      if (!saved || mode !== 'voice') replies.changing = false;
-      $('fish-form').hidden = true; // local-only build: no key to paste (the form, its link and its note name Fish Audio)
-      $('fish-change').hidden = true; // local-only build: the Mac's own voice, no key to change
-      $('fish-change').textContent = replies.changing ? 'Keep my current key' : 'Change key';
-      $('fish-label').textContent = replies.changing ? 'New Fish Audio API key' : 'Fish Audio API key';
-      $('fish-change').setAttribute('aria-expanded', String(replies.changing));
-      $('fish-save').disabled = replies.saving;
-      $('fish-save').textContent = replies.saving ? 'Checking…' : 'Save';
       nav();
     },
     choose(id) {
       if (replies.mode() === id && (id === 'text' || state?.replies === 'voice')) return;
-      replies.pick = id; $('fish-error').hidden = true;
-      if (id === 'text' || state?.fishKey) {
+      replies.pick = id;
+      if (id === 'text' || state?.canSpeak) {
         if (state?.replies === id) quip(id === 'text' ? 'Text it is!' : 'Voice it is!');
         send({ type: 'ob_replies', mode: id });
       }
       replies.render();
-      if (id === 'voice' && !state?.fishKey) { $('fish-input').focus(); quip('Voice needs a Mac', 3); }
-    },
-    onFish(msg) {
-      replies.saving = false;
-      if (msg.ok) { $('fish-error').hidden = true; replies.changing = false; }
-      else { const e = $('fish-error'); e.hidden = false; e.textContent = e.title = msg.error || "That key didn't work."; }
-      replies.render();
+      if (id === 'voice' && !state?.canSpeak) quip('Voice needs a Mac', 3);
     },
     enter() {
       replies.render();
@@ -524,21 +506,6 @@
     const next = replies.mode() === 'text' ? 'voice' : 'text';
     replies.choose(next);
     requestAnimationFrame(() => $('replies').children[next === 'text' ? 0 : 1]?.focus());
-  });
-  $('fish-change').addEventListener('click', () => {
-    replies.changing = !replies.changing; $('fish-error').hidden = true; $('fish-input').value = '';
-    replies.render();
-    if (replies.changing) $('fish-input').focus();
-  });
-  $('fish-link').addEventListener('click', () => { send({ type: 'open_link', url: FISH_URL }); quip('Copy it, then paste here'); });
-  $('fish-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const key = $('fish-input').value.trim();
-    if (!key || replies.saving) return $('fish-input').focus();
-    replies.saving = true; $('fish-error').hidden = true; replies.render();
-    poseFn = POSE.think();
-    send({ type: 'ob_fishkey', key });
-    $('fish-input').value = '';
   });
 
   // ---------------------------------------------------------------- step 4: shortcuts
@@ -849,7 +816,6 @@
         break;
       }
       case 'login': ai.onLogin(msg); break;
-      case 'fish': replies.onFish(msg); break;
       case 'ask':
         askId = msg.id;
         $('code-label').textContent = msg.prompt || 'Paste the code from your browser';
@@ -892,16 +858,15 @@
     // ?platform=linux&session=wayland previews a Wayland desktop (commands to bind instead of shortcuts).
     const sys = win ? { type: 'perms', mic: q.get('blocked') === '1' ? 'denied' : 'granted', input: true } : { type: 'perms', mic: pre, speech: old ? pre : 'granted', speechNeeded: old, screen: pre, accessibility: pre };
     const st = {
-      // &filesAsked=1: Allow was tapped for the folders in an earlier run. &replies=voice&fish=1: voice already on.
+      // &filesAsked=1: Allow was tapped for the folders in an earlier run. &replies=voice: voice already on; &speak=0: a computer that can't speak (not a Mac).
       kind: 'state', platform: q.get('platform') || 'darwin', step: +(q.get('step') || 0), sound: true, name: 'Jarvis', voice: true, actions: false, login: true, filesAsked: q.get('filesAsked') === '1',
-      replies: q.get('replies') === 'voice' ? 'voice' : 'text', fishKey: q.get('fish') === '1',
+      replies: q.get('replies') === 'voice' ? 'voice' : 'text', canSpeak: q.get('speak') !== '0' && !win,
       bind: q.get('session') === 'wayland' ? Object.fromEntries(['summon', 'talk', 'ask', 'list', 'panel'].map((k) => [k, `'/home/sam/Apps/Roamies 0.1.33.AppImage' --${k}`])) : null,
       keys: q.get('platform') === 'win32' ? { talk: ['control', 'option'], write: ['control', 'shift'], summon: 'Control+Shift+KeyS', snap: 'Control+Shift+KeyA' } : { talk: ['control', 'option'], write: win ? ['control', 'shift'] : ['option', 'command'], summon: 'Control+Alt+KeyS', snap: 'Control+Alt+KeyA' }, connected: null,
       voiceModel: win ? { status: q.get('model') || 'missing', done: q.get('model') === 'downloading' ? 281601575 : 0, total: 670479942, error: q.get('model') === 'error' ? 'Download failed. Check your internet.' : null, size: '670 MB' } : null,
-      oauth: [['anthropic', 'Claude', 'Anthropic'], ['openai', 'ChatGPT', 'OpenAI']].map(([id, name, company]) => ({ id, name, company, connected: false })),
-      apikey: [['anthropic', 'Anthropic'], ['openai', 'OpenAI'], ['gemini', 'Gemini'], ['xai', 'xAI'], ['kimi-code', 'Kimi Code'], ['moonshot', 'Moonshot'], ['glm', 'Z.AI'], ['minimax', 'MiniMax'],
-        ['xiaomi', 'MiMo Plan'], ['xiaomi-credits', 'MiMo Credits'], ['deepseek', 'DeepSeek'], ['sakana', 'Sakana'], ['openrouter', 'OpenRouter'], ['huggingface', 'Hugging Face']]
-        .map(([id, name]) => ({ id, name, connected: id === 'openrouter' && q.get('keys') === '1', link: id === 'xiaomi' ? null : `https://example.com/${id}` })),
+      // Feature 21: Anthropic only, as the sidecar offers (&keys=1: its key already saved).
+      oauth: [{ id: 'anthropic', name: 'Claude', company: 'Anthropic', connected: false }],
+      apikey: [{ id: 'anthropic', name: 'Anthropic', connected: q.get('keys') === '1', link: 'https://example.com/anthropic' }],
     };
     let filesAsked = st.filesAsked;
     const logins = new Map(); // sign-in id → its timers, so Cancel stops the simulated one
@@ -933,13 +898,7 @@
           window.__onboard?.({ kind: 'login', provider: m.provider, phase: 'done' }); window.__onboard?.({ ...st });
         }, 900);
       } else if (m.type === 'ob_replies') { st.replies = m.mode; reply({ ...st }); reply({ kind: 'say', text: m.mode === 'voice' ? 'Voice is on!' : 'Text only from now on.' }, 50); }
-      else if (m.type === 'ob_fishkey') {
-        // A key of "bad" is refused, like a wrong one.
-        setTimeout(() => {
-          if (m.key === 'bad') return window.__onboard?.({ kind: 'fish', ok: false, error: "That key didn't work. Copy it again from fish.audio and retry." });
-          Object.assign(st, { fishKey: true, replies: 'voice' }); window.__onboard?.({ kind: 'fish', ok: true }); window.__onboard?.({ ...st });
-        }, 900);
-      } else if (m.type === 'set_keys') {
+      else if (m.type === 'set_keys') {
         // As the sidecar does: talk and type never share a pair, so picking the other one's pair swaps them.
         const k = st.keys, both = (a, b) => a.every((x) => b.includes(x));
         if (m.talk) { if (both(m.talk, k.write)) k.write = k.talk; k.talk = m.talk; }

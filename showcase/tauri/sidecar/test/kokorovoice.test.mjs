@@ -251,7 +251,7 @@ for (const bad of ['python', path.join(dir, 'nothing', 'python')]) { // anything
   // through speaker.mjs: the overlay is sent the mark only after the last sentence's audio
   const out = [];
   const sp = createSpeaker({ emit: (m) => out.push(m), pickVoice: () => class extends voiceFor(e.k, () => e.st) { constructor(o) { super({ ...o, sayBin: fakeSay, platform: 'darwin' }); } }, beatPhrases: [] });
-  sp.setKey('local');
+  sp.enable();
   const reply = sp.start(); reply.say('Alpha.'); reply.say('Beta.'); const name = reply.mark(); reply.end();
   await until(() => out.some((m) => m.end));
   const kinds = out.filter((m) => m.kind === 'speech' && !m.stop).map((m) => (m.pcm ? `pcm@${m.rate}` : m.mark ? 'mark' : 'end'));
@@ -454,8 +454,8 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   const out = [];
   const Mac = class extends LocalVoice { constructor(o) { super({ ...o, sayBin: fakeSay, platform: 'darwin' }); } };
   const Natural = class extends voiceFor(e.k, () => e.st) { constructor(o) { super({ ...o, sayBin: fakeSay, platform: 'darwin' }); } };
-  const sp = createSpeaker({ emit: (m) => out.push(m), FishVoiceImpl: Mac, pickVoice: () => (e.k.ready ? Natural : null), beatPhrases: ['Right away.'] });
-  sp.setKey('local');
+  const sp = createSpeaker({ emit: (m) => out.push(m), MacVoice: Mac, pickVoice: () => (e.k.ready ? Natural : null), beatPhrases: ['Right away.'] });
+  sp.enable();
   const kinds = (from) => out.slice(from).filter((m) => m.kind === 'speech' && !m.stop).map((m) => (m.pcm ? `pcm@${m.rate}` : m.mark ? 'mark' : 'end'));
   await until(() => sp.ready === 1); // the beat, kept in the macOS voice while it is asleep
   let from = out.length;

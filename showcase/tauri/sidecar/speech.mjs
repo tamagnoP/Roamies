@@ -7,12 +7,11 @@ const SENTENCE_END = /[.!?…]+["'”’)\]]*(?=\s)/g;
 const SCREEN_ONLY = /^\s*(?:[-*•+]\s|\d{1,2}[.)]\s|>|#{1,6}\s|\||sources?\s*:)/i;
 const LONG = 220; // speak a run-on sentence in pieces rather than wait for its end
 
-// Fish Audio S2 voice cues: [chuckling], [warm], [break]… shape how a line is said (tested on the JARVIS voice:
-// they're performed, not read out). Only these are kept for the voice; on screen they're never shown.
-// Every cue in Fish Audio's emotion guide (docs.fish.audio/developer-guide/core-features/emotions), plus the
-// extra moods its examples use and a few of ours. All verified on the JARVIS voice by voice-samples.
+// Voice cues in square brackets: [chuckling], [warm], [break]… A model may still write them. They are never shown on
+// screen, and the voices of this build don't act them (localvoice.mjs and kokorovoice.mjs leave them out of what is
+// said). The list is the cues upstream's cloud voice knew, so a cue is told apart from a placeholder in brackets.
 export const VOICE_CUES = {
-  // 24 basic and 25 advanced emotions, then the ones Fish's examples use, then ours.
+  // 24 basic and 25 advanced emotions, then more moods, then upstream's own.
   emotions: [
     'happy', 'sad', 'angry', 'excited', 'calm', 'nervous', 'confident', 'surprised', 'satisfied', 'delighted', 'scared', 'worried',
     'upset', 'frustrated', 'depressed', 'empathetic', 'embarrassed', 'disgusted', 'moved', 'proud', 'relaxed', 'grateful', 'curious', 'sarcastic',
@@ -87,7 +86,7 @@ export function speakable(text) {
     .replace(/`([^`]*)`/g, (_, c) => (c.length > 24 || /[/\\{}();=<>]|^\S+\.[a-z0-9]{1,5}$/i.test(c) ? '' : c)) // code: short words only
     .replace(/(\*\*|__|\*|~~)(?=\S)([^*~]*?\S)\1/g, '$2') // bold, italic, strike
     .replace(/(?:^|\s)(?:~|\/)?(?:[\w.-]+\/){2,}[\w-]*(?:\.\w+)*/g, ' ') // file paths (the sentence's full stop stays)
-    .replace(/\[([^\]]{1,40})\]/g, (m, inner, at, all) => (IS_CUE.test(m) || (LOOSE.test(m) && SENTENCE_START.test(all.slice(0, at))) ? m.toLowerCase() : inner)) // voice cues stay; [placeholders] lose their brackets (Fish would act them out)
+    .replace(/\[([^\]]{1,40})\]/g, (m, inner, at, all) => (IS_CUE.test(m) || (LOOSE.test(m) && SENTENCE_START.test(all.slice(0, at))) ? m.toLowerCase() : inner)) // voice cues stay; [placeholders] lose their brackets (read as words)
     .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu, '')
     .replace(/\(\s*\)|\[\s*\]/g, '')
     .replace(/\s+([,.!?;:])/g, '$1')

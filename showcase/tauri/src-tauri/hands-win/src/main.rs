@@ -236,7 +236,6 @@ fn windows_main(cmd: &str, args: &[String]) -> ! {
             let Some(plan) = arg(1) else { fail("bad plan") };
             act::act(plan)
         }
-        // secret-* is handled by the sidecar on Windows (secrets.mjs).
         other => fail(&format!("unknown command {other}")),
     }
 }

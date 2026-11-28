@@ -170,8 +170,8 @@ const pendingNow = () => readState(dir).pending ?? [];
   // silent replies): hush() against stop(). What the reply says afterwards still comes out.
   const out = [];
   class V { constructor(o) { this.o = o; this.cuts = 0; } open() { return this; } say(s) { this.o.onAudio(new Uint8Array([s.length, 0])); } end() { this.o.onEnd(); } abort() {} mark(fn) { fn(); } cut() { this.cuts++; } }
-  const sp = createSpeaker({ emit: (m) => out.push(m), FishVoiceImpl: V });
-  sp.setKey('local');
+  const sp = createSpeaker({ emit: (m) => out.push(m), MacVoice: V });
+  sp.enable();
   let r = sp.start(); r.say('For pi. Say send.');
   sp.hush();
   assert.deepEqual(out.at(-1), { kind: 'speech', stop: true }); assert.equal(r.done, false);

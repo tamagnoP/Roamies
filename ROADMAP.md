@@ -2249,6 +2249,12 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
 - **2026-11-28, `kokoro.startWith` taken out again** (on `look-orb`, its own commit): the helper starts with Roamies, as
   since feature 16; a reply no longer starts it. A file that still has the key is not refused; nothing reads it.
   `kokoro.waitAtStartSeconds` stays.
+- **2026-11-28, the cloud voice deleted** (on `look-orb`): the setup guide's key form, affiliate link and billing note,
+  `ob_fishkey` and the panel's and menu's key handling, the voice model picker, `fish.mjs`, `msgpack.mjs`, the recorded
+  beats (11 MB) and their script, `secrets.mjs` and the macOS helper's keychain commands; the speaker is local only
+  (`enable()`); sidekick.json keeps only what is still read. The guide's Connect AI offers Anthropic only (it showed
+  ChatGPT and thirteen key providers in the installed 0.1.34). Test: `test/no-cloud-voice.test.mjs`, no "fish" in
+  anything shipped or shown but the fish shell in the safety rules and pi's watch.
 
 ## 6. Still to test
 

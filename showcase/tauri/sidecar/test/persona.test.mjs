@@ -126,8 +126,8 @@ assert.match(side, /function sir\(text, how\) \{ return addressClock\.line\(text
   class Voice { constructor(o) { Object.assign(this, o); this.said = []; Voice.made.push(this); } open() { return this; } say(t) { this.said.push(t); } end() { this.onEnd?.(); } abort() {} }
   Voice.made = [];
   const out = [];
-  const sp = createSpeaker({ emit: (m) => out.push(m), FishVoiceImpl: Voice, beatPhrases: P.beats });
-  sp.setKey('local'); await new Promise((r) => setTimeout(r, 20));
+  const sp = createSpeaker({ emit: (m) => out.push(m), MacVoice: Voice, beatPhrases: P.beats });
+  sp.enable(); await new Promise((r) => setTimeout(r, 20));
   const picked = new Set();
   for (let i = 0; i < 30; i++) { const r = sp.start(); assert.equal(r.beat(), true); picked.add(Voice.made.at(-1).said[0]); r.abort(); }
   assert.deepEqual([...picked].sort(), [...P.beats].sort(), 'only the persona\'s lines, all of them');

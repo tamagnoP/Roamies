@@ -1,11 +1,11 @@
-// Local-only build: spoken replies with the Mac's own voice (/usr/bin/say) instead of Fish Audio, so the text of a
-// reply never leaves the computer. Same shape as FishVoice (fish.mjs), so speaker.mjs drives it unchanged:
+// Local-only build: spoken replies with the Mac's own voice (/usr/bin/say), so the text of a reply never leaves the
+// computer. The shape speaker.mjs drives (kokorovoice.mjs has the same):
 // say() as many times as needed, then end(); abort() stops at once, silently. onAudio(Uint8Array) gets 16-bit mono
 // PCM at 44.1 kHz; onEnd() once after the last audio; onError(err) instead when it fails (err.heard = whether any
 // audio had been made).
 // Each sentence is made by one `say` run, in order: the text goes in on stdin (never on the command line), the
 // audio comes back as a WAV file in a private temp folder that's read and deleted straight away.
-// The voice is the one named for the look in ~/Documents/roamies-pi/settings.json ("voice", "voices"), else the one
+// The voice is the one named in ~/Documents/roamies-pi/settings.json ("voice"), else the one
 // in ROAMIES_SAY_VOICE, else the system voice (System Settings > Accessibility > Spoken Content > System voice).
 // Names are those `say -v '?'` lists. A voice that isn't installed is skipped: the system voice speaks instead.
 import { spawn } from 'node:child_process';
@@ -19,8 +19,8 @@ const CHUNK = 44100; // bytes handed over at a time: half a second of 16-bit mon
 
 let dir = null, seq = 0;
 const missing = new Set(); // voices `say` didn't have: not tried again until the app restarts
-// A name for `say -v`. Fish Audio voice ids (32 hex digits, the speaker's default) aren't Mac voices.
-const named = (v) => (typeof v === 'string' && v.trim() && !/^[0-9a-f]{32}$/i.test(v.trim()) ? v.trim() : null);
+// A name for `say -v`.
+const named = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 function tmpDir() {
   if (!dir) {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roamies-voice-')); // mkdtemp: owner-only (0700)
@@ -29,7 +29,7 @@ function tmpDir() {
   return dir;
 }
 
-/** What's said: Fish's voice cues ("[warm]", "[chuckling]") and stray brackets are for Fish only, so they go. */
+/** What's said: voice cues ("[warm]", "[chuckling]") and stray brackets aren't read out, so they go. */
 export const spoken = (text) => String(text ?? '').replace(/\[[^\]\n]{0,60}\]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** The samples in a WAV file from `say`: 16-bit PCM, mono (the first channel of anything wider). */
