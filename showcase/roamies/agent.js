@@ -1,5 +1,5 @@
 // Agent layer for the sidekick. Speech, question and listening bubbles, the thinking tag and the task tag are drawn in
-// the card look (glass.js) over the LED body; talking, thinking and tools drive the pose, face and voice blips.
+// the instrument style (glass.js) beside the orb (orb.js); listening, thinking, talking and tools set the orb's state.
 // API: agent.say(text) / agent.think(text) return handles with append(), end() and a `closed` promise.
 (() => {
   const R = window.Roamie;
@@ -114,11 +114,11 @@
     const css = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
     const tcan = document.createElement('canvas');
     const tctx = tcan.getContext('2d');
-    let b = null, dying = [], now = 0, W = 800, H = 600, mouthT = 0, mouthMode = null, gestT = 0;
-    let tool = null, lastPose = null, lookAt = null, actUntil = 0, typedAt = -9;
+    let b = null, dying = [], now = 0, W = 800, H = 600;
+    let tool = null, lastPose = null, lookAt = null;
     // Context handed to tool performances (agent-tools.js): timing, sounds and the face; the task tag shows the rest.
     const C = {
-      k, sq: k.sq, face, S: k.S,
+      k, sq: k.sq, face,
       get P() { return k.P; }, get R() { return k.R; }, get now() { return now; }, get W() { return W; }, get H() { return H; },
       get bx() { return m.x + (lastPose?.ox ?? 0); },
       get by() { return m.y + (lastPose?.oy ?? 0); },
@@ -391,21 +391,22 @@
       k.appear(entrance(), x, y);
     };
     const MAX_COLS = 38, MAX_LINES = 7, THINK_COLS = 28, THINK_LINES = 1, METER = 7;
-    // Bubble text: Martian Mono (0.7 em per letter), sized to the bubble's line grid.
-    const fontPx = (t) => Math.round(CH * t * 0.64 * 2) / 2;
-    const colW = (t) => fontPx(t) * 0.7 + 0.35;
-    const TEXT_INK = '#dcfff6', TEXT_ACCENT = '#78ffe2';
+    // Bubble text: the system's monospace (SF Mono, 0.6 em per letter), sized to the bubble's line grid. It stays in
+    // columns as it streams in, so a letter never moves once it has landed (feature 21: no font is downloaded).
+    const fontPx = (t) => Math.round(CH * t * 0.72 * 2) / 2;
+    const colW = (t) => fontPx(t) * 0.61 + 0.3;
+    const TEXT_INK = '#F2F7FB', TEXT_ACCENT = '#62D5F8';
     const T = () => clamp(k.P * 0.42, 1.4, 2.4);
     const G = R.glass;
     // Padding inside a bubble. The thinking tag is slim, one line, with its three dots before the words.
     const DOTS_W = 24;
-    const padX = (bb) => (bb.kind === 'thought' ? 13 : k.P * 3), padY = (bb) => (bb.kind === 'thought' ? 5 : k.P * 3);
+    const padX = (bb) => (bb.kind === 'thought' ? 13 : 20), padY = (bb) => (bb.kind === 'thought' ? 5 : 18);
     const dotsDx = (bb) => (bb.kind === 'thought' && bb.text ? DOTS_W + 10 : 0);
     // Under a question: how to answer it.
     const HINT = 'enter to send · esc to skip', HINT_F = `400 11px ${G.MONO}`, HINT_H = 18;
     const hintH = (bb) => (bb.input && !bb.input.listen && !bb.input.choices ? HINT_H : 0);
     // Local-only build (feature 23): a bubble's tag ("local"), a footer line like the hint.
-    const tagH = (bb) => (bb.tag && !bb.input ? HINT_H : 0);
+    const tagH = (bb) => (bb.tag && !bb.input ? HINT_H + 6 : 0);
     // A yes/no question: its buttons sit in a row under it instead of the hint.
     const CHOICE_GAP = 8, CHOICE_TOP = 12;
     const choicesW = (bb) => bb.input.choices.labels.reduce((s, l, i) => s + G.chipW(l) + (i ? CHOICE_GAP : 0), 0);
@@ -445,13 +446,11 @@
         b = make(kind);
         const tip = tipPoint();
         b.x.x = tip.x - k.P * 4; b.y.x = tip.y - k.P * 6; b.tail.x.x = tip.x; b.tail.y.x = tip.y;
-        k.S('pop');
       }
       b.mood = opts.mood ?? null;
       b.tag = opts.tag ? String(opts.tag).slice(0, 30) : null; // feature 23: the local model's tag
       // point: hand target in body radii (e.g. [0.3, -1.6] points up) held while the bubble is open.
       b.point = opts.point ?? null;
-      if (b.mood === 'happy') face.set('happy', 0.9);
       const h = handle(b);
       if (text) h.append(text);
       if (!opts.stream) h.end();
@@ -463,7 +462,6 @@
       bb.closing = 0.0001;
       dying.push(bb);
       if (b === bb) b = null;
-      k.S('poof');
     };
 
     const tipPoint = () => ({ x: m.x + Math.sign((b?.x.x ?? m.x) + (b?.w.x ?? 0) / 2 - m.x) * k.R * 0.25, y: b?.below ? m.y + k.R * 0.95 : m.y - k.R * 1.02 });
@@ -491,7 +489,7 @@
       for (const l of (bb.expanded ? bb.lines : shownLines)) cols = Math.max(cols, Math.min(l.s.length, maxCols));
       if (bb.lines.length > 1) cols = Math.max(cols, Math.min(maxCols, 18));
       const rows = clamp(bb.expanded ? bb.lines.length : shownLines.length, 1, maxRows);
-      return { cols, rows, maxRows, w: Math.max(cols * colW(t) + dotsDx(bb), tagH(bb) ? G.textW(bb.tag, HINT_F) : 0), h: rows * CH * t + tagH(bb) };
+      return { cols, rows, maxRows, w: Math.max(cols * colW(t) + dotsDx(bb), tagH(bb) ? G.textW(bb.tag, HINT_F) + 12 : 0), h: rows * CH * t + tagH(bb) };
     };
 
     const step = (bb, dt, env) => {
@@ -509,11 +507,7 @@
           const ch = bb.text[i];
           if (bb.kind === 'speech') {
             if ('.!?'.includes(ch)) bb.wait = 0.2; else if (ch === ',') bb.wait = 0.08; else if (ch === '\n') bb.wait = 0.25;
-            if (ch === '!') { k.sq.kick(3); bb.pop.v += 2.5; }
-            if (/[aeiouy]/i.test(ch)) k.S('blip', 0.85 + (ch.charCodeAt(0) % 7) * 0.06);
-            mouthMode = /[aeiouAEIOU]/.test(ch) ? (/[oO]/.test(ch) ? 'talk2' : 'talk1') : /\s/.test(ch) ? null : 'flat';
-            mouthT = 0.09;
-          } else if (i % 9 === 0) k.S('tick');
+          }
           if (bb.wait) break;
         }
       } else if (bb.text.length && Math.floor(bb.shown) >= bb.text.length) {
@@ -602,7 +596,7 @@
       }
     };
 
-    // ---- bubbles: the card look, with a stepped tail to the body (or, thinking, two little steps up from it) ----
+    // ---- bubbles: the instrument's panel beside the orb (or, thinking, two little squares up from it) ----
     // The frame as drawn this instant: it pops in and out around the point its tail comes from.
     const bubbleBox = (bb) => {
       const pop = clamp(bb.pop.x, 0, 1.08), beside = bb.side === 'left' || bb.side === 'right';
@@ -664,7 +658,12 @@
         ctx.restore();
       }
       if (hintH(bb) && bb.pop.x > 0.6) G.typed(ctx, HINT, f.x + padX(bb), f.y + f.h - padY(bb) - HINT_H / 2 + 2, HINT_F, G.DIM);
-      if (tagH(bb) && bb.pop.x > 0.6) G.typed(ctx, bb.tag, f.x + padX(bb), f.y + f.h - padY(bb) - HINT_H / 2 + 2, HINT_F, G.DIM);
+      // Feature 23's tag ("local", "local · private"), as an outlined tag in the accent (feature 21, the artboards).
+      if (tagH(bb) && bb.pop.x > 0.6) {
+        const tx = f.x + padX(bb), ty = f.y + f.h - padY(bb) - HINT_H + 1, tw = G.textW(bb.tag, HINT_F) + 12;
+        ctx.save(); ctx.strokeStyle = G.ACC; ctx.lineWidth = 1; ctx.strokeRect(Math.round(tx) + 0.5, Math.round(ty) + 0.5, Math.round(tw), HINT_H - 2); ctx.restore();
+        G.typed(ctx, bb.tag, tx + 6, ty + (HINT_H - 2) / 2 + 1, HINT_F, G.ACC);
+      }
       const ch = bb.input?.choices;
       if (ch) {
         ch.rects = [];
@@ -722,7 +721,7 @@
         let f = fonts.get(st);
         if (!f) {
           const w = st & (md?.BOLD ?? 0) ? 700 : base, it = st & (md?.ITAL ?? 0) ? 'italic ' : '';
-          f = `${it}${w} ${fpx}px "Martian Mono", Menlo, ui-monospace, monospace`; fonts.set(st, f);
+          f = `${it}${w} ${fpx}px ${G.MONO}`; fonts.set(st, f);
         }
         return f;
       };
@@ -864,13 +863,11 @@
       think: (text, opts = {}) => {
         ensureShown();
         const h = open('thought', text, { ...opts, stream: true });
-        if (!opts.quiet) k.S('hmm');
         if (opts.dur) setTimeout(() => { h.end(); }, opts.dur * 1000);
         return h;
       },
       hush: () => { if (b) close(b); },
       // Act out an emote (wave, hype, upset, remind, motivate). Skipped while a tool is on stage.
-      act: (name) => { if (tool) return false; ensureShown(); actUntil = now + (k.presence === 'in' ? 4.2 : 3.3); k.startAct(name); return true; },
       show: ({ summoned = false, variant } = {}) => {
         den.dismissed = false; R.wake?.();
         presence.lastActive = now; presence.summoned = summoned;
@@ -947,7 +944,7 @@
           await penTween(dur, (u) => { const e = penSmooth(u); pen.tip = penAt(pts, e); onP(e); });
           onP(1); await penWait(0.04);
         },
-        async tap(x, y) { await penFly(x, y); k.S('pip'); await penTween(0.16, (u) => { pen.tip = [x, y + Math.sin(u * Math.PI) * 3]; }); },
+        async tap(x, y) { await penFly(x, y); await penTween(0.16, (u) => { pen.tip = [x, y + Math.sin(u * Math.PI) * 3]; }); },
         // Drift just off a finished mark (down and right of it), so the cursor never covers it.
         rest(x, y) { const [x0, y0] = pen.tip, tx = x + 16, ty = y + 14; return penTween(0.2, (u) => { const e = penEase(u); pen.tip = [lerp(x0, tx, e), lerp(y0, ty, e)]; }); },
         park(kind, x, y) {
@@ -993,9 +990,9 @@
       atRest: () => den.calm > 1,
       // Local-only build (feature 24, fix 6): at rest on its home spot, not where it was dragged, with nothing of its
       // own on screen (bubble, task tag, the pen) and nothing it is doing. host.js adds the rest of the page.
-      get atHome() { return homing() && k.presence === 'shown' && !den.away && !den.dismissed && !b && !dying.length && !tool && !pen.held && !m.dragging && !m.flung && !station.moving && now >= actUntil && den.calm > 1; },
+      get atHome() { return homing() && k.presence === 'shown' && !den.away && !den.dismissed && !b && !dying.length && !tool && !pen.held && !m.dragging && !m.flung && !station.moving && den.calm > 1; },
       // A page made to take over from one where it was resting: it is at home at once, without an entrance or a
-      // sound, with JARVIS's globe turned as it was (keep.spin).
+      // sound, with the orb's particles turned as they were (keep.spin).
       get keep() { return { spin: k.spin }; },
       // hold: the seconds after this in which a change of the home spot puts it there at once (the sidecar's).
       settle: (keep) => {
@@ -1021,7 +1018,6 @@
         const bb = b;
         bb.input = { placeholder: opts.placeholder ?? 'Listening…', focused: true, caretAt: now, listen: true, level: 0, target: 0, levels: [], processing: false };
         bb.wait = 0;
-        k.S('listen');
         return {
           set(text) {
             let i = 0;
@@ -1049,14 +1045,12 @@
         bb.wait = 0;
         return {
           // The keyboard's highlighted button (-1: none).
-          select(i) { const ch = bb.input.choices; if (ch && ch.sel !== i) { ch.sel = i; k.S('tick'); } return this; },
+          select(i) { const ch = bb.input.choices; if (ch && ch.sel !== i) ch.sel = i; return this; },
           // caret: where the field's own caret is (it moves with the arrow keys and clicks); the end if not given.
           set(value, caret = value.length) {
             const v = bb.input.mask ? '•'.repeat(value.length) : value;
             bb.input.caret = clamp(caret, 0, v.length);
             const prev = bb.text.length;
-            if (v.length > prev) { k.S('key', 0.9 + Math.random() * 0.25); k.sq.kick(1.2); typedAt = now; }
-            else if (v.length < prev) k.S('tick');
             bb.text = v; bb.sty = null; bb.lines = wrap(v, MAX_COLS); bb.shown = v.length;
             for (let i = prev; i < v.length; i++) bb.at[i] = now;
             bb.input.caretAt = now;
@@ -1084,11 +1078,10 @@
           // Live calls: when the animation reaches its end before the real tool, hold there (spinner keeps going).
           if (st.live && st.real === undefined) { st.parked = true; return; }
           const final = st.live ? st.real && ok : ok;
-          st.status = final ? 'ok' : 'fail'; k.S(final ? 'done' : 'error');
+          st.status = final ? 'ok' : 'fail';
         };
         tool = st;
         def.start?.(st, C);
-        k.S('toolstart');
         if (opts.dur) setTimeout(() => st.finish(true), opts.dur * 1000);
         const done = (ok = true) => {
           if (!st.live) return st.finish(ok);
@@ -1123,7 +1116,7 @@
           return;
         }
         if (b.input) { b.input.onPress?.(); return; }
-        if (b.overflow || b.expanded) { b.expanded = !b.expanded; b.follow = false; b.dwell = 0; k.S('expand'); if (!b.expanded) b.scrollTarget = 0; }
+        if (b.overflow || b.expanded) { b.expanded = !b.expanded; b.follow = false; b.dwell = 0; if (!b.expanded) b.scrollTarget = 0; }
         else close(b);
       },
       wheel: (dy) => {
@@ -1132,54 +1125,20 @@
         b.scrollTarget = (b.scrollTarget ?? 0) + dy / 40;
         if (b.scrollTarget >= b.lines.length - b.rows) b.follow = b.ended ? false : true;
       },
-      pose: (dt) => {
+      // The orb's state (orb.js): listening, thinking (a thought, or a tool call running) or talking; null at rest.
+      pose: () => {
         lookAt = null;
-        if (now < actUntil && !tool) { lastPose = null; return null; }
-        const tp0 = tool ? tool.def.pose(tool, C) : null, tp = tp0 && { ...tp0, arms: 0, tl: undefined, tr: undefined };
-        const bp = bubblePose(dt);
-        let p = tp ?? bp;
-        if (tp && bp && b?.kind === 'speech' && mouthT > 0) p = { ...tp, mouth: bp.mouth };
-        if (tool && tool.status && tool.out > 0.35) p = p && { ...p, arms: tool.out > 0.6 ? 0 : p.arms };
+        const p = bubblePose() ?? (tool && !tool.status ? tool.def.pose?.(tool, C) ?? { mode: 'think' } : null);
         lastPose = p;
         return p;
       },
     };
-    function bubblePose(dt) {
-      {
-        const t = now;
-        if (!b) return null;
-        if (b.input?.listen) {
-          const lv = b.input.level, wig = Math.sin(t * 7) * 0.04 * lv;
-          return {
-            arms: 1, tr: [0.98 + wig, -0.42 - lv * 0.08], tl: [-0.62, 0.88 + Math.sin(t * 2) * 0.03],
-            ox: k.R * 0.05, oy: -lv * k.R * 0.06, mouth: b.input.processing ? 'o' : 'flat', brow: 'raised', mode: 'listen', heard: lv,
-          };
-        }
-        if (b.input) {
-          const typing = now - typedAt < 0.35, bob = Math.sin(t * 2.2) * 0.03;
-          return { arms: 0.8, tl: [-0.42, 0.95 + bob], tr: [0.42, 0.95 - bob], oy: typing ? -k.R * 0.025 : 0, mouth: typing ? 'o' : 'flat', brow: b.text ? null : 'raised' };
-        }
-        if (b.kind === 'thought') {
-          return {
-            arms: 1, tl: [-0.08, 0.5 + Math.sin(t * 2) * 0.03], tr: [0.98, 0.34], ox: Math.sin(t * 1.3) * k.R * 0.04,
-            mouth: Math.sin(t * 0.9) > 0.6 ? 'o' : 'flat', brow: 'raised', mode: 'think',
-          };
-        }
-        const talking = b.shown < b.text.length || !!R.voiceOut?.playing();
-        gestT += dt * (talking ? 1 : 0.3);
-        const g = Math.sin(gestT * 3.1), g2 = Math.sin(gestT * 1.7 + 1);
-        const brow = b.mood === 'annoyed' ? 'angry' : b.mood === 'concerned' ? 'raised' : b.mood === 'determined' ? 'determined' : null;
-        if (b.point) {
-          const bob = Math.sin(t * 5) * 0.06;
-          return { arms: 1, tr: [b.point[0], b.point[1] + bob], tl: [-0.9, 0.45], mouth: mouthT > 0 ? mouthMode : 'grin', brow: 'raised', mode: talking ? 'talk' : null };
-        }
-        return {
-          arms: talking ? 1 : 0.4,
-          tr: [0.95 + g * 0.08, 0.05 - Math.max(0, g) * 0.35], tl: [-0.98 - g2 * 0.06, 0.25 - Math.max(0, g2) * 0.18],
-          // No hop while it talks: the body (and the bubble and cards placed from it) stays level to be read.
-          mouth: mouthT > 0 ? mouthMode : b.mood === 'annoyed' ? 'frown' : null, brow, mode: talking ? 'talk' : null,
-        };
-      }
+    function bubblePose() {
+      if (!b) return null;
+      if (b.input?.listen) return { mode: 'listen', heard: b.input.level };
+      if (b.input) return null;
+      if (b.kind === 'thought') return { mode: 'think' };
+      return b.shown < b.text.length || !!R.voiceOut?.playing() ? { mode: 'talk' } : null;
     }
     const self = {
       ...plugin,
@@ -1215,7 +1174,7 @@
         if (den.gone > 0.4) { den.gone = 0; if (den.quiet) settleNow(); else { const [x, y] = spot(); k.appear(entrance(), x, y); } }
         if (presence.auto && !hm) {
           const hover = env.mouse?.active && Math.hypot(env.mouse.x - m.x, env.mouse.y - m.y) < k.R * 1.5;
-          const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;
+          const busyNow = b || dying.length || tool || pen.held || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;
           if (busyNow) presence.lastActive = now;
           const idleFor = presence.summoned ? presence.summonIdle : presence.idle;
           if (k.presence === 'shown' && now - presence.lastActive > idleFor) { presence.summoned = false; k.vanish(nextVariant()); }
@@ -1226,7 +1185,6 @@
           for (let i = dying.length - 1; i >= 0; i--) { dying[i].closing += dt; if (dying[i].closing > 0.35) { dying[i].closed.resolve(); dying.splice(i, 1); } }
           return;
         }
-        mouthT -= dt;
         if (k.presence === 'shown') {
           if (station.x == null) setStation(m.x, m.y);
           const held = m.dragging || m.flung;
@@ -1258,7 +1216,7 @@
             if (station.flee > 0.45 && !station.moving) {
               const [x, y] = pickSpot(cx, cy, m.x, m.y);
               k.stopAct?.(); setStation(x, y); m.goTo(x, y);
-              station.moving = true; station.flee = 0; k.S('hop'); k.sq.kick(4);
+              station.moving = true; station.flee = 0;
             }
           }
           // Local-only build: home is where it belongs unless it was dragged off. It glides there when it isn't (the
@@ -1314,7 +1272,7 @@
         }
         // Local-only build: resting at home with nothing going on, it looks straight ahead rather than at the cursor,
         // and once it has been still for a second the frame loop stops until something wakes it (core.js).
-        const idle = hm && k.presence === 'shown' && !b && !dying.length && !tool && !pen.held && !m.dragging && !m.flung && !station.moving && now >= actUntil;
+        const idle = hm && k.presence === 'shown' && !b && !dying.length && !tool && !pen.held && !m.dragging && !m.flung && !station.moving;
         if (idle) { den.look = [R.damp(den.look[0], 0, 6, dt), R.damp(den.look[1], 0, 6, dt)]; face.lookX = den.look[0]; face.lookY = den.look[1]; }
         else den.look = [face.lookX, face.lookY];
         const still = idle && !!k.calmBody?.() && k.form === k.userForm && face.blinkT < 0 && m.speed < 2 && Math.abs(den.look[0]) < 0.02 && Math.abs(den.look[1]) < 0.02;

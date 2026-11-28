@@ -4,10 +4,7 @@
 <meta charset="utf-8">
 <title>Roamies on the desktop</title>
 <style>
-  /* Bubble and research-card text (the setup guide's body font). */
-  @font-face { font-family: "Martian Mono"; src: url("onboarding/fonts/martian-mono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
-  /* Headings on drawn cards and tickets. */
-  @font-face { font-family: "Doto"; src: url("onboarding/fonts/doto.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  /* Feature 21: the system's own fonts only (glass.js); nothing is loaded. */
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   /* Sized and moved by core.js to cover just what's drawn. */
   canvas { position: fixed; left: 0; top: 0; display: block; cursor: grab; touch-action: none; transform-origin: 0 0; will-change: transform;
@@ -17,11 +14,10 @@
 </style>
 </head>
 <body>
-<canvas id="stage" aria-label="Roamies roaming the desktop"></canvas>
+<canvas id="stage" aria-label="Roamies on the desktop"></canvas>
 <script src="roamies/core.js"></script>
 <script src="roamies/measure.js"></script>
 <script src="roamies/markdown.js"></script>
-<script src="roamies/sfx.js"></script>
 <script src="roamies/voice-out.js"></script>
 <script src="roamies/glass.js"></script>
 <script src="roamies/home.js"></script>
@@ -29,16 +25,12 @@
 <script src="roamies/agent-tools.js"></script>
 <script src="roamies/agent-cards.js"></script>
 <script src="roamies/agent-panel.js"></script>
-<script src="roamies/jarvis.js"></script>
-<script src="roamies/people.js"></script>
-<script src="roamies/10-dither.js"></script>
-<script src="roamies/12-sidekick.js"></script>
-<script>Roamie.bootDesktop(document.getElementById("stage")); document.fonts.load('500 13px "Martian Mono"');</script>
+<script src="roamies/orb.js"></script>
+<script>Roamie.bootDesktop(document.getElementById("stage"));</script>
 <script src="roamies/ink3d.js"></script>
 <script src="roamies/world.js"></script>
 <script src="roamies/ink.js"></script>
 <script src="roamies/pen.js"></script>
-<script>document.fonts.load('800 16px "Doto"');</script>
 <script src="roamies/ask-bar.js"></script>
 <script src="roamies/host.js"></script>
 </body>

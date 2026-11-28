@@ -1,12 +1,12 @@
-// Feature 31, the quiet queue's count on the overlay page without a screen (page.mjs): drawn by the body, above and to
-// the right, while there is something waiting; gone at 0; hidden while stood down and back after; "9+" past nine;
-// drawn at once on a page at rest, which then rests again. In every look.
+// Feature 31, the quiet queue's count on the overlay page without a screen (page.mjs). Feature 21: the orb's "waiting on
+// you" state shows it, in its centre with an amber half ring, while there is something waiting; gone at 0; hidden
+// while stood down and back after; "9+" past nine; drawn at once on a page at rest, which then rests again.
 import assert from 'node:assert/strict';
 import { started } from './page.mjs';
 
-for (const look of ['jarvis', 'classic', 'anime', 'sarah', 'adrian']) {
-  const p = await started();
-  p.host({ kind: 'look', look }); await p.tick(6);
+{
+  const look = 'the orb';
+  const p = await started(); await p.tick(2);
   assert.equal(p.R.rested(), true, `${look}: at rest`);
   const ctx = p.canvas.getContext('2d'), texts = [];
   ctx.fillText = (t, x, y) => texts.push([String(t), x, y]);
@@ -16,7 +16,8 @@ for (const look of ['jarvis', 'classic', 'anime', 'sarah', 'adrian']) {
   assert.equal(p.creature.queued, 2);
   const [t, x, y] = badge().at(-1) ?? [];
   assert.equal(t, '2', `${look}: the count is drawn`);
-  assert.ok(x > p.m.x && y < p.m.y && Math.hypot(x - p.m.x, y - p.m.y) < 140, `${look}: above and right of the body (${Math.round(x - p.m.x)}, ${Math.round(y - p.m.y)})`);
+  assert.ok(Math.hypot(x - p.m.x, y - p.m.y) < 4, `${look}: in the orb's centre (${Math.round(x - p.m.x)}, ${Math.round(y - p.m.y)})`);
+  assert.equal(p.creature.state, 'waiting');
   await p.tick(6); assert.equal(p.R.rested(), true, `${look}: and rests again`);
   texts.length = 0; p.host({ kind: 'queue', n: 14 }); await p.tick(1);
   assert.equal(badge().at(-1)?.[0], '9+');

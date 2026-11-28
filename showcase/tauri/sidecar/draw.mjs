@@ -11,13 +11,12 @@ export const LIMITS = { beats: 12, marks: 40, points: 200, parts3d: 40, atoms: 1
 export const TONES = ['accent', 'teal', 'amber', 'coral', 'lilac', 'sky', 'lime', 'red', 'white'];
 // Marks on the real screen (they need a place on it), actions in apps, and cards drawn on calm space.
 export const SCREEN = ['point', 'target', 'hover', 'ring', 'frame', 'underline', 'strike', 'check', 'cross', 'connect', 'trace', 'num', 'label', 'write', 'scroll', 'spotlight', 'highlight', 'line', 'curve', 'arrow', 'circle', 'rect'];
-export const ACTIONS = ['emote', 'sfx', 'type', 'copy', 'open', 'handoff', 'button'];
+export const ACTIONS = ['emote', 'type', 'copy', 'open', 'handoff', 'button']; // feature 21: no sounds (sfx went with them)
 export const CARDS = ['card', 'note', 'list', 'clip', 'sources', 'photo', 'graph', 'legend', 'timeline', 'molecule', 'model', 'flow', 'table', 'bars', 'map', 'math', 'geometry', 'quiz', 'ticket', 'medal'];
 export const KINDS = [...SCREEN, ...ACTIONS, ...CARDS];
 // Drawn from a list of points (screenshot pixels) instead of one place.
 const PATHS = new Set(['trace', 'line', 'curve', 'arrow']);
 const EMOTES = ['hype', 'wave', 'upset', 'remind', 'motivate'];
-const SOUNDS = ['pop', 'tick', 'blip', 'whoosh', 'scan', 'done', 'page', 'hype', 'focus', 'expand'];
 const SHAPES = ['box', 'sphere', 'cylinder', 'cone', 'torus'];
 const MOTIONS = ['spin', 'orbit', 'slide', 'pulse'];
 const NODE_SHAPES = ['box', 'round', 'diamond'];
@@ -93,7 +92,6 @@ export function checkDraw(args) {
       else if (SCREEN.includes(m.kind)) need(hasAt(m.at), 'at (text, id, or x and y)');
       if (m.kind === 'label' || m.kind === 'write') need(m.text || m.label, 'text');
       if (m.kind === 'emote') need(EMOTES.includes(m.name), `name, one of ${EMOTES.join(', ')}`);
-      if (m.kind === 'sfx') need(SOUNDS.includes(m.name), `name, one of ${SOUNDS.join(', ')}`);
       if (m.kind === 'type') { need(hasAt(m.at), 'at (the field)'); need(m.text, 'text'); }
       if (m.kind === 'copy') need(m.text, 'text');
       if (m.kind === 'open') need(m.url, 'url');
@@ -325,7 +323,7 @@ export function quizNote(m, picks) {
   const missed = qs.map((q, i) => (pick(i) === q.right ? null : `${cut(q.text)} (they ${pick(i) < 0 ? 'skipped it' : `picked ${cut(q.options[pick(i)])}`}; the answer is ${cut(q.options[q.right])})`)).filter(Boolean);
   return `They answered the quiz${m.title ? ` ${cut(m.title)}` : ''} on screen by clicking: ${qs.length - missed.length} of ${qs.length} right.${missed.length ? ` Missed: ${missed.join('; ')}.` : ''}`;
 }
-const SILENT = new Set(['emote', 'sfx', 'copy', 'open', 'handoff']);
+const SILENT = new Set(['emote', 'copy', 'open', 'handoff']);
 /** The parts on screen: ids never reused in a conversation, screen marks cleared on their own, cards until closed. */
 export function createParts() {
   const all = new Map();

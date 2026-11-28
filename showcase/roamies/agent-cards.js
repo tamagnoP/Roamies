@@ -11,13 +11,13 @@
   // ---------- a card beside the Sidekick: placed and sprung beside it, opening from its top-left corner ----------
   class Card {
     constructor() { this.open = false; this.age = 0; this.closing = 0; this.until = Infinity; this.x = { x: 0, v: 0 }; this.y = { x: 0, v: 0 }; this.placed = false; this.geo = null; }
-    show(k) { if (!this.open || this.closing) { this.open = true; this.closing = 0; this.age = 0; this.placed = false; k.S('page'); } this.until = Infinity; }
+    show(k) { if (!this.open || this.closing) { this.open = true; this.closing = 0; this.age = 0; this.placed = false; } this.until = Infinity; }
     close(k, after = 0) { this.until = Math.min(this.until, now() + after); }
     fade() { return this.closing ? clamp(1 - this.closing / 0.3, 0, 1) : clamp(this.age / 0.22, 0, 1); }
     update(dt, k, side, slot) {
       if (!this.open) return;
       if (this.closing) { this.closing += dt; if (this.closing > 0.35) { this.open = false; this.closing = 0; } }
-      else { this.age += dt; if (now() > this.until) { this.closing = 0.0001; k.S('poof'); } }
+      else { this.age += dt; if (now() > this.until) this.closing = 0.0001; }
       const { w, h } = this.size(k), P = k.P, S = R.safe ?? { left: 0, top: 0, right: 0, bottom: 0 }, m = k.m;
       const l = S.left, t = S.top, r = innerWidth - S.right, b = innerHeight - S.bottom, gap = k.R * 1.35 + P * 3;
       // Beside the body, its bottom kept above the task tag that can open under it.
@@ -34,11 +34,9 @@
   // ---------- trail: the parts of the request ----------
   class Trail extends Card {
     set(e, k) {
-      const fresh = !this.open || this.closing;
       this.show(k);
       const before = this.steps ?? [];
       this.steps = (e.steps ?? []).map((s, i) => ({ ...s, at: before[i]?.state === s.state ? before[i].at : now() }));
-      for (const [i, s] of this.steps.entries()) if (!fresh && before[i] && before[i].state !== s.state && (s.state === 'ok' || s.state === 'bad')) k.S(s.state === 'ok' ? 'tick' : 'error');
       this.head = String(e.head ?? 'your request').toLowerCase();
       this.lay = null;
       if (e.final) this.close(k, 4.5);
@@ -80,7 +78,7 @@
           if (!s || ra <= 0) return;
           const ry = y + r.y;
           if (r.why) { r.why.forEach((ln, j) => G.typed(ctx, ln, x + 40, ry + 8 + j * 16, SMALL, G.NOTE, (ra - 0.1) / 0.4)); return; }
-          const since = t - s.at, ink = s.state === 'ok' ? G.MID : s.state === 'bad' ? G.CORAL : s.state === 'now' ? G.ACC : '#3f8f88';
+          const since = t - s.at, ink = s.state === 'ok' ? G.MID : s.state === 'bad' ? G.CORAL : s.state === 'now' ? G.ACC : G.DEEP;
           if (s.state === 'now') { ctx.fillStyle = 'rgba(120,255,226,0.07)'; ctx.fillRect(x + 4, ry, w - 8, r.h); }
           G.pen(ctx, G.ringPts(x + 24, ry + 12, 7, r.i * 2.3), ink, 2.2, ra / 0.3);
           const font = s.state === 'now' ? NOW : BODY;

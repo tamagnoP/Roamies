@@ -1,7 +1,7 @@
-// Setup guide: Welcome → Permissions → Connect AI → Replies → What I can do → Shortcuts → About you → Find me.
-// The Sidekick lives on the left: it drops in on each step, points at what needs doing, cheers when
-// something gets done and listens when you test your voice. Talks to the app through Tauri commands;
-// opened in a plain browser it runs a simulated preview instead.
+// Setup guide: Welcome → Permissions → Connect AI → Replies → Shortcuts → Find me.
+// The orb (roamies/orb.js) lives on the left: it comes in on each step, moves beside what needs doing, says a short
+// line, and shows that it listens when you test your voice. Feature 21: no look, size, chat, drawing demo or tour.
+// Talks to the app through Tauri commands; opened in a plain browser it runs a simulated preview instead.
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -10,39 +10,32 @@
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const invoke = window.__TAURI__?.core?.invoke ?? preview();
   const send = (msg) => invoke('sidecar_send', { msg }).catch(() => {});
-  const sfx = (name, arg) => Roamie.sfx?.play(name, arg);
 
-  // ---------------------------------------------------------------- the Sidekick
+  // ---------------------------------------------------------------- the orb
   const canvas = $('roamie'), ctx = canvas.getContext('2d'), quipEl = $('quip'), tailEl = $('quip-tail');
   const HOME = { x: 150, y: 330 };
-  let W = innerWidth, H = innerHeight, dpr = 1, K = null, clock = 0, actUntil = 0, poseFn = null;
+  let W = innerWidth, H = innerHeight, dpr = 1, K = null, clock = 0, poseFn = null;
   const env = {
     w: W, h: H, dpr, t: 0, unit: 330, transparent: true, spawn: { ...HOME },
     safe: { left: 30, right: W - 290, top: 70, bottom: 50 },
     mouse: { x: 0, y: 0, inside: false, active: false }, sleepy: 0, reduced: reduced.matches,
   };
-  const sidekick = Roamie.ditherKit({
-    id: 'guide', label: 'Guide', matrix: true, pixel: 1.3, glow: 0.55, speed: 80,
-    pal: [[4, 16, 18], [14, 92, 96], [40, 196, 184], [120, 255, 226], [230, 255, 250]],
-    // busy: no random acts; pose: whatever the current step wants, except while acting something out.
-    // calm while a quip is up: the act keeps its gesture but drops its icon, which would sit on the bubble.
-    plugin: (kit) => { K = kit; return { busy: () => true, calm: () => !!quipText && clock < quipUntil, pose: () => (clock < actUntil ? null : poseFn?.(clock) ?? null) }; },
+  const sidekick = Roamie.orbKit({
+    id: 'guide', label: 'Guide',
+    // pose: the orb's state for the current step (thinking while it waits on a sign-in, listening while you test
+    // your voice); null at rest.
+    plugin: (kit) => { K = kit; return { busy: () => true, pose: () => poseFn?.(clock) ?? null }; },
   }).create(env);
+  sidekick.setSize(96);
   const m = sidekick.mover;
   sidekick.vanish(null, true);
 
   const POSE = {
-    point: (dx, dy) => (t) => ({ arms: 1, tr: [dx, dy + Math.sin(t * 4) * 0.05], tl: [-0.85, 0.5], mouth: 'grin' }),
-    think: () => (t) => ({ arms: 1, tl: [-0.08, 0.5 + Math.sin(t * 2) * 0.03], tr: [0.98, 0.34], mouth: Math.sin(t * 0.9) > 0.6 ? 'o' : 'flat', brow: 'raised' }),
-    listen: () => (t) => ({ arms: 1, tr: [0.98 + Math.sin(t * 7) * 0.04 * voice.level, -0.42 - voice.level * 0.1], tl: [-0.62, 0.88], oy: -voice.level * 3, mouth: 'flat', brow: 'raised' }),
-    wait: () => (t) => ({ arms: 0.7, tl: [-0.45, 0.95 + Math.sin(t * 2.2) * 0.03], tr: [0.45, 0.95 - Math.sin(t * 2.2) * 0.03], mouth: 'flat' }),
+    point: () => () => null,
+    think: () => () => ({ mode: 'think' }),
+    listen: () => () => ({ mode: 'listen', heard: voice.level }),
+    wait: () => () => null,
   };
-  const ACT_SECS = { hype: 2.8, upset: 3.4, wave: 3.1, remind: 3.1, motivate: 3.1 };
-  function act(name) {
-    if (!K) return;
-    K.startAct(name);
-    actUntil = clock + (ACT_SECS[name] ?? 3) + (sidekick.hidden ? 0.8 : 0);
-  }
   function moveTo(x, y) {
     y = clamp(y, 150, H - 100);
     m.anchor = { x, y, r: 6 };
@@ -69,7 +62,6 @@
     quipText = text; quipShown = 0; quipUntil = clock + secs + text.length * 0.035;
     quipEl.textContent = '';
     quipEl.classList.add('on');
-    sfx('pop');
   }
 
   let last = performance.now();
@@ -90,13 +82,10 @@
         const before = Math.floor(quipShown);
         quipShown = Math.min(quipText.length, quipShown + dt * 42);
         const n = Math.floor(quipShown);
-        if (n !== before) {
-          quipEl.textContent = quipText.slice(0, n);
-          if (n % 3 === 0 && /\w/.test(quipText[n - 1])) sfx('blip', 0.9 + Math.random() * 0.3);
-        }
+        if (n !== before) quipEl.textContent = quipText.slice(0, n);
       }
       if (clock > quipUntil) { quipEl.classList.remove('on'); if (clock > quipUntil + 0.3) quipText = ''; }
-      // Bubble sits just above the head; the stepped tail hangs from it, pointing at the Sidekick.
+      // The line sits just above the orb, its tail pointing at it.
       const qx = clamp(m.x, 125, W - 125), qy = m.y - (K?.R ?? 50) * 1.45 - 6;
       quipEl.style.left = `${qx}px`; quipEl.style.top = `${qy}px`;
       tailEl.style.left = `${clamp(m.x, qx - 100, qx + 100)}px`; tailEl.style.top = `${qy - 0.5}px`;
@@ -133,7 +122,6 @@
   // Ask About an Area and circling while talking: macOS and Windows (the sidecar says which this computer has).
   const canSnap = () => state?.snap ?? isMac();
   const canCircle = () => state?.circle ?? isMac();
-  const MODE = new URLSearchParams(location.search).get('mode');
   const at = (name) => STEPS[cur]?.name === name;
 
   // Keycaps for shortcuts: Apple's symbols and order on a Mac, the key names on Windows and Linux.
@@ -188,7 +176,7 @@
     // A voice download that's under way counts: it carries on after the guide closes.
     done() { return this.rows().every((r) => this.status(r.id) === 'granted' || (r.id === 'voice' && state.voiceModel.status === 'downloading')); },
     async allow(r) {
-      if (r.id === 'voice') { send({ type: 'ob_voice_model' }); act('hype'); quip('Downloading! Keep going', 3); return; }
+      if (r.id === 'voice') { send({ type: 'ob_voice_model' }); quip('Downloading! Keep going', 3); return; }
       this.waiting = r.id; this.asked[r.id] = true; this.render();
       poseFn = POSE.point(1.7, -0.1);
       if (r.id === 'files') { quip('Click OK when it asks!'); send({ type: 'ob_files', request: true }); return; }
@@ -225,7 +213,7 @@
       this.shot = 'checking'; this.render();
       const res = await invoke('screen_check').catch(() => null);
       this.shot = res?.seen || res?.unsupported ? 'ok' : 'failed';
-      if (this.shot === 'failed' && at('perms')) { act('upset'); quip('Switch me on, then Reopen', 5); }
+      if (this.shot === 'failed' && at('perms')) { quip('Switch me on, then Reopen', 5); }
       this.render();
     },
     applyFiles(status) {
@@ -263,7 +251,7 @@
       const sw = el('button', { className: 'px switch', type: 'button', role: 'switch' });
       sw.setAttribute('aria-checked', String(!!state?.actions));
       sw.setAttribute('aria-label', 'Let me edit files and run commands');
-      sw.onclick = () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', String(on)); send({ type: 'set_actions', on }); if (on) { act('hype'); quip("I'll be careful!"); } };
+      sw.onclick = () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', String(on)); send({ type: 'set_actions', on }); if (on) { quip("I'll be careful!"); } };
       list.append(el('li', { className: 'px row' },
         el('div', {}, el('h2', { textContent: 'Edit files and run commands' }), el('p', { textContent: 'Off: I can look, never change.' })), sw));
       // Only an installed copy can start at login, so the row is hidden otherwise (login is null).
@@ -284,7 +272,7 @@
       // Cheer for anything that just turned green.
       for (const r of rows) {
         const g = this.status(r.id) === 'granted';
-        if (g && !this.seen.has(r.id)) { this.seen.add(r.id); if (at('perms') && this.since && clock - this.since > 0.8) { act('hype'); quip(pick(CHEERS)); } }
+        if (g && !this.seen.has(r.id)) { this.seen.add(r.id); if (at('perms') && this.since && clock - this.since > 0.8) { quip(pick(CHEERS)); } }
       }
       if (at('perms')) {
         if (firstPending && this.waiting == null) { poseFn = POSE.point(1.7, -0.1); aim($(`perm-${firstPending.id}`)); }
@@ -430,15 +418,14 @@
       if (msg.phase === 'status') { ai.status = String(msg.text ?? ''); ai.arm(); ai.render(); return; }
       clearTimeout(ai.timer);
       ai.busy = null; ai.loginId = null; ai.status = ''; ai.keyBusy = null; poseFn = null;
-      if (msg.phase === 'done') { act('hype'); quip('Ooh, a brain!'); $('code-form').hidden = true; }
+      if (msg.phase === 'done') { quip('Ooh, a brain!'); $('code-form').hidden = true; }
       else { const e = $('login-error'); e.hidden = false; e.textContent = e.title = `That didn't work: ${msg.error}`; quip('Hmm. Try again?'); }
       ai.render();
     },
     enter() {
       ai.render();
       setTimeout(() => at('ai') && quip(state?.connected ? 'Already connected!' : 'Pick one you have'), 700);
-      if (state?.connected) setTimeout(() => at('ai') && act('hype'), 900);
-      else poseFn = POSE.point(1.7, 0.05);
+      if (!state?.connected) poseFn = POSE.point(1.7, 0.05);
       aim($('providers'));
     },
     // A sign-in carries on after leaving the step; it's only cancelled by the card or the timeout.
@@ -519,7 +506,7 @@
     },
     onFish(msg) {
       replies.saving = false;
-      if (msg.ok) { act('hype'); $('fish-error').hidden = true; replies.changing = false; }
+      if (msg.ok) { $('fish-error').hidden = true; replies.changing = false; }
       else { const e = $('fish-error'); e.hidden = false; e.textContent = e.title = msg.error || "That key didn't work."; }
       replies.render();
     },
@@ -565,8 +552,8 @@
     drawMeter(dt) {
       voice.level += (voice.target - voice.level) * Math.min(1, dt * (voice.target > voice.level ? 30 : 8));
       voice.target *= Math.exp(-dt * 3);
-      const inChat = at('chat'), meter = inChat ? $('chat-meter') : $('meter');
-      if (!(inChat ? $('chat-talk').classList.contains('on') : voice.listening)) { if (meter.childElementCount) meter.replaceChildren(); return; }
+      const meter = $('meter');
+      if (!voice.listening) { if (meter.childElementCount) meter.replaceChildren(); return; }
       voice.bars.push(voice.level); if (voice.bars.length > 14) voice.bars.shift();
       if (meter.childElementCount !== voice.bars.length) meter.replaceChildren(...voice.bars.map(() => el('i')));
       [...meter.children].forEach((b, i) => { b.style.height = `${2 + voice.bars[i] * 12}px`; });
@@ -575,7 +562,7 @@
       if (!at('keys')) return;
       const heard = $('heard');
       if (msg.type === 'state' && msg.state === 'listening') {
-        voice.listening = true; heard.textContent = 'Listening…'; poseFn = POSE.listen(); sfx('listen');
+        voice.listening = true; heard.textContent = 'Listening…'; poseFn = POSE.listen();
       } else if (msg.type === 'level') voice.target = clamp(msg.v, 0, 1);
       else if (msg.type === 'partial') heard.textContent = msg.text;
       else if (msg.type === 'state' && msg.state === 'processing') { voice.listening = false; }
@@ -584,7 +571,7 @@
         // Drawing (Mac): circling something while holding the keys marks it; the words arrive with that area.
         const drew = canCircle() && !!msg.area;
         heard.textContent = drew ? `“${msg.text}” + your circle` : `“${msg.text}”`;
-        act('hype'); quip(drew ? 'I saw your circle!' : keys.heard && canCircle() && !keys.drew ? 'Now try circling!' : 'I heard you!'); sfx('heard');
+        quip(drew ? 'I saw your circle!' : keys.heard && canCircle() && !keys.drew ? 'Now try circling!' : 'I heard you!');
         if (drew) keys.drew = true; else keys.heard = true;
         keys.tryLabel();
       } else if (msg.type === 'state' && msg.state === 'idle') { voice.listening = false; if (poseFn) poseFn = null; }
@@ -730,7 +717,7 @@
     },
   };
 
-  for (const id of ['chords', 'write-chords', 'looks', 'sizes']) $(id).addEventListener('keydown', (e) => {
+  for (const id of ['chords', 'write-chords']) $(id).addEventListener('keydown', (e) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     e.preventDefault();
     const btns = [...$(id).children], i = btns.findIndex((b) => b.getAttribute('aria-checked') === 'true');
@@ -749,92 +736,10 @@
     const which = keys.recording;
     keys.stop();
     send({ type: 'set_keys', [which]: [...mods, e.code].join('+') });
-    act('hype'); quip('Got it!');
+    quip('Got it!');
   }, true);
 
   // ---------------------------------------------------------------- step 5: find me
-  // ---------------------------------------------------------------- what I can do
-  // Try me out: this window steps aside and the desktop gets a fixed drawing (sidekick.mjs), one card per capability,
-  // ticked off here as each draws. It comes back once the cards are gone: faded a few seconds after the last one,
-  // closed with their ×, or cleared with Esc.
-  const DEMO = [
-    ['Search the web', 'Answers, with where they came from.'],
-    ['Graphs', 'Numbers turned into charts.'],
-    ['Timelines', 'Events in order, at a glance.'],
-    ['Science', 'Molecules drawn from their formula.'],
-    ['3D models', 'Little models that turn.'],
-    ['Plans and lists', 'To-dos that keep you on track.'],
-  ];
-  const demo = {
-    status: 'idle', // idle → playing → done → idle again once the cards are gone | failed
-    beat: -1, played: false, aside: false, timer: null,
-    enter() {
-      demo.render();
-      send({ type: 'ob_showcase_warm' });
-      setTimeout(() => { if (at('demo') && demo.status !== 'playing') { poseFn = POSE.point(1.3, -0.9); quip('Want to see?'); } }, 700);
-    },
-    leave() { demo.stop(); poseFn = null; },
-    async play() {
-      demo.played = true; demo.status = 'playing'; demo.beat = -1;
-      $('demo-say').textContent = '';
-      poseFn = POSE.wait();
-      quip('Watch your desktop!', 1.2);
-      demo.render();
-      // Started at once: the first card is still being got ready while the bubble shows and this window steps aside.
-      send({ type: 'ob_showcase' });
-      await wait(reduced.matches ? 0 : 500);
-      if (demo.status !== 'playing') return;
-      demo.aside = true;
-      invoke('guide_aside', { on: true }).catch(() => {});
-      // Back for sure, even if the end never comes through.
-      clearTimeout(demo.timer); demo.timer = setTimeout(() => demo.back(), 90000);
-    },
-    back() {
-      clearTimeout(demo.timer);
-      if (!demo.aside) return;
-      demo.aside = false;
-      invoke('guide_aside', { on: false }).catch(() => {});
-    },
-    stop() {
-      if (demo.status === 'playing') send({ type: 'ob_showcase_stop' });
-      demo.back();
-      if (demo.status === 'playing') demo.status = 'idle';
-      poseFn = null; demo.render();
-    },
-    on(msg) {
-      if (msg.phase === 'beat' && demo.status === 'playing') {
-        demo.beat = msg.beat | 0;
-        if (DEMO[demo.beat]) $('demo-say').textContent = `Drawing: ${DEMO[demo.beat][0]}`;
-      } else if (msg.phase === 'done' && demo.status === 'playing') {
-        demo.status = 'done'; demo.beat = DEMO.length;
-        $('demo-say').textContent = 'All drawn.';
-      } else if (msg.phase === 'gone' && demo.aside) {
-        // Stopped part way (Esc) still counts as seen: what drew stays ticked.
-        if (demo.status === 'playing') demo.status = 'idle';
-        demo.back(); poseFn = null;
-        if (at('demo')) { act('hype'); quip(demo.status === 'done' ? "That's a taste!" : 'Okay, stopped.'); }
-      } else if (msg.phase === 'failed') {
-        demo.status = 'failed'; demo.back(); poseFn = null;
-        if (at('demo')) { act('upset'); quip("Hmm, that didn't draw."); }
-      } else return;
-      demo.render();
-    },
-    render() {
-      const playing = demo.status === 'playing', shown = demo.status === 'done' ? DEMO.length : Math.max(0, demo.beat);
-      $('demo-lead').textContent = demo.status === 'failed' ? "I couldn't draw just now." : 'Watch me draw on your desktop.';
-      $('demo-rows').replaceChildren(...DEMO.map(([title, desc], i) => {
-        const done = demo.played && i < shown && !(playing && i === demo.beat), now = playing && i === demo.beat;
-        const side = done ? okMark('Shown') : now ? el('span', { className: 'waiting' }, led('busy'), ' Drawing') : null;
-        return el('li', { className: `px row${done ? ' granted' : now ? ' focus' : ''}` }, el('div', {}, el('h2', { textContent: title }), el('p', { textContent: desc, title: desc })), side);
-      }));
-      const btn = $('demo-again');
-      btn.textContent = playing ? 'Drawing…' : demo.status === 'failed' ? 'Try again' : demo.played ? 'Show me again' : 'Try me out';
-      btn.disabled = playing;
-      btn.className = `px btn ${demo.played && !playing ? 'ghost' : 'primary'}`;
-    },
-  };
-  $('demo-again').addEventListener('click', () => { if (demo.status !== 'playing') demo.play(); });
-
   const find = {
     enter() {
       const k = state?.keys;
@@ -862,260 +767,18 @@
     leave() { poseFn = null; },
   };
 
-  // ---------------------------------------------------------------- the get-to-know-you chat
-  // Four questions from the AI (sidekick.mjs runs it): each reply shows as a reaction, the question as the
-  // heading and a nudge under the answer box. Answer by typing (Enter sends) or holding the talk keys: the words
-  // appear in the box as you speak and send when you let go. The end lists what it learned, each removable.
-  // How a turn appears. Words come in as the model streams them and are sorted the way the sidecar splits a
-  // turn (intro.mjs splitTurn): sentences before the last question are the reaction, that question is the
-  // heading, anything after it the nudge. A sentence shows only once it's complete, so a question never starts
-  // out in the reaction and jumps up. Each slot reveals its words one at a time, in reading order (reaction,
-  // heading, nudge), at a steady pace that speeds up to catch up, so uneven chunks never show as lurches.
-  const SENTENCES = /[^.!?…]+(?:[.!?…]+["'”’)]*|$)/g;
-  const splitStream = (raw, final) => {
-    const parts = raw.replace(/\s+/g, ' ').match(SENTENCES)?.map((x) => x.trim()).filter(Boolean) ?? [];
-    // The last sentence counts once it has its stop and the stream has moved past it (or the reply is over).
-    if (!final && parts.length && (!/[.!?…]["'”’)]*$/.test(parts.at(-1)) || !/\s$/.test(raw))) parts.pop();
-    let qi = -1;
-    for (let i = parts.length - 1; i >= 0; i--) if (parts[i].includes('?')) { qi = i; break; }
-    return qi < 0 ? { lead: parts.join(' '), question: null, hint: '' } : { lead: parts.slice(0, qi).join(' '), question: parts[qi], hint: parts.slice(qi + 1).join(' ') };
-  };
-  const reveal = (() => {
-    const slots = {};
-    const slot = (id) => (slots[id] ??= { el: $(id), words: [], n: 0, stale: false });
-    const word = (w, fresh) => el('span', { className: fresh ? 'chat-w in' : 'chat-w', textContent: w });
-    const paint = (s, n, fresh = false) => {
-      for (let i = s.n; i < n; i++) s.el.append(...(i ? [' '] : []), word(s.words[i], fresh));
-      s.n = n;
-    };
-    let raf = 0, last = 0, acc = 0;
-    const order = ['chat-lead', 'chat-q', 'chat-hint'];
-    const tick = (t) => {
-      raf = 0;
-      const dt = last ? Math.min(0.1, (t - last) / 1000) : 0; last = t;
-      const s = order.map(slot).find((x) => x.next || x.n < x.words.length);
-      if (!s) { last = 0; return; }
-      // Its turn: last turn's dimmed text gives way to the new text's first word in the same frame.
-      if (s.next) { s.words = s.next; s.next = null; s.stale = false; s.el.classList.remove('stale'); s.el.replaceChildren(); s.n = 0; paint(s, 1, !REDUCED()); acc = 0; onReveal(); raf = requestAnimationFrame(tick); return; }
-      // About 11 words a second (a bit faster than they're read), quicker when it's behind.
-      const behind = s.words.length - s.n;
-      acc += dt * (11 + Math.max(0, behind - 4) * 2.5);
-      const k = Math.floor(acc);
-      if (k > 0 || REDUCED()) { acc -= k; paint(s, Math.min(s.words.length, s.n + (REDUCED() ? behind : Math.max(1, k))), !REDUCED()); }
-      onReveal();
-      raf = requestAnimationFrame(tick);
-    };
-    let onReveal = () => {};
-    return {
-      set onReveal(f) { onReveal = f; },
-      // Aim a slot at its text. Shown words that still match stay; new ones reveal. A changed word (the final
-      // text tidied a little) is put right in place, without starting over. A stale slot (last turn's heading,
-      // left dim until the new one starts) is cleared first, so the new text reveals from its first word.
-      to(id, text) {
-        const s = slot(id), words = text ? text.split(' ') : [];
-        // Stale: the new text waits (s.next) until the reveal reaches this slot, in reading order.
-        if (s.stale) { if (words.length) { s.next = words; if (!raf) raf = requestAnimationFrame(tick); } return; }
-        const keep = Math.min(s.n, words.length);
-        if (s.words.slice(0, keep).some((w, i) => w !== words[i]) || keep < s.n) { s.words = words; s.el.replaceChildren(); s.n = 0; paint(s, keep); }
-        s.words = words;
-        if (!raf && s.n < words.length) raf = requestAnimationFrame(tick);
-      },
-      // Show a slot's text at once (a fixed line, not something being said).
-      now(id, text) { const s = slot(id); s.stale = false; s.next = null; s.el.classList.remove('stale'); s.words = text ? text.split(' ') : []; s.el.replaceChildren(); s.n = 0; paint(s, s.words.length); },
-      // Keep what it says, dimmed, until something new starts in it.
-      dim(id) { const s = slot(id); if (s.n) { s.stale = true; s.el.classList.add('stale'); } },
-      shown: (id) => slot(id).n,
-      done: () => order.every((id) => !slot(id).next && slot(id).n >= slot(id).words.length),
-    };
-  })();
-  const REDUCED = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-  reveal.onReveal = () => chat.slots();
-
-  const chat = {
-    status: 'idle', // idle → thinking ⇄ asking → done | skipped | no_model | failed
-    n: 0, total: 4, text: '', facts: [], heard: false, before: '', fixed: '',
-    enter() {
-      if (chat.status === 'idle') {
-        chat.status = 'thinking';
-        send({ type: 'chat_start' });
-        setTimeout(() => at('chat') && act('wave'), 700);
-      }
-      chat.voiceHint();
-      chat.render();
-    },
-    leave() { poseFn = null; Roamie.voiceOut?.stop(); },
-    over: () => ['done', 'skipped', 'no_model', 'failed'].includes(chat.status),
-    nav() {
-      const over = chat.over();
-      $('next').textContent = over ? (cur === STEPS.length - 1 ? 'Done' : 'Continue') : 'Send';
-      $('next').disabled = !over && (chat.status !== 'asking' || !$('chat-input').value.trim());
-      $('back').disabled = cur === 0 || !over;
-      $('skip').hidden = over;
-      $('skip').textContent = 'Skip these questions';
-    },
-    next() { if (chat.over()) return false; chat.send(); return true; },
-    skip() {
-      if (chat.over()) return false;
-      send({ type: 'chat_skip' });
-      chat.status = 'skipped';
-      Roamie.voiceOut?.stop();
-      chat.render();
-      if (MODE === 'chat') finish();
-      return true;
-    },
-    send(text = $('chat-input').value.trim()) {
-      if (!text || chat.status !== 'asking') return;
-      Roamie.voiceOut?.stop();
-      send({ type: 'chat_answer', text });
-      $('chat-input').value = '';
-      chat.text = '';
-      chat.status = 'thinking';
-      reveal.to('chat-lead', ''); reveal.to('chat-hint', ''); reveal.dim('chat-q');
-      chat.render();
-    },
-    on(msg) {
-      if (msg.kind === 'chat') {
-        const e = msg.e;
-        if (e.type === 'start') chat.text = '';
-        else if (e.type === 'text') { chat.text += e.text; if (chat.status === 'thinking') chat.stream(false); }
-        else if (e.type === 'emote' && at('chat')) act(e.action);
-        return;
-      }
-      if (msg.kind === 'chat_state') {
-        if (msg.status === 'busy') return;
-        chat.status = msg.status;
-        if (msg.n != null) { chat.n = msg.n; chat.total = msg.total; }
-      } else if (msg.kind === 'chat_turn') {
-        Object.assign(chat, { status: 'asking', n: msg.n, total: msg.total, lead: msg.lead, question: msg.question, hint: msg.hint });
-        // The sidecar's split is the final word; it matches what's streamed, so this only finishes it off.
-        reveal.to('chat-lead', msg.lead || ''); reveal.to('chat-q', msg.question || 'Tell me more?'); reveal.to('chat-hint', msg.hint || '');
-        $('chat-say').textContent = [msg.lead, msg.question].filter(Boolean).join(' ');
-        if (at('chat')) setTimeout(() => $('chat-input').focus({ preventScroll: true }), 50);
-      } else if (msg.kind === 'chat_done') {
-        Object.assign(chat, { status: msg.skipped ? 'skipped' : 'done', done: msg.text ?? '', facts: msg.facts ?? [] });
-        if (!msg.skipped) { reveal.to('chat-lead', chat.done); reveal.to('chat-hint', ''); reveal.dim('chat-q'); reveal.to('chat-q', 'Nice to meet you'); $('chat-say').textContent = `Nice to meet you. ${chat.done}`; }
-        if (at('chat') && !msg.skipped) act('hype');
-      } else if (msg.kind === 'chat_facts') chat.facts = msg.facts ?? [];
-      chat.render();
-    },
-    // Which slots show: "Thinking" holds the reaction's place until its first words arrive (same height, so
-    // nothing below moves), and the nudge appears with its first word.
-    slots() {
-      const busy = chat.status === 'thinking' && !reveal.shown('chat-lead');
-      $('chat-busy').hidden = !busy;
-      $('chat-lead').hidden = busy;
-      // The nudge keeps its two lines reserved while the chat runs (visibility, not display), so it appearing
-      // never pushes the answer box up.
-      $('chat-hint').hidden = chat.over();
-      $('chat-hint').classList.toggle('empty', !reveal.shown('chat-hint'));
-    },
-    // What's streamed so far, sorted into its slots.
-    stream(final) {
-      const t = splitStream(chat.text, final);
-      reveal.to('chat-lead', t.lead);
-      if (t.question) reveal.to('chat-q', t.question);
-      reveal.to('chat-hint', t.hint);
-      chat.render();
-    },
-    render() {
-      const st = chat.status, asking = st === 'asking', thinking = st === 'thinking';
-      $('chat-count').textContent = chat.over() ? '' : `Question ${Math.min(chat.total, chat.n + 1)} of ${chat.total}`;
-      // On its own (from the menu), the LED bar counts the questions instead of the setup steps.
-      if (MODE === 'chat') {
-        const done = chat.over() ? chat.total : chat.n;
-        if ($('progress').childElementCount !== chat.total) $('progress').replaceChildren(...Array.from({ length: chat.total }, () => el('li')));
-        [...$('progress').children].forEach((li, j) => { li.className = j < done ? 'done' : ''; if (j === done) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); });
-      }
-      // Fixed lines (not something it's saying) show at once; a turn's words reveal as they stream (above).
-      const FIXED = {
-        skipped: ['Maybe later', 'No problem. Get to Know Me is in the Roamies panel any time.'],
-        no_model: ['I need a brain first', 'Connect an AI account in the Roamies panel, then try Get to Know Me again.'],
-        failed: ["That didn't work", "I couldn't reach the AI. Try Get to Know Me from the Roamies panel in a moment."],
-      };
-      if (FIXED[st] && chat.fixed !== st) { chat.fixed = st; reveal.now('chat-q', FIXED[st][0]); reveal.now('chat-lead', FIXED[st][1]); reveal.now('chat-hint', ''); }
-      else if (thinking && !chat.n && !reveal.shown('chat-q')) reveal.now('chat-q', 'Getting to know you');
-      $('chat-form').hidden = chat.over();
-      $('chat-input').disabled = !asking;
-      chat.slots();
-      if (at('chat') && !$('chat-talk').classList.contains('on')) poseFn = thinking ? POSE.think() : asking ? POSE.wait() : null;
-      $('chat-facts').hidden = st !== 'done' || !chat.facts.length;
-      $('chat-facts-list').replaceChildren(...chat.facts.map((f) => {
-        const b = el('button', { className: 'link', type: 'button', textContent: 'Remove' });
-        b.setAttribute('aria-label', `Forget: ${f.text}`);
-        b.onclick = () => { send({ type: 'chat_forget', id: f.id }); chat.facts = chat.facts.filter((x) => x.id !== f.id); chat.render(); };
-        return el('li', { className: 'px row fact-row' }, el('span', { className: 'fact', textContent: f.text, title: f.text }), b);
-      }));
-      nav();
-    },
-    // The talk keys answer too: hold, speak, let go.
-    voiceHint() {
-      const can = !!(state?.voice && state.keys && (isMac() || state.voiceModel?.status === 'ready'));
-      $('chat-talk').hidden = !can;
-      if (can) $('chat-talk-keys').replaceChildren(capsEl(capsFor(state.keys.talk)));
-    },
-    voice(msg) {
-      const input = $('chat-input'), talk = $('chat-talk');
-      if (chat.status !== 'asking') return;
-      if (msg.type === 'state' && msg.state === 'listening') {
-        chat.heard = false; chat.before = input.value; input.value = ''; input.placeholder = 'Listening…';
-        talk.classList.add('on'); poseFn = POSE.listen(); sfx('listen'); Roamie.voiceOut?.stop();
-      } else if (msg.type === 'level') voice.target = clamp(msg.v, 0, 1);
-      else if (msg.type === 'partial') input.value = msg.text;
-      else if (msg.type === 'final') {
-        chat.heard = true; talk.classList.remove('on'); input.placeholder = 'Type your answer…';
-        sfx('heard'); chat.send(String(msg.text ?? '').trim());
-      } else if (msg.type === 'state' && msg.state === 'idle') {
-        talk.classList.remove('on'); input.placeholder = 'Type your answer…';
-        if (!chat.heard && !input.value) input.value = chat.before;
-        if (chat.status === 'asking') poseFn = POSE.wait();
-      } else if (msg.type === 'error') {
-        talk.classList.remove('on'); input.placeholder = 'Type your answer…'; input.value = chat.before;
-        poseFn = POSE.wait();
-        quip(msg.code === 'permission' ? 'I can’t hear you yet' : 'Didn’t catch that');
-      }
-      nav();
-    },
-  };
-  $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); chat.send(); });
-  $('chat-input').addEventListener('input', () => nav());
-
   // ---------------------------------------------------------------- flow
-  // ---------------------------------------------------------------- step 0: look and size
-  // Picked here, previewed on the guide right away, saved by the app (Settings has the same choices).
-  const LOOKS = [['classic', 'Roamie'], ['jarvis', 'JARVIS'], ['anime', 'Anime Girl'], ['sarah', 'Sarah'], ['adrian', 'Adrian']], SIZES = [['default', 'Default'], ['small', 'Small'], ['cursor', 'Cursor']];
-  const LOOK_QUIPS = { classic: 'Classic me!', jarvis: 'At your service.', anime: 'Yay, hi hi!', sarah: 'Hey, nice to meet you!', adrian: 'Alright, let\'s do this.' }, SIZE_QUIPS = { default: 'Full size!', small: 'Fun size!', cursor: 'Tiny pointer me!' };
-  const look = {
-    radios(id, list, value, pickIt) {
-      $(id).replaceChildren(...list.map(([v, label]) => {
-        const on = v === value;
-        const b = el('button', { className: 'px chord', type: 'button', role: 'radio', tabIndex: on ? 0 : -1 }, el('span', { className: 'px cap', textContent: label }));
-        b.setAttribute('aria-checked', String(on));
-        b.onclick = () => { if (!on) pickIt(v); };
-        return b;
-      }));
-    },
-    render() {
-      $('h-0').textContent = `Hi, I'm ${(LOOKS.find(([v]) => v === (state?.look ?? 'classic')) ?? LOOKS[0])[1]}.`;
-      look.radios('looks', LOOKS, state?.look ?? 'classic', (v) => { state.look = v; sidekick.setLook?.(v); send({ type: 'ob_look', look: v }); quip(LOOK_QUIPS[v]); look.render(); });
-      look.radios('sizes', SIZES, state?.size ?? 'default', (v) => { state.size = v; sidekick.setForm?.(v); send({ type: 'ob_size', size: v }); quip(SIZE_QUIPS[v]); look.render(); });
-    },
-  };
-
   const ALL = [
-    { name: 'welcome', enter: 'drop', next: "Let's go", onEnter: () => { look.render(); setTimeout(() => { if (at('welcome')) { act('wave'); quip('Hi there!'); } }, 650); } },
+    { name: 'welcome', enter: 'drop', next: "Let's go", onEnter: () => { $('h-0').textContent = `Hi, I'm ${state?.name || 'Jarvis'}.`; setTimeout(() => { if (at('welcome')) quip('Hi there!'); }, 650); } },
     // Windows: the voice download is optional, so it can be skipped.
     { name: 'perms', enter: 'materialize', next: 'Continue', onEnter: perms.enter, onLeave: perms.leave, ready: () => perms.done(), get skip() { return !isMac(); } },
     { name: 'ai', enter: 'crt', next: 'Continue', onEnter: ai.enter, onLeave: ai.leave, ready: () => !!state?.connected, skip: true },
     { name: 'voice', enter: 'materialize', next: 'Continue', onEnter: replies.enter, onLeave: replies.leave, ready: () => replies.ready(), skip: true },
-    { name: 'demo', enter: 'crt', next: 'Continue', onEnter: demo.enter, onLeave: demo.leave },
     { name: 'keys', enter: 'materialize', next: 'Continue', onEnter: keys.enter, onLeave: keys.leave },
-    { name: 'chat', enter: 'crt', next: 'Send', onEnter: () => chat.enter(), onLeave: () => chat.leave(), nav: () => chat.nav(), onNext: () => chat.next(), onSkip: () => chat.skip() },
     { name: 'find', enter: 'drop', next: 'Done', onEnter: find.enter, onLeave: find.leave },
   ];
-  // ?mode=chat: only the get-to-know-you chat (from the menu's Get to Know Me…).
-  const STEPS = MODE === 'chat' ? ALL.filter((s) => s.name === 'chat') : ALL;
+  const STEPS = ALL;
   const sectionOf = (s) => $(`step-${s.name}`);
-  for (const s of ALL) if (!STEPS.includes(s)) sectionOf(s).hidden = true;
   const sections = STEPS.map(sectionOf);
   $('progress').replaceChildren(...STEPS.map(() => el('li')));
 
@@ -1156,7 +819,6 @@
     $('next').disabled = true;
     STEPS[cur]?.onLeave?.();
     if (!reduced.matches) { sidekick.vanish('materialize'); await wait(700); }
-    if (MODE === 'chat') return invoke('guide_close');
     send({ type: 'ob_done' });
     const canTalk = state?.voice && state.keys && (isMac() || state.voiceModel?.status === 'ready');
     const talk = canTalk ? capsFor(state.keys.talk).join(isMac() ? '' : '+') : null;
@@ -1181,10 +843,8 @@
       case 'state': {
         const first = !state;
         state = msg;
-        if (Roamie.sfx) Roamie.sfx.enabled = msg.sound !== false;
-        if (first) { sidekick.setLook?.(msg.look); sidekick.setForm?.(msg.size); }
-        if (at('welcome')) look.render();
-        if (first) go(MODE === 'chat' ? 0 : clamp(msg.step | 0, 0, STEPS.length - 1));
+        if (at('welcome')) $('h-0').textContent = `Hi, I'm ${msg.name || 'Jarvis'}.`;
+        if (first) go(clamp(msg.step | 0, 0, STEPS.length - 1));
         else { if (at('perms')) perms.render(); if (at('ai')) ai.render(); if (at('voice')) replies.render(); if (at('keys')) keys.render(); }
         break;
       }
@@ -1207,11 +867,8 @@
         keys.render();
         break;
       case 'say': quip(msg.text, 3); break;
-      case 'showcase': demo.on(msg); break;
-      case 'voice': if (at('chat')) chat.voice(msg); else voice.on(msg); break;
+      case 'voice': voice.on(msg); break;
       case 'speech': Roamie.voiceOut?.handle(msg); break;
-      case 'chat': case 'chat_state': case 'chat_turn': case 'chat_done': case 'chat_facts': chat.on(msg); break;
-      case 'mode': if (msg.mode === 'chat' && !at('chat')) { const i = STEPS.findIndex((s) => s.name === 'chat'); if (i >= 0) go(i); } break;
       case 'voice_model':
         if (!state) break;
         state.voiceModel = { status: msg.status, done: msg.done, total: msg.total, error: msg.error, size: msg.size };
@@ -1236,7 +893,7 @@
     const sys = win ? { type: 'perms', mic: q.get('blocked') === '1' ? 'denied' : 'granted', input: true } : { type: 'perms', mic: pre, speech: old ? pre : 'granted', speechNeeded: old, screen: pre, accessibility: pre };
     const st = {
       // &filesAsked=1: Allow was tapped for the folders in an earlier run. &replies=voice&fish=1: voice already on.
-      kind: 'state', platform: q.get('platform') || 'darwin', step: +(q.get('step') || 0), sound: true, look: q.get('look') || 'classic', size: q.get('size') || 'default', voice: true, actions: false, login: true, filesAsked: q.get('filesAsked') === '1',
+      kind: 'state', platform: q.get('platform') || 'darwin', step: +(q.get('step') || 0), sound: true, name: 'Jarvis', voice: true, actions: false, login: true, filesAsked: q.get('filesAsked') === '1',
       replies: q.get('replies') === 'voice' ? 'voice' : 'text', fishKey: q.get('fish') === '1',
       bind: q.get('session') === 'wayland' ? Object.fromEntries(['summon', 'talk', 'ask', 'list', 'panel'].map((k) => [k, `'/home/sam/Apps/Roamies 0.1.33.AppImage' --${k}`])) : null,
       keys: q.get('platform') === 'win32' ? { talk: ['control', 'option'], write: ['control', 'shift'], summon: 'Control+Shift+KeyS', snap: 'Control+Shift+KeyA' } : { talk: ['control', 'option'], write: win ? ['control', 'shift'] : ['option', 'command'], summon: 'Control+Alt+KeyS', snap: 'Control+Alt+KeyA' }, connected: null,
@@ -1249,7 +906,6 @@
     let filesAsked = st.filesAsked;
     const logins = new Map(); // sign-in id → its timers, so Cancel stops the simulated one
     const reply = (m, ms = 0) => setTimeout(() => window.__onboard?.(m), ms);
-    const showcase = { at: null, n: 0 };
     return async (cmd, args) => {
       if (cmd === 'perm_status') return { ...sys };
       if (cmd === 'guide_aside') return;
@@ -1291,39 +947,6 @@
         if (m.summon) k.summon = m.summon; if (m.snap) k.snap = m.snap;
         reply({ kind: 'keys', keys: k });
       }
-      else if (m.type === 'chat_start' || m.type === 'chat_answer') {
-        // A canned chat: &chat=nomodel previews not being signed in.
-        if (q.get('chat') === 'nomodel') return reply({ kind: 'chat_state', status: 'no_model' }, 300);
-        const turns = [
-          ["[wave] Hi Ken, I'm Roamie! I'm here to help you get things done and keep you on track. I've got four quick questions.", 'What are you working on these days?', ''],
-          ['Night shifts and NP exam prep, that is a lot to juggle.', 'What does a normal week look like for you?', 'Could be the hospital, flashcards in Anki, or something else entirely.'],
-          ['Phone, Anki and Google Docs, a tight little setup.', "What's the actual thing you're going for right now?", 'Could be passing the boards, a new role, or something else entirely.'],
-          ['Passing the boards in March, love it.', 'Okay, last one: have you used AI helpers before?', ''],
-        ];
-        const n = (st.chatN = m.type === 'chat_start' ? 0 : (st.chatN ?? 0) + 1);
-        reply({ kind: 'chat_state', status: 'thinking', n, total: 4 });
-        reply({ kind: 'chat', e: { type: 'start' } }, 100);
-        if (n >= 4) {
-          reply({ kind: 'chat_done', text: 'ChatGPT a couple of times, nice. Thanks for telling me about yourself, Ken! Passing your NP boards in March is a great place to start.', facts: [
-            { id: 'a', text: 'Ken is a night-shift nurse studying for the NP board exam.' }, { id: 'b', text: "Ken's goal: pass the NP boards in March." },
-            { id: 'c', text: 'Ken uses his phone, Anki and Google Docs to study.' }, { id: 'd', text: 'Ken has used ChatGPT a couple of times.' }] }, 1400);
-        } else {
-          // Streamed a few words at a time, as a model sends it, then the turn split into its parts.
-          const [lead, question, hint] = turns[n];
-          const words = [lead.replace('[wave] ', ''), question, hint].filter(Boolean).join(' ').split(' ');
-          let t = 500;
-          for (let i = 0; i < words.length; i += 3) { t += 70 + ((i * 37) % 90); reply({ kind: 'chat', e: { type: 'text', text: (i ? ' ' : '') + words.slice(i, i + 3).join(' ') } }, t); }
-          reply({ kind: 'chat_turn', n, total: 4, lead: lead.replace('[wave] ', ''), question, hint }, t + 250);
-        }
-      } else if (m.type === 'ob_showcase') {
-        // A card a beat, then done (&showcase=fail: it can't draw).
-        clearTimeout(showcase.at); showcase.n = 0;
-        if (q.get('showcase') === 'fail') { showcase.at = setTimeout(() => window.__onboard?.({ kind: 'showcase', phase: 'failed' }), 1200); return; }
-        // Then gone, as when the cards fade (the window stays put in a browser).
-        const tick = () => { const n = showcase.n++; window.__onboard?.(n < 7 ? { kind: 'showcase', phase: 'beat', beat: n } : n === 7 ? { kind: 'showcase', phase: 'done' } : { kind: 'showcase', phase: 'gone' }); if (n < 8) showcase.at = setTimeout(tick, n < 7 ? 1600 : 2500); };
-        showcase.at = setTimeout(tick, 600);
-      } else if (m.type === 'ob_showcase_stop') clearTimeout(showcase.at);
-      else if (m.type === 'chat_skip') { /* nothing comes back */ }
       else if (m.type === 'set_actions') { st.actions = m.on; }
       else if (m.type === 'set_login') { st.login = m.on; }
       else if (m.type === 'ob_voice_model' && st.voiceModel) {

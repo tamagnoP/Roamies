@@ -559,7 +559,7 @@
       for (let i = list.length - 1; i >= 0; i--) {
         if (list[i].c.hidden || list[i].c.ghost?.()) continue;
         const m = list[i].c.mover;
-        if (Math.hypot(x - m.x, y - m.y) < m.radius * 1.1) return list[i];
+        if (Math.hypot(x - m.x, y - m.y) < (list[i].c.spot ?? m.radius * 1.1)) return list[i]; // feature 21: the orb takes clicks on its centre spot only
       }
       return null;
     };
@@ -716,7 +716,7 @@
       // Nothing on screen (drawn natively, or off it): just the bookkeeping, 30 times a second, off the display clock.
       if (!shown && !list.some((o) => o.c.mover.dragging)) { nap = setTimeout(() => { nap = 0; requestAnimationFrame(frame); }, 33); return; }
       // Local-only build: everyone at rest at home and the canvas already showing exactly this: stop here (see rested).
-      if (same && !down && list.every((o) => o.c.agent?.atRest?.())) { rested = true; return; }
+      if (same && !down && list.every((o) => o.c.agent?.atRest?.() && !o.c.animating)) { rested = true; return; } // feature 21: not while the orb moves
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

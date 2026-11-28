@@ -274,8 +274,8 @@ export function sandboxProblem(profile, exec = SANDBOX_EXEC) {
 // ---- the settings
 // Every setting has its default here and nowhere else, and every one is written to settings.default.json beside the
 // owner's settings.json at start-up (reference.mjs), so none has a value the owner can't see.
-// voice: the Mac voice for every look ('' = the system voice); voices: one per look, which wins over voice.
-const DEFAULT_VOICES = { jarvis: 'Daniel' }; // JARVIS speaks British English unless the settings say otherwise
+// voice: the Mac voice when the natural one isn't used ('' = the system voice). Feature 21: one look, so the one voice;
+// Daniel (British English, shipped with macOS) by default, as the JARVIS look had. "voices" (one per look) is no longer read.
 const HOME_CORNERS = ['bottom-left', 'bottom-right', 'top-left', 'top-right']; // the first is the default
 // How far the character keeps from the screen's edges, in body radii: the same numbers as the overlay's home.js
 // (settings.test.mjs checks they match).
@@ -360,6 +360,12 @@ export const KOKORO = {
   startWith: { default: 'app', ok: (v) => v === 'app' || v === 'firstReply' },
   waitAtStartSeconds: { default: 8, min: 0, max: 30, ok: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 30 },
 };
+/** Feature 21: the orb. size: across, in points (the owner, 2026-11-28); the rest of its design stays in code (orb.js). */
+/** The owner's values for the orb's look (2026-11-17), as orb.js draws them. Shown in settings.default.json. */
+export const ORB_DESIGN = { disc: 100, line: 1, ticks: 36, hue: 194, count: 700, thick: 20, size: 1, speed: 50 };
+export const ORB = {
+  size: { default: 100, min: 80, max: 140, ok: (v) => Number.isInteger(v) && v >= 80 && v <= 140 },
+};
 /** The parts of "persona": how Roamies speaks, and nothing about what it may do (persona.mjs). address may be "". */
 export const PERSONA = {
   name: { default: 'Jarvis', ok: text(40) },
@@ -424,7 +430,7 @@ const limitDefaults = () => Object.fromEntries(Object.entries(LIMITS).map(([k, v
 const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >= LIMITS[name].min && v <= LIMITS[name].max && (!LIMITS[name].whole || Number.isInteger(v));
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
-const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, piUpdates: UPDATE_MODES[0], piUpdatesOwnWork: true, piWatch: { installs: [], network: [], pushes: [] }, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], masking: true, mask: Object.fromEntries(MASK_GROUPS.map((g) => [g, []])), measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
+const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, piUpdates: UPDATE_MODES[0], piUpdatesOwnWork: true, piWatch: { installs: [], network: [], pushes: [] }, routines: {}, briefings: {}, voice: 'Daniel', vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], masking: true, mask: Object.fromEntries(MASK_GROUPS.map((g) => [g, []])), measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), orb: partDefaults(ORB), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
 /** The owner, 2026-11-28: the settings that protect something. A wrong value in one of these (or in a part of one) is
  *  treated like a file that can't be read: requests are refused until it is fixed (SettingsProblem). A wrong value in
  *  any other setting gets a notice and that setting's default, as before. "limits" itself, when it isn't an object,
@@ -499,7 +505,6 @@ const CLEAN = {
     return [kept, ok];
   },
   voice: when(isStr),
-  voices: (v, d) => { if (!isObj(v)) return [d, false]; const kept = Object.entries(v).filter(([, name]) => isStr(name)); return [Object.fromEntries(kept), kept.length === Object.keys(v).length]; },
   vault: when(full),
   dailyFolder: when((v) => isStr(v) && /^[^/\\:*?"<>|#^[\]\u0000-\u001f]{1,60}$/.test(v) && !v.startsWith('.') && v.trim() === v),
   neverLook: when(strs),
@@ -520,6 +525,7 @@ const CLEAN = {
   measureRequests: when((v) => typeof v === 'boolean'), // feature 23: timings and memory per request, numbers only, in the activity log
   voiceEngine: when((v) => VOICE_ENGINES.includes(v)),
   kokoro: when(isObj),
+  orb: when(isObj),
   persona: when(isObj),
   standDown: when(isObj),
   speaking: when(isObj),
@@ -608,7 +614,7 @@ export function loadSettings(home) {
   }
   // kokoro, persona, standDown (feature 33) and speaking (features 25 and 31): part by part, the same way.
   const parts = {};
-  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['persona', set.persona, PERSONA], ['standDown', set.standDown, STAND_DOWN], ['speaking', set.speaking, SPEAKING], ['local', set.local, LOCAL]]) {
+  for (const [group, given, table] of [['kokoro', set.kokoro, KOKORO], ['orb', set.orb, ORB], ['persona', set.persona, PERSONA], ['standDown', set.standDown, STAND_DOWN], ['speaking', set.speaking, SPEAKING], ['local', set.local, LOCAL]]) {
     parts[group] = partDefaults(table);
     if (given === defaults[group]) continue;
     for (const name of Object.keys(table)) {
@@ -648,7 +654,6 @@ export function loadSettings(home) {
   const chosen = at(state.project);
   const project = chosen && at(state.projectWas) === fileProject && projects.some((p) => p.dir === chosen) ? chosen : fileProject;
   if (!projects.some((p) => p.dir === project)) projects.unshift({ name: base(project), dir: project });
-  const voices = Object.fromEntries(Object.entries(set.voices).map(([k, v]) => [k.toLowerCase(), v.trim()]).filter(([, v]) => v)); // "" for a look: no voice of its own
   const vault = expand(set.vault.trim(), home); // the Obsidian vault Roamies keeps notes in (notes.mjs)
   const neverLook = set.neverLook.map((n) => n.trim());
   // routines: { "what you say": ["step", "step"] }; briefings: { "morning": "09:00", "evening": "18:30" }
@@ -663,7 +668,7 @@ export function loadSettings(home) {
   // home: where the character rests on the desktop in its default and small sizes (the overlay's home.js): a corner,
   // or { x, y } in screen points.
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
-  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), piUpdates: set.piUpdates, piUpdatesOwnWork: set.piUpdatesOwnWork, piWatch: set.piWatch, keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), masking: set.masking, mask: set.mask, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
+  return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), piUpdates: set.piUpdates, piUpdatesOwnWork: set.piUpdatesOwnWork, piWatch: set.piWatch, keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), masking: set.masking, mask: set.mask, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, orb: parts.orb, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
 
 /** The owner, 2026-11-28: why settings.json can't be used now (a SettingsProblem: its message is the line shown, its
@@ -680,9 +685,9 @@ export function homeFor(home = os.homedir()) {
   try { return loadSettings(home).home; } catch { return HOME_CORNERS[0]; }
 }
 
-/** The Mac voice a look speaks in (a name from `say -v '?'`), or '' for the system voice. Never throws. */
-export function voiceFor(look, home = os.homedir()) {
-  try { const s = loadSettings(home); return s.voices[String(look ?? '').toLowerCase()] || s.voice || ''; } catch { return ''; }
+/** The Mac voice (a name from `say -v '?'`), or '' for the system voice. Never throws. */
+export function macVoice(home = os.homedir()) {
+  try { return loadSettings(home).voice || ''; } catch { return ''; }
 }
 
 /** The sizes, times and counts ("limits") as they stand now. Never throws: the defaults if the settings can't be read. */
@@ -1303,6 +1308,9 @@ export function codeReference() {
     kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts', sleepAfterMinutes: { min: KOKORO.sleepAfterMinutes.min, max: KOKORO.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps', wakes: `on the talk key, an answer window, a spoken request, and ${WAKE_BEFORE_BRIEFING_MINUTES} minutes before a briefing; meanwhile the Mac's voice speaks` } },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },
     voiceEngines: [...VOICE_ENGINES],
+    // Feature 21: the orb's design, fixed in the app (orb.js, which test/orb.test.mjs checks against this); only its
+    // size on screen is a setting (orb.size).
+    orb: { design: { ...ORB_DESIGN }, size: { min: ORB.size.min, max: ORB.size.max, unit: 'points across' }, stillAtRest: true, framesPerSecondAtMost: 30, dial: 'the working day, calendar.dayStart to calendar.dayEnd, redrawn every five minutes and when a block starts or ends' },
     localRanges: { address: '"" (off) or http://127.0.0.1:<port>/v1 (port 1024 to 65535); no other host, name or https', model: 'the id the server lists, or "" for the first one', historyExchanges: { min: LOCAL.historyExchanges.min, max: LOCAL.historyExchanges.max, wholeNumber: true }, maxSteps: { min: LOCAL.maxSteps.min, max: LOCAL.maxSteps.max, wholeNumber: true }, confirmChanges: 'true: a change the local model chose is shown as a question and saved only on a yes; what code decided from fixed words is saved at once either way', start: { python: 'a full path to the Python that has mlx-vlm, or "" (Roamies starts no server)', model: [...LOCAL_MODELS], port: { min: LOCAL_START.port.min, max: LOCAL_START.port.max, wholeNumber: true }, sleepAfterMinutes: { min: 0, max: LOCAL_START.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps' }, draft: 'the pinned drafter, when its files are on this Mac; never downloaded', waitSeconds: { min: LOCAL_START.waitSeconds.min, max: LOCAL_START.waitSeconds.max, wholeNumber: true, means: 'how long a start may take to load the model and answer; then the request gets "The local model could not start, so nothing was sent."' } } },
     calendarRanges: { dayStart: 'HH:MM', dayEnd: 'HH:MM, after dayStart', lunch: '["HH:MM", "HH:MM"], or [] or null for no break', gapMinutes: { min: CALENDAR.gapMinutes.min, max: CALENDAR.gapMinutes.max, wholeNumber: true }, syncSeconds: { min: CALENDAR.syncSeconds.min, max: CALENDAR.syncSeconds.max }, dayTurnsAt: 'HH:MM, not after dayStart: when one day\'s note ends and the next one\'s starts', reviewAt: 'HH:MM, or "" for only when asked; when it is missing it is dayEnd\'s value' },
     superProductivity: {

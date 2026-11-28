@@ -679,6 +679,16 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     const mine = Object.entries(cal.links).filter(([, l]) => on(l.local)).map(([id, l]) => ({ todo: id, title: list.find((t) => t.id === id)?.text ?? l.title, start: l.local.start, minutes: l.local.minutes, done: l.was === 'done' }));
     return { mine: mine.sort((a, b) => a.start - b.start), theirs: others.filter((o) => !o.done && on(o)).sort((a, b) => a.start - b.start) };
   }
+  /** Feature 21: today's blocks for the orb's dial, in minutes from midnight: { mine: [[start, end]], theirs: [[start, end]] }
+   *  (theirs: time taken by tasks of their own in the app). From what is known here: no request. Never throws. */
+  function todayArcs(at = now()) {
+    try {
+      const d = new Date(at), day = new Date(d.getFullYear(), d.getMonth(), d.getDate()), t0 = day.getTime();
+      const { mine, theirs } = dayBlocks(day);
+      const arc = (b) => { const s0 = Math.round((b.start - t0) / 60_000); return [s0, s0 + Math.max(1, Math.round(b.minutes || 0))]; };
+      return { mine: mine.map(arc), theirs: theirs.map(arc) };
+    } catch { return { mine: [], theirs: [] }; }
+  }
   /** The open to-do a block is for: of kind commitment. */
   async function openTodo(id) {
     const t = (await todos.all()).find((x) => x.id === id);
@@ -1433,5 +1443,5 @@ export function createCalendar({ home = os.homedir(), todos, ask = async () => n
     return (cal.started ? `- Super Productivity: ${n} to-do${n === 1 ? '' : 's'} mirrored there as tasks (kept in step by the app, both ways).${cal.adopt ? ' Every open task they have in the app is on the to-do list too, whoever made it; the app adds new ones itself.' : ''}` : '- Super Productivity: the to-do list isn\'t mirrored there yet (sync_todos offers it).') + how + waits;
   }
 
-  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, reschedule, resume, dayNote, outline, startup, takeHeld, hasHeld, hasLines, free, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
+  return { tools, wrap, sync, changed, setLocal, answered, askDeleted, placeKept, kept, blocks, todayArcs, reschedule, resume, dayNote, outline, startup, takeHeld, hasHeld, hasLines, free, askOffer, offerStart, firstRun, adoptable, offerAdopt, live, there, others: () => others, state: get };
 }

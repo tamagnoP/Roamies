@@ -67,15 +67,15 @@
 
   let agent = null;
   const getAgent = () => (agent ??= Roamie.tiles?.find((t) => t.creature?.agent)?.creature.agent ?? null);
+  // Feature 21: the orb itself (orb.js), for what it shows that isn't a bubble: the microphone open, pi working, the day.
+  const orb = () => Roamie.tiles?.find((t) => t.creature?.agent)?.creature ?? null;
 
   // ---------- typing: an input bubble, or the field beside the cursor ----------
   // The bubble (API keys, Allow/Decline, the area follow-up): a real (invisible) input collects keys, so paste, IME
   // and key repeat all just work. Type to ask (m.bar) shows its own field beside the cursor instead (ask-bar.js).
   const field = document.createElement('input');
   Object.assign(field.style, { position: 'fixed', left: '0', top: '0', width: '1px', height: '1px', opacity: '0', pointerEvents: 'none' });
-  // Its name is its look's (the sidecar's LOOKS).
-  const NAMES = { classic: 'Roamie', jarvis: 'JARVIS', anime: 'Anime Girl', sarah: 'Sarah', adrian: 'Adrian' };
-  field.setAttribute('aria-label', 'Message for Roamie');
+  field.setAttribute('aria-label', 'Message for Roamies');
   field.autocomplete = 'off'; field.spellcheck = false;
   document.addEventListener('DOMContentLoaded', () => document.body.appendChild(field));
   if (document.body) document.body.appendChild(field);
@@ -328,7 +328,6 @@
       case 'trail': a.cards?.trail(e); break;
       case 'emote':
         nextMood = MOODS[e.action] ?? null;
-        a.act(e.action);
         break;
       case 'done':
         responding = false;
@@ -363,8 +362,8 @@
       // a spoken answer can settle it. It stays on screen as it is: the character doesn't step away and no
       // listening bubble takes its place, and clicking a button still works.
       // An answer window reopened after a phrase (m.again) is the same listening: no second sound.
-      if (ask?.choices && m.again) return;
-      if (ask?.choices) { Roamie.sfx?.play('listen'); return; }
+      orb()?.setHearing?.(true);
+      if (ask?.choices) return;
       if (ask) finishAsk(null);
       endTalk();
       heard = null;
@@ -374,22 +373,22 @@
         waveTurn = true;
         thought?.end(); thought = null;
         if (a.visible) a.hide();
-        if (!m.again) Roamie.sfx?.play('listen');
         return;
       }
       listen = a.listen({ placeholder: m.mode === 'handsfree' ? 'Listening… tap again to send' : 'Listening…' });
     } else if (m.type === 'partial') listen?.set(m.text);
-    else if (m.type === 'level') listen?.level(m.v);
+    else if (m.type === 'level') { listen?.level(m.v); orb()?.setLevel?.(m.v); }
     else if (m.type === 'state' && m.state === 'processing') listen?.processing();
     else if (m.type === 'final') {
       heardText = true;
       // Keep what was heard on screen until the agent starts thinking.
       if (listen) { listen.set(m.text).processing(); heard = listen; listen = null; }
-      Roamie.sfx?.play('heard');
+      orb()?.setHearing?.(false);
     } else if (m.type === 'state' && m.state === 'idle') {
       // Nothing was heard (or it was cancelled): no answer is coming for that talk.
       if (m.cancelled || !heardText) waveTurn = false;
       heardText = false;
+      orb()?.setHearing?.(false);
       listen?.close(); listen = null;
       if (heard) { const h = heard; setTimeout(() => { if (heard === h) { h.close(); heard = null; } }, 4000); }
     }
@@ -426,15 +425,12 @@
     if (m.kind === 'queue') { for (const t of Roamie.tiles ?? []) t.creature.setQueued?.(m.n); Roamie.wake?.(); return; } // feature 31: the quiet queue's count
     if (m.kind === 'private') { for (const t of Roamie.tiles ?? []) t.creature.setMark?.(m.on ? 'private' : ''); Roamie.wake?.(); return; } // feature 23: private mode's mark
     if (held) { held.q.push(m); return; }
-    if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
-    if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }
+    // Feature 21: the orb's size on screen in points (orb.size), pi working, and the working day with today's blocks.
+    if (m.kind === 'orb') { orb()?.setSize?.(m.size); return; }
+    if (m.kind === 'pi') { orb()?.setPi?.(m.on); return; }
+    if (m.kind === 'dial') { orb()?.setDial?.(m); return; }
     // Local-only build: where it rests in its default and small sizes (the "home" setting; home.js, agent.js).
     if (m.kind === 'home') { getAgent()?.setHome?.(m.home); return; }
-    if (m.kind === 'look') {
-      for (const t of Roamie.tiles ?? []) t.creature.setLook?.(m.look);
-      field.setAttribute('aria-label', `Message for ${NAMES[m.look] ?? NAMES.classic}`);
-      return;
-    }
     if (!getAgent()) return;
     if (m.kind === 'hands') {
       // on/off: it is acting in another app. In between: where each step lands (global screen points) and when a
@@ -448,7 +444,6 @@
       else { handsBusy = !!m.on; if (handsBusy) setHot(false); else hand?.end(); }
       return;
     }
-    if (m.kind === 'greet') { getAgent().act('wave'); return; }
     // Local-only build (feature 24, fix 6): this page replaces one that was at rest: no entrance, no greeting.
     if (m.kind === 'settle') { getAgent().settle?.({ spin: m.spin, hold: m.hold }); return; }
     if (m.kind === 'intro') { getAgent().intro(m.x, m.text); return; }
@@ -456,7 +451,7 @@
     if (m.kind === 'summon') {
       // ⌃⌥S toggles; the menu's Show Sidekick only ever shows.
       const a = getAgent();
-      if (m.show || !a.visible) { if (a.show({ summoned: true })) a.act('wave'); }
+      if (m.show || !a.visible) a.show({ summoned: true });
       else a.hide({ dismiss: true }); // Local-only build: the key still sends it away, also from its home
       return;
     }

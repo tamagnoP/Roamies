@@ -43,7 +43,7 @@ assert.deepEqual(touched, [], 'reading is not a write');
 await noticed('rmSync', () => fs.rmSync(file));
 touched.length = 0;
 
-const { createPi, loadSettings, voiceFor, gateTools } = await import('../pi.mjs');
+const { createPi, loadSettings, macVoice, gateTools } = await import('../pi.mjs');
 const { createNotes } = await import('../notes.mjs');
 const guard = await import('../guard.mjs');
 
@@ -93,7 +93,7 @@ await assert.rejects(tool('switch_project').execute({ name: 'nowhere' }, {}), /N
 await tool('stop_pi').execute({});
 pi.live(); pi.state(); pi.tasksOn(new Date()); pi.stop();
 pi.briefing(new Date(2026, 10, 12, 9, 0)); pi.briefing.done('morning'); pi.briefing.done('evening'); pi.briefing(new Date(2026, 10, 12, 19, 0));
-voiceFor('jarvis', home); voiceFor('classic', home);
+macVoice(home);
 for (const t of gateTools([{ name: 'show_list', execute: async () => 'list' }], pi)) if (t.name === 'show_list') await t.execute({});
 // the notes vault and the never-look list read the same file
 const notes = createNotes({ home, userName: 'Tiago' }), note = (n) => notes.tools.find((t) => t.name === n);
@@ -115,7 +115,7 @@ touched.length = 0;
 fs.writeFileSync(file, '{ broken'); touched.length = 0;
 assert.throws(() => loadSettings(home), /isn't valid JSON/);
 await assert.rejects(tool('ask_pi').execute({ prompt: 'hello', mode: 'read' }, {}), /isn't valid JSON/);
-pi.live(); voiceFor('jarvis', home);
+pi.live(); macVoice(home);
 fs.writeFileSync(file, '{}'); touched.length = 0;
 loadSettings(home); pi.live();
 assert.deepEqual(touched, []); assert.equal(fs.readFileSync(file, 'utf8'), '{}');
@@ -132,7 +132,7 @@ for (const f of fs.readdirSync(src).filter((n) => n.endsWith('.mjs'))) {
 }
 assert.deepEqual(aimed, [], `writes aimed at settings.json: ${aimed.join(', ')}`);
 const piSrc = fs.readFileSync(path.join(src, 'pi.mjs'), 'utf8');
-const body = piSrc.slice(piSrc.indexOf('export function loadSettings('), piSrc.indexOf('export function voiceFor('));
+const body = piSrc.slice(piSrc.indexOf('export function loadSettings('), piSrc.indexOf('export function macVoice('));
 assert.deepEqual([...body.matchAll(/(fs\.\w+)\(file\b/g)].map((m) => m[1]), ['fs.existsSync', 'fs.writeFileSync', 'fs.readFileSync'], 'loadSettings: checks, creates, reads; nothing else');
 assert.ok(body.includes('if (!fs.existsSync(file)) fs.writeFileSync(file,'), 'the one write is the guarded first-time creation');
 

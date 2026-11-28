@@ -913,7 +913,7 @@ const pendingNow = () => readState(dir).pending ?? [];
   const host = fs.readFileSync(new URL('../../../roamies/host.js', import.meta.url), 'utf8');
   assert.match(host, /Roamie\.voiceOut\.onMark = \(mark\) => send\(\{ type: 'speech_mark', mark \}\)/);
   assert.match(host, /else if \(m\.kind === 'ask_text'\) \{ if \(ask && !ask\.bar && ask\.choices\) ask\.h\.placeholder\?\.\(m\.text\); \}/);
-  assert.match(host, /if \(ask\?\.choices && m\.again\) return;/, 'a reopened window makes no second listening sound');
+  assert.match(host, /if \(ask\?\.choices\) return;/, 'a window opened, or reopened, over a bubble with buttons leaves it as it is'); assert.ok(!/sfx/.test(host), 'feature 21: no listening sound from the page')
   // a question between two things: the second button answers with what the sidecar gave (SECOND), and Y is not a yes there
   assert.match(host, /const second = choices && typeof m\.second === 'string' && m\.second \? m\.second : null;\n\s*const third = second && typeof m\.third === 'string' && m\.third \? m\.third : null;\n\s*const pick = \(i\) => \(i === 0 \? 'yes' : i === 1 && second \? second : i === 2 && third \? third : null\);/, 'feature 25: a third button answers with what the sidecar gave it');
   assert.match(host, /onChoose: \(i\) => finishAsk\(pick\(i\)\)/); assert.match(host, /if \(key === 'y' && !ask\.second\) finishAsk\('yes'\);/); assert.match(host, /finishAsk\(ask\.pick\(ask\.sel\)\);/);

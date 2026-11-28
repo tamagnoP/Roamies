@@ -37,6 +37,8 @@ export function settingsNotice(home = os.homedir()) {
   const lines = [];
   if (s.missing.length) lines.push(`settings.json doesn't have: ${s.missing.join(', ')}. I'm using the values in settings.default.json until you add them.`);
   for (const { name, using } of s.invalid) lines.push(`settings.json has a value I can't use for: ${name}. I'm using ${shown(using)}.`);
+  // Feature 21: one look, so one voice: "voices" is no longer read (the owner, 2026-11-28).
+  if (Object.hasOwn(s.raw, 'voices')) lines.push(voicesLine(s.raw.voices, s.voice, Object.hasOwn(s.raw, 'voice')));
   // Feature 34: what on the masking list can't be used (these lines name words: shown, never logged).
   if (s.masking !== false) lines.push(...cleanMask(s.mask, { maxEntries: s.limits.maskEntries }).problems);
   return lines.join('\n');
@@ -64,6 +66,16 @@ function defaultWords(name, value) {
 export function removedNotice(names, home = os.homedir()) {
   const d = settingsDefaults(home);
   return names.map((n) => `${n} was taken out of settings.json, so it now takes its default: ${defaultWords(n, valueAt(d, n))}.`).join('\n');
+}
+
+/** The notice for a settings file that still has "voices": it is no longer read, and the line to add for the voice it
+ *  gave the JARVIS look (or the first one), unless "voice" already says it. */
+export function voicesLine(voices, voice, hasVoice) {
+  const named = voices && typeof voices === 'object' && !Array.isArray(voices) ? Object.entries(voices).filter(([, v]) => typeof v === 'string' && v.trim()) : [];
+  const keep = (named.find(([k]) => k.toLowerCase() === 'jarvis') ?? named[0])?.[1]?.trim() ?? '';
+  const head = 'settings.json still has "voices", which is no longer read: there is one look, so one voice.';
+  if (!keep || (hasVoice && voice === keep)) return `${head} You can take it out.`;
+  return `${head} To keep ${JSON.stringify(keep)}, add the line "voice": ${JSON.stringify(keep)}, and take "voices" out.`;
 }
 
 /** At start-up: the reference file is written and the notice worked out. Never throws; → the notice ('' for none). */

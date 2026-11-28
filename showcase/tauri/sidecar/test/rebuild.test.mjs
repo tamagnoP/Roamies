@@ -115,11 +115,11 @@ const restsWithin = async (p, sec) => { for (let t = 0; t < sec && !lastRest(p);
 {
   const p = page();
   await p.tick(0.5);
-  for (const m of [{ kind: 'size', size: 'default' }, { kind: 'home', home: 'bottom-left' }, { kind: 'look', look: 'jarvis' }]) p.host(m);
+  for (const m of [{ kind: 'orb', size: 100 }, { kind: 'home', home: 'bottom-left' }]) p.host(m);
   assert.equal(await restsWithin(p, 15), true, 'at rest at home with nothing on screen: it says so');
   assert.equal(p.R.rested(), true);
   const said = rests(p).at(-1);
-  assert.ok(Number.isFinite(said.keep.spin), 'with the turn of the globe');
+  assert.ok(Number.isFinite(said.keep.spin), 'with the turn of the orb\'s particles');
   assert.equal(rests(p).length, 1, 'once, when it changes');
   await p.tick(30); assert.equal(rests(p).length, 1, 'and not again while nothing changes');
 
@@ -130,7 +130,6 @@ const restsWithin = async (p, sec) => { for (let t = 0; t < sec && !lastRest(p);
     ['a question with buttons', () => p.host({ kind: 'ask', id: 7, prompt: 'Book a block?', choices: ['Yes', 'No'] }), () => p.host({ kind: 'cancel_ask', id: 7 })],
     ['listening', () => p.host({ kind: 'voice', type: 'state', state: 'listening', mode: 'hold' }), () => p.host({ kind: 'voice', type: 'state', state: 'idle', cancelled: true })],
     ['the task tag of a tool', () => p.host({ kind: 'agent', e: { type: 'tool', id: 't1', anim: { tool: 'read', label: 'Reading' } } }), () => { p.host({ kind: 'agent', e: { type: 'tool_end', id: 't1' } }); p.host({ kind: 'agent', e: { type: 'done' } }); }],
-    ['a wave', () => p.host({ kind: 'greet' }), () => {}],
   ];
   for (const [what, on, off] of cases) {
     on(); await p.tick(1);
@@ -154,27 +153,27 @@ const restsWithin = async (p, sec) => { for (let t = 0; t < sec && !lastRest(p);
 }
 
 // A new page taking over: the sidecar answers its ui_ready with the settings and "settle". It is at home at once,
-// with no entrance, no wave, and the globe turned as it was; then it rests and says so.
+// with no entrance and the particles turned as they were; then it rests and says so.
 {
   const p = page();
   await p.tick(0.5);
   assert.deepEqual(p.sent.map((s) => s.type), ['ui_ready']);
   assert.equal(p.agent.presence, 'hidden', 'a new page starts with the character hidden');
-  for (const m of [{ kind: 'sound', on: true }, { kind: 'size', size: 'default' }, { kind: 'home', home: 'bottom-left' }, { kind: 'look', look: 'jarvis' }, { kind: 'settle', spin: 4.25 }]) p.host(m);
+  for (const m of [{ kind: 'orb', size: 100 }, { kind: 'home', home: 'bottom-left' }, { kind: 'settle', spin: 4.25 }]) p.host(m);
   assert.equal(p.agent.presence, 'shown', 'there at once: no entrance');
   atSpot(p, HOME['bottom-left'], 'on its home spot');
-  assert.equal(p.creature.agent.keep.spin, 4.25, 'the globe turned as the old page had it');
+  assert.equal(p.creature.agent.keep.spin, 4.25, 'the particles turned as the old page had them');
   await p.tick(0.05);
   assert.equal(p.agent.presence, 'shown');
   await p.tick(3);
-  atSpot(p, HOME['bottom-left'], 'and it stays there'); assert.equal(p.agent.keep.spin, 4.25, 'the globe has not turned');
+  atSpot(p, HOME['bottom-left'], 'and it stays there'); assert.equal(p.agent.keep.spin, 4.25, 'the particles have not turned');
   assert.equal(await restsWithin(p, 15), true, 'at rest, and says so');
   assert.equal(p.R.rested(), true);
   assert.equal(rests(p).at(-1).keep.spin, 4.25);
 
   // settle before the home has arrived: it comes on screen at home when it does, still without an entrance
   const q = page(); await q.tick(0.5);
-  q.host({ kind: 'size', size: 'default' }); q.host({ kind: 'settle' });
+  q.host({ kind: 'orb', size: 100 }); q.host({ kind: 'settle' });
   assert.equal(q.agent.presence, 'hidden', 'no home yet');
   q.host({ kind: 'home', home: 'top-right' }); await q.tick(0.3);
   assert.equal(q.agent.presence, 'hidden'); await q.tick(0.3);
@@ -182,23 +181,23 @@ const restsWithin = async (p, sec) => { for (let t = 0; t < sec && !lastRest(p);
 
   // an ordinary start, for comparison: an entrance
   const o = page(); await o.tick(0.5);
-  o.host({ kind: 'size', size: 'default' }); o.host({ kind: 'home', home: 'bottom-left' }); await o.tick(0.5);
+  o.host({ kind: 'orb', size: 100 }); o.host({ kind: 'home', home: 'bottom-left' }); await o.tick(0.5);
   assert.equal(o.agent.presence, 'in', 'an ordinary start comes on with an entrance');
 }
 
 // The owner saw the orb hop up a little after a rebuild, then slide slowly to its place. In its small size, settle
 // used the default size's radius for the home spot (the radius the page had kept from its last frame), then the next
 // frame worked it out again with the small one and the character glided there. Now it is placed at the final spot
-// at once, and stays exactly there; every position it is drawn at is that spot.
-const SMALL = [72, 763]; // bottom-left, radius 30
+// at once, and stays exactly there; every position it is drawn at is that spot. Feature 21: sizes are orb.size.
+const SMALL = [94, 746]; // bottom-left, at 80 points (radius 39.2)
 const settled = async (size, more = {}) => {
   const p = page(); p.win.ROAMIE_LABEL = 'overlay-2-0'; await p.tick(0.5);
   p.win.__roamieMeasure(30_000);
-  for (const m of [{ kind: 'sound', on: true }, { kind: 'size', size }, { kind: 'home', home: 'bottom-left' }, { kind: 'look', look: 'jarvis' }, { kind: 'settle', spin: 1, hold: SETTLE_HOLD_SECONDS, ...more }]) p.host(m);
+  for (const m of [{ kind: 'orb', size: size === 'small' ? 80 : 100 }, { kind: 'home', home: 'bottom-left' }, { kind: 'settle', spin: 1, hold: SETTLE_HOLD_SECONDS, ...more }]) p.host(m);
   return p;
 };
 const rowsOf = (p) => p.sent.filter((s) => s.type === 'measure').flatMap((s) => s.rows);
-for (const [size, spot] of [['small', SMALL], ['default', HOME['bottom-left']]]) {
+for (const [size, spot] of [['small', SMALL], ['default', HOME['bottom-left'].map(Math.round)]]) {
   const p = await settled(size);
   assert.deepEqual(p.at().map(Math.round), spot, `${size}: on its final home spot at once`);
   const seen = new Set();
@@ -215,7 +214,7 @@ for (const [size, spot] of [['small', SMALL], ['default', HOME['bottom-left']]])
   const p = await settled('default'), b0 = p.R.safe.bottom;
   await p.tick(1);
   p.win.__roamieSafe({ top: 33, left: 0, bottom: b0 + 40, right: 0, ox: 0, oy: 0 }); await p.tick(1 / 60); await p.tick(1 / 60);
-  const [hx, hy] = HOME['bottom-left'];
+  const [hx, hy] = HOME['bottom-left'].map(Math.round);
   assert.deepEqual(p.at().map(Math.round), [hx, hy - 40], 'the Dock grew in the first seconds: straight to the new spot');
   await p.tick(0.15); // rows go to the sidecar every 100 ms
   const rows = rowsOf(p);
@@ -235,7 +234,7 @@ for (const [size, spot] of [['small', SMALL], ['default', HOME['bottom-left']]])
 {
   // measuring off (no ROAMIE_MEASURE, no __roamieMeasure): nothing is sent
   const p = page(); await p.tick(0.5);
-  for (const m of [{ kind: 'size', size: 'small' }, { kind: 'home', home: 'bottom-left' }, { kind: 'settle' }]) p.host(m);
+  for (const m of [{ kind: 'orb', size: 80 }, { kind: 'home', home: 'bottom-left' }, { kind: 'settle' }]) p.host(m);
   await p.tick(2);
   assert.equal(p.sent.filter((s) => s.type === 'measure').length, 0, 'off: nothing measured');
   assert.deepEqual(p.at().map(Math.round), SMALL, 'and still placed at once (the hold is 3 s without one given)');
@@ -246,12 +245,13 @@ for (const [size, spot] of [['small', SMALL], ['default', HOME['bottom-left']]])
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   const ready = side.slice(side.indexOf("else if (m.type === 'ui_ready')"), side.indexOf("else if (m.type?.startsWith('ob_')"));
   assert.match(ready, /const keep = pageRebuild\?\.ready\(\)/, 'ui_ready asks whether this page is a rebuild');
-  assert.match(ready, /if \(keep\) ui\(\{ kind: 'settle'[^\n]*\n\s*else if \(config\.onboarded && !stood\?\.on\(\)\) ui\(\{ kind: 'greet' \}\);/, 'a rebuilt page is settled, not greeted (nor one stood down: feature 33)');
-  assert.ok(ready.indexOf("kind: 'look'") < ready.indexOf("kind: 'settle'"), 'settle comes after the settings');
+  assert.match(ready, /if \(keep\) ui\(\{ kind: 'settle'/, 'a rebuilt page is settled');
+  assert.ok(!/kind: 'greet'/.test(side), 'feature 21: no greeting wave (the orb has no acts)');
+  assert.ok(ready.indexOf("kind: 'orb'") >= 0 && ready.indexOf("kind: 'orb'") < ready.indexOf("kind: 'settle'"), 'settle comes after the settings');
   assert.match(side, /if \(!PAGE_SETTINGS\.has\(msg\.kind\)\) pageRebuild\?\.shown\(\);\n\s*send\(\{ type: 'ui', msg \}\);/, 'everything the page is sent counts as shown, but its settings');
   assert.match(side, /minutes: \(\) => limitsFor\(HOME\)\.pageRebuildQuietMinutes,/, 'the setting is read at each check');
   const quiet = /quiet: \(\) => ([^\n]+),\n/.exec(side.slice(side.indexOf('pageRebuild = createPageRebuild(')))[1];
-  for (const part of ['calQuietBase()', '!pi.bubble()', '!answers.open()', '!micWindow', '!heldSpeech.length', '!turnVoice', '!cal.hasHeld()', '!flow.open()', '!flow.window()', '!intro', '!showcase']) assert.ok(quiet.includes(part), `quiet needs ${part}`);
+  for (const part of ['calQuietBase()', '!pi.bubble()', '!answers.open()', '!micWindow', '!heldSpeech.length', '!turnVoice', '!cal.hasHeld()', '!flow.open()', '!flow.window()']) assert.ok(quiet.includes(part), `quiet needs ${part}`);
   assert.ok(!/pending/.test(quiet), 'a question kept in state.json does not hold the rebuild off');
   assert.ok(!/stood|calQuiet\(\)/.test(quiet), 'nor does stand down (feature 33): calQuietBase, not calQuiet');
   assert.match(side, /rebuild: \(\{ measure \}\) => send\(\{ type: 'rebuild_overlays', measure \}\),\n\s*measure: \(\) => loadSettings\(HOME\)\.measurePageRebuild,/, 'the shell is asked to measure when the setting is on');

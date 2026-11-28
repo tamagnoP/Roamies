@@ -196,7 +196,7 @@ assert.ok(src.includes('blockedPaths(home, s.dir)'), 'the sandbox\'s blocked lis
 
 // ---- sidekick.mjs: the tools are given, after the app's, only with his words in that request
 const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
-assert.match(side, /ownWords = intro \|\| briefing \|\| text\.startsWith\('\('\) \? '' : text; ownTurn\+\+;/, 'a briefing or a system note is never his words');
+assert.match(side, /ownWords = briefing \|\| text\.startsWith\('\('\) \? '' : text; ownTurn\+\+;/, 'a briefing or a system note is never his words');
 assert.match(side, /createFiles\(\{ home: HOME, userName, heard: \(\) => ownWords, turn: \(\) => ownTurn, ask: \(o\) => answers\.ask\(o\), counted: \(kind, chars\) => countText\(kind, chars\)/);
 assert.match(side, /\.\.\.notes\.tools, \.\.\.files\.tools, \.\.\.cal\.tools/);
 assert.match(side, /\.\.\.countTools\(u\.names\), \.\.\.\(l\.texts \?\? \{\}\)(?:, swaps: [^}]*)? \}\);/, 'the request\'s file and note texts in its ledger line (and feature 34\'s swaps)');

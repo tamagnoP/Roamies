@@ -158,14 +158,20 @@ put({ ...made, neverLook: [] }); assert.deepEqual(loadSettings(home).neverLook, 
 put({ ...made, toolFolders: ['~/.mytool', 7, ''], docker: 'everywhere', home: 'middle', voices: { jarvis: 'Daniel', anime: 3 } });
 {
   const s = loadSettings(home);
-  assert.ok(s.toolFolders.includes(path.join(home, '.mytool'))); assert.deepEqual(s.docker, []); assert.equal(s.home, 'bottom-left'); assert.deepEqual(s.voices, { jarvis: 'Daniel' });
+  assert.ok(s.toolFolders.includes(path.join(home, '.mytool'))); assert.deepEqual(s.docker, []); assert.equal(s.home, 'bottom-left'); assert.ok(!('voices' in s), 'feature 21: "voices" is not read');
   assert.deepEqual(settingsNotice(home).split('\n'), [
-    'settings.json has a value I can\'t use for: voices. I\'m using {"jarvis":"Daniel"}.',
     'settings.json has a value I can\'t use for: toolFolders. I\'m using ["~/.mytool"].',
     'settings.json has a value I can\'t use for: docker. I\'m using [].',
     'settings.json has a value I can\'t use for: home. I\'m using "bottom-left".',
+    'settings.json still has "voices", which is no longer read: there is one look, so one voice. You can take it out.',
   ]);
 }
+// feature 21: "voices" with a voice "voice" doesn't say: the line to add
+put({ ...made, voice: '', voices: { jarvis: 'Daniel' } });
+assert.equal(settingsNotice(home), 'settings.json still has "voices", which is no longer read: there is one look, so one voice. To keep "Daniel", add the line "voice": "Daniel", and take "voices" out.');
+put({ ...made, voices: { sarah: 'Samantha' } });
+assert.match(settingsNotice(home), /To keep "Samantha", add the line "voice": "Samantha"/, 'the first one, when JARVIS has none');
+put(made); assert.equal(settingsNotice(home), '', 'gone once it is taken out');
 // one in a list that protects something refuses the file, whichever entry it is
 for (const name of ['readOnly', 'toolFoldersOff', 'findLeaveOut']) { put({ ...made, [name]: ['~/Documents/cells', 7] }); refused([name], name); put({ ...made, [name]: ['~/Documents/cells', ''] }); refused([name], name); }
 // the other protecting settings, with an everyday wrong value each; their right values pass

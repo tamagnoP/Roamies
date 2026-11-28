@@ -1,5 +1,5 @@
 // The panel that opens from the menu bar or tray icon: a sidebar of pages. Home (what's going on) and Memory,
-// then a page per group of settings: Model, Appearance, Voice, Behavior and About.
+// then a page per group of settings: Model, Voice, Behavior and About (feature 21: the looks and sizes went with the old look).
 // The sidecar owns every value: it sends the whole state when the panel opens and after each change, and the
 // panel sends back the same actions the menu used ({type:'menu', id}). Opened in a plain browser it shows a
 // labelled preview with sample data instead.
@@ -430,39 +430,6 @@
       foot(null, nav),
     ];
   }
-  function appearancePage() {
-    return [
-      group('Look', 'Each look has its own name and voice.', null, lookTiles()),
-      group('Size', 'How big I am on your screen.', null, picks('Size', state.sizes, state.size, (x) => act(`size:${x}`), 'size')),
-    ];
-  }
-  // The looks as live tiles: each one's character, playing, at the size picked below. Kept between renders (a state update mustn't restart
-  // them); hovering or focusing one makes it wave; picking it makes it cheer.
-  const tiles = new Map();
-  function lookTiles() {
-    const g = tiles.get('_group') ?? el('div', { className: 'looks', role: 'radiogroup', 'aria-label': 'Look' });
-    tiles.set('_group', g);
-    g.replaceChildren(...state.looks.map(([id, name]) => {
-      let t = tiles.get(id);
-      if (!t) {
-        const cv = el('canvas', { 'aria-hidden': 'true' });
-        const b = el('button', { className: 'px looktile', type: 'button', role: 'radio', 'data-k': `look:${id}` }, cv, el('span', { className: 'name', textContent: name }));
-        const r = liveRoamie(cv, 104, 76, { look: id, y: 0.55, form: state.size });
-        t = { b, r, waved: 0 };
-        const wave = () => { if (r && Date.now() - t.waved > 3500) { t.waved = Date.now(); r.act('wave'); } };
-        b.addEventListener('pointerenter', wave);
-        b.addEventListener('focus', () => b.matches(':focus-visible') && wave());
-        b.addEventListener('click', () => { if (state.look !== id) { r?.act('hype'); act(`look:${id}`); } });
-        tiles.set(id, t);
-        r?.appear('crt');
-      }
-      t.r?.setForm(state.size);
-      const on = state.look === id;
-      t.b.setAttribute('aria-checked', String(on)); t.b.tabIndex = on ? 0 : -1;
-      return t.b;
-    }));
-    return g;
-  }
   function voicePage() {
     const v = state.voice;
     return [
@@ -540,7 +507,7 @@
   }
 
   // ---------------------------------------------------------------- render
-  const PANES = { home, memory, model: modelPage, appearance: appearancePage, voice: voicePage, behavior: behaviorPage, about: aboutPage };
+  const PANES = { home, memory, model: modelPage, voice: voicePage, behavior: behaviorPage, about: aboutPage };
   // focusKey: what to focus after (a data-k, or an element id); otherwise whatever had focus keeps it.
   function render(focusKey, animate = false) {
     if (!state) return;

@@ -198,7 +198,7 @@ enum Rebuilding {
 fn rebuilding(msg: &Value) -> Rebuilding {
     match msg.get("kind").and_then(Value::as_str) {
         Some("settle") => Rebuilding::Settle,
-        Some("sound" | "size" | "home" | "look") => Rebuilding::Pass,
+        Some("orb" | "home" | "dial" | "pi") => Rebuilding::Pass, // feature 21: the orb's size, its home, the working day, pi working
         _ => Rebuilding::Hold,
     }
 }
@@ -1952,11 +1952,11 @@ mod tests {
     // the rebuild, and everything else waits for it.
     #[test]
     fn a_rebuild_holds_all_but_the_new_pages_settings() {
-        for k in ["sound", "size", "home", "look"] {
+        for k in ["orb", "home", "dial", "pi"] {
             assert_eq!(rebuilding(&json!({ "kind": k })), Rebuilding::Pass, "{k}");
         }
         assert_eq!(rebuilding(&json!({ "kind": "settle", "spin": 1.5 })), Rebuilding::Settle);
-        for k in ["say", "ask", "agent", "speech", "voice", "list", "greet", "summon", "hands", "esc", "intro", "cancel_ask"] {
+        for k in ["say", "ask", "agent", "speech", "voice", "list", "summon", "hands", "esc", "intro", "cancel_ask", "sound", "size", "look"] {
             assert_eq!(rebuilding(&json!({ "kind": k })), Rebuilding::Hold, "{k}");
         }
         assert_eq!(rebuilding(&json!({})), Rebuilding::Hold);

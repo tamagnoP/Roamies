@@ -1,4 +1,4 @@
-// Local-only build: the character's home on the desktop, in the overlay itself (core.js, agent.js, 10-dither.js,
+// Local-only build: the orb's home on the desktop, in the overlay itself (core.js, agent.js, orb.js,
 // host.js), run here without a screen: the page's scripts are loaded as they are, with a stand-in for the browser (a
 // canvas that draws nowhere, a clock moved by hand, and a stand-in for the Tauri shell; page.mjs). What it can't show
 // is how any of it looks; that is checked by eye. Run: npm run test:all (slow: minutes of the page's clock drawn
@@ -40,9 +40,10 @@ for (const [home, spot] of Object.entries(HOME)) {
   for (let i = 0; i < 80; i++) { p.ptr(spot[0] + 110 + (i % 5), spot[1] - 40); await p.tick(0.05); }
   atSpot(p, spot, `${home}, with the cursor hovering beside it`); assert.equal(p.hot(), false);
   // on its body: the click is its own, so it can be dragged
-  p.ptr(spot[0] + 20, spot[1] - 10); assert.equal(p.hot(), true, `${home}: the body takes clicks`);
-  p.ptr(spot[0] + 82, spot[1]); assert.equal(p.hot(), true); p.ptr(spot[0] + 84, spot[1]); assert.equal(p.hot(), false, 'the patch that takes clicks is a circle of 82.5 px radius round its centre');
-  p.ptr(spot[0] + 60, spot[1] + 60); assert.equal(p.hot(), false, 'a circle, not a square');
+  p.ptr(spot[0] + 10, spot[1] - 8); assert.equal(p.hot(), true, `${home}: its centre takes clicks`);
+  p.ptr(spot[0] + 17, spot[1]); assert.equal(p.hot(), true); p.ptr(spot[0] + 19, spot[1]); assert.equal(p.hot(), false, 'feature 21: only a spot of 18 px radius round its centre takes clicks (agreed 2026-11-17)');
+  p.ptr(spot[0] + 14, spot[1] + 14); assert.equal(p.hot(), false, 'a circle, not a square');
+  p.ptr(spot[0] + 40, spot[1]); assert.equal(p.hot(), false, 'the rest of the orb lets clicks through');
   p.ptr(900, 300); await p.tick(3);
 
   // a reply: said from home, with the cursor far away, the bubble whole on screen beside it
@@ -77,7 +78,7 @@ for (const [home, spot] of Object.entries(HOME)) {
   atSpot(p, [700, 400], 'coordinates');
   p.agent.say('Said from the middle of the screen.'); await p.tick(2); bubbleOnScreen(p, 'coordinates speech');
   const low = await started({ home: { x: 20, y: 895 } });
-  atSpot(low, [96, 730], 'coordinates under the Dock, at the edge');
+  atSpot(low, [78.4, 746.5], 'coordinates under the Dock, at the edge');
   low.host({ kind: 'ask', id: 1, prompt: SEND, choices: ['Send', "Don't send"] }); await low.tick(2.5); bubbleOnScreen(low, 'Send bubble in the very corner');
 }
 
@@ -138,47 +139,30 @@ for (const [home, spot] of Object.entries(HOME)) {
 // The Dock grows, the size changes, the overlay changes screens: home moves with them.
 {
   const p = await started();
-  atSpot(p, [144, 706], 'before'); await p.tick(3); assert.equal(p.R.rested(), true);
+  atSpot(p, [117.6, 726.9], 'before'); await p.tick(3); assert.equal(p.R.rested(), true);
   p.win.__roamieSafe({ top: 33, left: 0, bottom: 140, right: 0, ox: 0, oy: 0 }); await p.tick(4);
-  atSpot(p, [144, 646], 'a taller Dock'); await p.tick(3); assert.equal(p.R.rested(), true);
+  atSpot(p, [117.6, 666.9], 'a taller Dock'); await p.tick(3); assert.equal(p.R.rested(), true);
   p.win.__roamieSafe({ top: 33, left: 96, bottom: 0, right: 0, ox: 0, oy: 0 }); await p.tick(4);
-  atSpot(p, [240, 786], 'the Dock on the left');
-  // the small size: half the body, closer to the corner, same behaviour
-  p.host({ kind: 'size', size: 'small' }); await p.tick(4);
-  assert.equal(p.agent.homing, true); atSpot(p, [96 + 72, 900 - 57], 'small');
+  atSpot(p, [213.6, 806.9], 'the Dock on the left');
+  // feature 21: orb.size changed (80 points, radius 39.2): closer to the corner, same behaviour
+  p.host({ kind: 'orb', size: 80 }); await p.tick(4);
+  assert.equal(p.creature.size, 80); assert.equal(p.agent.homing, true); atSpot(p, [96 + 94.08, 900 - 74.48], 'at 80 points');
   await p.tick(4); assert.equal(p.R.rested(), true); assert.equal(await p.tick(30), 0);
-  p.ptr(600, 400); p.agent.say('Small, and still at home.'); await p.tick(2); atSpot(p, [168, 843], 'small, speaking'); bubbleOnScreen(p, 'small speech');
+  p.ptr(600, 400); p.agent.say('Smaller, and still at home.'); await p.tick(2); atSpot(p, [190.08, 825.52], 'at 80 points, speaking'); bubbleOnScreen(p, 'speech at 80 points');
   p.agent.hush(); await p.tick(1);
+  // outside 80 to 140: held to the range; nonsense: the default
+  p.host({ kind: 'orb', size: 300 }); assert.equal(p.creature.size, 140); p.host({ kind: 'orb', size: 'big' }); assert.equal(p.creature.size, 100); p.host({ kind: 'orb', size: 80 });
+  // the old size message does nothing now
+  p.host({ kind: 'size', size: 'cursor' }); await p.tick(4); assert.equal(p.creature.form, 'default'); assert.equal(p.agent.homing, true);
   // the setting edited (sent again with the next request): it moves there
-  p.host({ kind: 'home', home: 'top-right' }); await p.tick(5);
-  atSpot(p, [1440 - 72, 33 + 72], 'after the setting changed');
+  p.host({ kind: 'home', home: 'top-right' }); await p.tick(9);
+  atSpot(p, [1440 - 94.08, 33 + 94.08], 'after the setting changed');
   // the overlay moves to another screen: gone for a moment, then at that screen's home
   p.win.__roamieMoved(); await p.tick(0.1);
   assert.equal(p.agent.presence, 'hidden');
   p.win.innerWidth = 1920; p.win.innerHeight = 1080; p.win.__roamieSafe({ top: 25, left: 0, bottom: 0, right: 0, ox: 1440, oy: 0 }); p.win.dispatchEvent(new p.win.Event('resize'));
   await p.tick(5);
-  assert.equal(p.agent.presence, 'shown'); atSpot(p, [1920 - 72, 25 + 72], 'on the other screen');
-}
-
-// The cursor size is upstream's: beside the cursor, following it, hidden when idle. Switching sizes switches behaviour.
-{
-  const p = await started({ size: 'cursor' });
-  assert.equal(p.agent.homing, false); assert.equal(p.agent.presence, 'hidden', 'cursor size: hidden until needed');
-  p.ptr(600, 400); await p.tick(0.3); p.agent.say('hi'); await p.tick(1.5);
-  assert.ok(Math.hypot(p.m.x - 600, p.m.y - 400) < 120, 'cursor size: beside the cursor');
-  p.ptr(900, 500); await p.tick(1); p.ptr(900, 500); await p.tick(1);
-  assert.ok(Math.hypot(p.m.x - 900, p.m.y - 500) < 120, 'cursor size: it follows the cursor');
-  p.agent.hush(); await p.tick(12);
-  assert.equal(p.agent.presence, 'hidden', 'cursor size: hides when idle');
-  // to the default size: it comes on at home and stays
-  p.host({ kind: 'size', size: 'default' }); await p.tick(5);
-  assert.equal(p.agent.presence, 'shown'); atSpot(p, HOME['bottom-left'], 'switched to the default size');
-  await p.tick(30); assert.equal(p.agent.presence, 'shown');
-  // and back to the cursor size: hidden again when idle, beside the cursor when asked
-  p.host({ kind: 'size', size: 'cursor' }); await p.tick(12);
-  assert.equal(p.agent.presence, 'hidden');
-  p.ptr(500, 300); await p.tick(0.3); p.agent.say('hi again'); await p.tick(1.5);
-  assert.ok(Math.hypot(p.m.x - 500, p.m.y - 300) < 120);
+  assert.equal(p.agent.presence, 'shown'); atSpot(p, [1920 - 94.08, 25 + 94.08], 'on the other screen');
 }
 
 // The summon key still sends it away and brings it back; Esc doesn't take it off the screen.

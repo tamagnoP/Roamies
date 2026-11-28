@@ -1,47 +1,36 @@
-// The card look shared by the Sidekick's own UI (bubbles, the thinking tag, task tags, the step list): the same
-// stepped corners, dark glass, teal edge, glint and Martian Mono as the drawings' cards (ink.js) and the reminders.
+// The instrument style (feature 21, DESIGN-SPEC.md) shared by the orb's own UI (bubbles, the thinking tag, task tags,
+// the step list) and the drawings' cards (ink.js): near-black panels, a thin line, square corners with short accent
+// corner marks, one ice blue, amber for a warning, the system's own fonts (nothing is downloaded).
 (() => {
   const R = window.Roamie;
   if (!R || typeof document === 'undefined') return;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const ACC = '#78ffe2', HOT = '#e6fffa', MID = '#28c4b8', DEEP = '#0e5c60', EDGE = 'rgba(3,39,34,0.6)';
-  const GLASS = 'rgba(6,22,24,0.94)', TEXT = '#dcfff6', DIM = '#8ab8b0', CORAL = '#ff8a7a', NOTE = '#e9a196';
-  const MONO = '"Martian Mono", ui-monospace, monospace';
+  const ACC = '#62D5F8', HOT = '#F2F7FB', MID = '#3FA9CC', DEEP = '#1B4A5C', EDGE = 'rgba(6,9,15,0.7)';
+  const GLASS = 'rgba(6,9,15,0.97)', TEXT = '#F2F7FB', DIM = '#B4C2CE', CORAL = '#FF8A7A', NOTE = '#F7C078', AMBER = '#F7C078', LINE = '#39434C', STOOD = '#6B7B88';
+  const MONO = 'ui-monospace, "SF Mono", Menlo, monospace', SANS = '-apple-system, system-ui, "Segoe UI", sans-serif';
   const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const rgba = (h, a) => `rgba(${hex(h).join(',')},${a})`;
 
-  // The outline, clockwise from the top-left; tail: { side: 'top'|'right'|'bottom'|'left', at, to: [x, y] } adds a
-  // stepped tail on that side, centred at `at` along it and stepping toward the point `to`.
-  function stepped(x, y, w, h, c = 8, tail = null) {
-    const s = c / 2, b = y + h, r = x + w;
-    const pts = [[x + c, y], [r - c, y], [r - c, y + s], [r - s, y + s], [r - s, y + c], [r, y + c], [r, b - c], [r - s, b - c], [r - s, b - s], [r - c, b - s], [r - c, b],
-      [x + c, b], [x + c, b - s], [x + s, b - s], [x + s, b - c], [x, b - c], [x, y + c], [x + s, y + c], [x + s, y + s], [x + c, y + s]];
-    if (!tail) return pts;
-    // Each side as the path walks it: where it starts, its direction, its outward normal, and the point it follows.
-    const SIDE = { top: [[x, y], [1, 0], [0, -1], 0], right: [[r, y], [0, 1], [1, 0], 5], bottom: [[r, b], [-1, 0], [0, 1], 10], left: [[x, b], [0, -1], [-1, 0], 15] }[tail.side];
-    if (!SIDE) return pts;
-    const [o, e, n, after] = SIDE, len = Math.abs(e[0]) ? w : h;
-    // Position along the walked side, kept clear of the corners.
-    const w0 = tail.w ?? 12, along = clamp(Math.abs(e[0]) ? (tail.at - o[0]) * e[0] : (tail.at - o[1]) * e[1], c + w0 / 2 + 2, len - c - w0 / 2 - 2);
-    const base = [o[0] + e[0] * along, o[1] + e[1] * along];
-    const to = tail.to ?? [base[0] + n[0] * 14, base[1] + n[1] * 14];
-    const depth = clamp((to[0] - base[0]) * n[0] + (to[1] - base[1]) * n[1], 6, tail.max ?? 18), shift = (to[0] - base[0]) * e[0] + (to[1] - base[1]) * e[1];
-    const hs = depth / 3, ws = [w0, w0 * 0.66, w0 * 0.33], ds = [0, shift * 0.45, shift * 0.8];
-    const P = (a, d) => [base[0] + e[0] * a + n[0] * d, base[1] + e[1] * a + n[1] * d];
-    const t = [P(-ws[0] / 2, 0), P(-ws[0] / 2, hs), P(ds[1] - ws[1] / 2, hs), P(ds[1] - ws[1] / 2, 2 * hs), P(ds[2] - ws[2] / 2, 2 * hs), P(ds[2] - ws[2] / 2, 3 * hs),
-      P(ds[2] + ws[2] / 2, 3 * hs), P(ds[2] + ws[2] / 2, 2 * hs), P(ds[1] + ws[1] / 2, 2 * hs), P(ds[1] + ws[1] / 2, hs), P(ws[0] / 2, hs), P(ws[0] / 2, 0)];
-    pts.splice(after + 1, 0, ...t);
-    return pts;
-  }
-  const steppedPath = (x, y, w, h, c, tail) => { const p = new Path2D(); stepped(x, y, w, h, c, tail).forEach((q, i) => (i ? p.lineTo(q[0], q[1]) : p.moveTo(q[0], q[1]))); p.closePath(); return p; };
-
-  // Dark glass with a soft shadow, the accent edge with its glow, and a glint along the top.
+  // A panel: near-black, a thin line, square corners, short marks at each corner in the accent (o.edge: another
+  // colour, a task that failed). o.tail is not drawn: the instrument's bubbles sit beside the orb.
   function chrome(c, x, y, w, h, o = {}) {
-    const path = o.path || steppedPath(x, y, w, h, o.corner ?? 8, o.tail), edge = o.edge || ACC;
+    const edge = o.edge || ACC, k = Math.min(14, w / 3, h / 3);
     c.save();
-    c.fillStyle = GLASS; c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = 14; c.shadowOffsetY = 4; c.fill(path);
-    c.shadowColor = rgba(edge, 0.7); c.shadowBlur = 8; c.shadowOffsetY = 0; c.strokeStyle = edge; c.lineWidth = 1.5; c.globalAlpha *= 0.9; c.stroke(path);
-    if (o.glint !== false && w > 24) { c.globalAlpha *= 0.6; c.shadowBlur = 0; c.strokeStyle = '#ffffff'; c.lineWidth = 1; c.beginPath(); c.moveTo(x + 12, y + 1.5); c.lineTo(x + Math.min(w * 0.45, 90), y + 1.5); c.stroke(); }
+    c.fillStyle = GLASS; c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = 12; c.shadowOffsetY = 3;
+    if (o.path) c.fill(o.path); else c.fillRect(x, y, w, h);
+    c.shadowColor = 'transparent'; c.shadowBlur = 0; c.shadowOffsetY = 0;
+    c.strokeStyle = LINE; c.lineWidth = 1;
+    if (o.path) c.stroke(o.path); else c.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
+    if (!o.path && w > 20 && h > 16) {
+      c.strokeStyle = edge; c.lineWidth = 2; c.lineCap = 'butt';
+      const X = Math.round(x), Y = Math.round(y), R2 = Math.round(x + w), B = Math.round(y + h);
+      c.beginPath();
+      c.moveTo(X + 1, Y + k); c.lineTo(X + 1, Y + 1); c.lineTo(X + k, Y + 1);
+      c.moveTo(R2 - k, Y + 1); c.lineTo(R2 - 1, Y + 1); c.lineTo(R2 - 1, Y + k);
+      c.moveTo(X + 1, B - k); c.lineTo(X + 1, B - 1); c.lineTo(X + k, B - 1);
+      c.moveTo(R2 - k, B - 1); c.lineTo(R2 - 1, B - 1); c.lineTo(R2 - 1, B - k);
+      c.stroke();
+    }
     c.restore();
   }
 
@@ -100,29 +89,23 @@
     c.restore();
   }
 
-  // A pixel button like the drawings' chips (ink.js): filled is teal with dark ink, otherwise dark glass with a teal
-  // edge and light ink. focus adds a bright ring, so the keyboard's choice shows; down presses it into its shadow.
-  const CHIP_F = `700 11px ${MONO}`, INK_DARK = '#032722';
-  const mix = (a, b, k) => `rgb(${hex(a).map((v, i) => Math.round(v + (hex(b)[i] - v) * k)).join(',')})`;
-  const chipW = (label) => Math.round(textW(label, CHIP_F) + 22);
+  // A button as on the artboards: the first is filled in the accent with dark ink, the others are outlined in grey with
+  // light ink; square corners, at least 44 points high. focus: a ring in the accent; down: pressed in a little.
+  const CHIP_F = `600 15px ${SANS}`, CHIP_F2 = `500 15px ${SANS}`, INK_DARK = '#04121C';
+  const chipW = (label) => Math.round(textW(label, CHIP_F) + 40);
   function chip(c, x, y, w, h, label, o = {}) {
     c.save();
-    if (o.focus) { c.strokeStyle = HOT; c.lineWidth = 2; c.stroke(steppedPath(x - 3.5, y - 3.5, w + 7, h + 9, 6)); }
-    if (o.down) c.translate(0, 2);
-    c.fillStyle = o.filled ? mix(ACC, '#000000', 0.62) : 'rgba(0,0,0,0.45)'; c.fill(steppedPath(x, y + (o.down ? 1 : 3), w, h, 4));
-    const face = steppedPath(x, y, w, h, 4);
-    if (o.filled) {
-      c.fillStyle = o.hover ? mix(ACC, '#ffffff', 0.3) : ACC; c.fill(face);
-      c.fillStyle = 'rgba(255,255,255,0.55)'; c.fillRect(x + 4, y + 1, w - 8, 1.5); c.fillStyle = 'rgba(3,39,34,0.25)'; c.fillRect(x + 4, y + h - 2.5, w - 8, 1.5);
-    } else {
-      c.fillStyle = GLASS; c.fill(face);
-      if (o.hover) { c.fillStyle = rgba(ACC, 0.16); c.fill(face); }
-      c.strokeStyle = ACC; c.lineWidth = 1.5; c.stroke(face);
+    if (o.focus) { c.strokeStyle = ACC; c.lineWidth = 2; c.strokeRect(x - 3, y - 3, w + 6, h + 6); }
+    if (o.down) c.translate(0, 1);
+    if (o.filled) { c.fillStyle = o.hover ? '#8FE2FA' : ACC; c.fillRect(x, y, w, h); }
+    else {
+      c.fillStyle = o.hover ? 'rgba(98,213,248,0.10)' : 'transparent'; c.fillRect(x, y, w, h);
+      c.strokeStyle = STOOD; c.lineWidth = 1; c.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
     }
-    c.font = CHIP_F; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = o.filled ? INK_DARK : TEXT;
+    c.font = o.filled ? CHIP_F : CHIP_F2; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = o.filled ? INK_DARK : TEXT;
     c.fillText(String(label ?? ''), x + w / 2, y + h / 2 + 0.5);
     c.restore();
   }
 
-  R.glass = { ACC, HOT, MID, DEEP, EDGE, GLASS, TEXT, DIM, CORAL, NOTE, MONO, rgba, stepped, steppedPath, chrome, textW, typed, wrapRows, ringPts, pen, chip, chipW, CHIP_H: 23 };
+  R.glass = { ACC, HOT, MID, DEEP, EDGE, GLASS, TEXT, DIM, CORAL, NOTE, AMBER, LINE, STOOD, MONO, SANS, rgba, chrome, textW, typed, wrapRows, ringPts, pen, chip, chipW, CHIP_H: 44 };
 })();

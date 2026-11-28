@@ -2224,6 +2224,19 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   the first spoken reply, which then waits). A wake from sleep doesn't wait. Measured: ready 7.6 to 7.9 s after start,
   the sidecar's start unchanged (0.47 s), the helper 654 to 683 MB. mlx-audio 0.6.5 can blend voices
   (`"bm_george,bm_lewis"`, an equal mean), not used: `kokoro_server.py` takes one voice name. Not built.
+- **2026-11-28, `look-orb` (feature 21, part a).** One look, the orb (`showcase/roamies/orb.js`, the owner's values;
+  `reference.orb` in settings.default.json): the working day as a dial with today's blocks and a now line, the
+  particle ring, and a centre whose shape gives the state (listening ring, thinking arc on a dotted ring, speaking
+  bars, waiting amber half ring and count, stood down grey ring and dash, pi's three still arcs). Still at rest; the
+  moving states painted at most 30 times a second; the dial redrawn every five minutes and at a block's start or end;
+  Reduce Motion holds each state still; only a centre spot takes clicks. Bubbles, cards, the ask field, the research
+  card and the setup guide in the instrument style with the system's fonts. Deleted: the five looks (`10-dither.js`,
+  `12-sidekick.js`, `jarvis.js`, `people.js`), the faces, acts and tool performances, the sounds (`sfx.js`, the
+  draw step `sfx`), the bundled fonts, the look and size pickers, the guide's chat, demo and tour. Settings:
+  `orb.size` (80 to 140, default 100) replaces the size in sidekick.json; `voices` is no longer read (a notice with
+  the line to add), `voice` defaults to Daniel. The page is told `orb`, `dial` and `pi`. Tests: `orb.test.mjs`,
+  `orb-rest.test.mjs` (replaces `looks-rest`), the page and run tests brought up to date. Not merged: waiting for his
+  review. Part (b), Mission Control, starts after it is reviewed and merged.
 
 ## 6. Still to test
 

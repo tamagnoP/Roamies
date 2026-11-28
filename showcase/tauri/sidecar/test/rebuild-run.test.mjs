@@ -43,10 +43,13 @@ const page = (from) => out.slice(from).filter((o) => o.m.type === 'ui').map((o) 
 const asked = (from) => out.slice(from).find((o) => o.m.type === 'rebuild_overlays');
 try {
   await sleep(3000);
-  // an ordinary start: the page is greeted
+  // an ordinary start: the page gets its settings (feature 21: the orb's size, the home, the working day, pi), and no
+  // greeting (the orb has no acts)
+  const KINDS = ['orb', 'home', 'dial', 'pi', 'greet', 'settle', 'sound', 'size', 'look'];
   let from = out.length;
   tell({ type: 'ui_ready' }); await sleep(1500);
-  assert.deepEqual(page(from).map((m) => m.kind).filter((k) => ['sound', 'size', 'home', 'look', 'greet', 'settle'].includes(k)), ['sound', 'size', 'home', 'look', 'greet'], 'an ordinary start is greeted');
+  assert.deepEqual(page(from).map((m) => m.kind).filter((k) => KINDS.includes(k)), ['orb', 'home', 'dial', 'pi'], 'an ordinary start gets the settings');
+  assert.equal(page(from).find((m) => m.kind === 'orb').size, 100);
 
   // the list shown, the page busy and then at rest again: a rebuild one quiet minute later, checked every 15 s
   tell({ type: 'show_list' }); await sleep(500);
@@ -63,11 +66,11 @@ try {
   const after = (ask.at - restAt) / 1000;
   assert.ok(after >= 59 && after <= 77, `one quiet minute, give or take a check (${after.toFixed(1)} s)`);
 
-  // the new page reports ready: its settings, then settle with the globe as it was, and no greeting
+  // the new page reports ready: its settings, then settle with the particles as they were
   from = out.length;
   tell({ type: 'ui_ready' }); await sleep(1500);
-  const sent = page(from).filter((m) => ['sound', 'size', 'home', 'look', 'greet', 'settle'].includes(m.kind));
-  assert.deepEqual(sent.map((m) => m.kind), ['sound', 'size', 'home', 'look', 'settle'], 'a rebuilt page is not greeted');
+  const sent = page(from).filter((m) => KINDS.includes(m.kind));
+  assert.deepEqual(sent.map((m) => m.kind), ['orb', 'home', 'dial', 'pi', 'settle'], 'a rebuilt page gets its settings, then settle');
   assert.equal(sent.at(-1).spin, 2.75);
   const log = logText();
   assert.match(log, / page_rebuild \{"quietMinutes":1\}\n/); assert.match(log, / page_rebuilt \{"ms":\d+\}\n/);

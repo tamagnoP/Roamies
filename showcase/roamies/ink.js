@@ -8,11 +8,12 @@
   if (!R || typeof document === 'undefined') return;
 
   // ---------------------------------------------------------------- look
-  const P = 4, MONO = '"Martian Mono", ui-monospace, monospace', DOTO = '"Doto", "Martian Mono", ui-monospace, monospace';
-  const ACC = '#78ffe2', HOT = '#e6fffa', MID = '#28c4b8', DEEP = '#0e5c60', EDGE = 'rgba(3,39,34,0.6)';
-  const GLASS = 'rgba(6,22,24,0.94)', TEXT = '#dcfff6', DIM = '#8ab8b0', INKDARK = '#032722';
-  const TONES = { accent: ACC, teal: '#78ffe2', amber: '#ffcf5c', coral: '#ff8a7a', lilac: '#b9a4ff', sky: '#7cc8ff', lime: '#b6f36b', red: '#ff6b6b', white: '#e8fffa' };
-  const LED = ['#051214', '#0e5c60', '#28c4b8', '#78ffe2', '#e6fffa'];
+  // Feature 21: the instrument style (glass.js): the system's own fonts, near-black, one ice blue, square corners.
+  const P = 4, MONO = 'ui-monospace, "SF Mono", Menlo, monospace', DOTO = '-apple-system, system-ui, "Segoe UI", sans-serif';
+  const ACC = '#62D5F8', HOT = '#F2F7FB', MID = '#3FA9CC', DEEP = '#1B4A5C', EDGE = 'rgba(6,9,15,0.7)';
+  const GLASS = 'rgba(6,9,15,0.97)', TEXT = '#F2F7FB', DIM = '#B4C2CE', INKDARK = '#04121C', LINE = '#39434C';
+  const TONES = { accent: ACC, teal: '#78ffe2', amber: '#F7C078', coral: '#ff8a7a', lilac: '#b9a4ff', sky: '#7cc8ff', lime: '#b6f36b', red: '#ff6b6b', white: '#F2F7FB' };
+  const LED = ['#06090F', '#1B4A5C', '#3FA9CC', '#62D5F8', '#F2F7FB'];
   const B4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const tone = (t) => TONES[t] || ACC;
   const now = () => performance.now() / 1000;
@@ -24,7 +25,6 @@
   const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const mixHex = (a, b, k) => '#' + hex(a).map((v, i) => Math.round(v + (hex(b)[i] - v) * k).toString(16).padStart(2, '0')).join('');
   const rgba = (h, a) => `rgba(${hex(h).join(',')},${a})`;
-  const sfx = (n) => R.sfx?.play(n);
   const reducedMQ = matchMedia('(prefers-reduced-motion: reduce)');
   const reduced = () => reducedMQ.matches;
   const sleep = (ms) => new Promise((r) => setTimeout(r, reduced() ? Math.min(ms, 60) : ms));
@@ -49,12 +49,8 @@
     r = clamp(r, 0, Math.min(w, h) / 2);
     return [...arc(x + w - r, y + r, r, r, -Math.PI / 2, 0, 10), ...arc(x + w - r, y + h - r, r, r, 0, Math.PI / 2, 10), ...arc(x + r, y + h - r, r, r, Math.PI / 2, Math.PI, 10), ...arc(x + r, y + r, r, r, Math.PI, Math.PI * 1.5, 10)];
   }
-  function stepped(x, y, w, h, c = 2 * P) {
-    const s = c / 2;
-    return [[x + c, y], [x + w - c, y], [x + w - c, y + s], [x + w - s, y + s], [x + w - s, y + c], [x + w, y + c], [x + w, y + h - c], [x + w - s, y + h - c], [x + w - s, y + h - s], [x + w - c, y + h - s], [x + w - c, y + h],
-      [x + c, y + h], [x + c, y + h - s], [x + s, y + h - s], [x + s, y + h - c], [x, y + h - c], [x, y + c], [x + s, y + c], [x + s, y + s], [x + c, y + s], [x + c, y]];
-  }
-  const steppedPath = (x, y, w, h, c) => { const p = new Path2D(); stepped(x, y, w, h, c).forEach((q, i) => (i ? p.lineTo(q[0], q[1]) : p.moveTo(q[0], q[1]))); return p; };
+  // A card's or a box's outline: square corners (feature 21).
+  const boxPath = (x, y, w, h) => { const p = new Path2D(); p.rect(x, y, w, h); return p; };
   function catmull(pts, closed) {
     const Q = closed ? [pts[pts.length - 1], ...pts, pts[0], pts[1]] : [pts[0], ...pts, pts[pts.length - 1]], out = [];
     for (let i = 1; i < Q.length - 2; i++) for (let k = 0; k < 10; k++) {
@@ -218,13 +214,22 @@
     base.save(); base.lineJoin = 'round'; base.lineWidth = 2.5; base.strokeStyle = EDGE; base.stroke(body); base.beginPath(); base.arc(pts[k][0], pts[k][1], ol.hw[k] + 1.2, 0, Math.PI * 2); base.fillStyle = EDGE; base.fill(); base.restore();
     lit.save(); lit.fillStyle = c; lit.fill(body); lit.beginPath(); lit.arc(pts[k][0], pts[k][1], ol.hw[k], 0, Math.PI * 2); lit.arc(pts[0][0], pts[0][1], ol.hw[0], 0, Math.PI * 2); lit.fill(); lit.restore();
   }
-  // Our chrome for cards and chips: stepped corners, dark glass, an accent edge, a glint along the top.
+  // Our chrome for cards and chips: near-black, a thin line, square corners, short marks at the corners in the accent.
   function chrome(c, x, y, w, h, o = {}) {
-    const path = steppedPath(x, y, w, h, o.corner ?? 2 * P), edge = o.edge || ACC;
+    const edge = o.edge || ACC, k = Math.min(14, w / 3, h / 3);
     c.save();
-    c.fillStyle = o.fill || GLASS; c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = 14; c.shadowOffsetY = 4; c.fill(path);
-    c.shadowColor = rgba(edge, 0.7); c.shadowBlur = 8; c.shadowOffsetY = 0; c.strokeStyle = edge; c.lineWidth = 1.5; c.globalAlpha *= 0.9; c.stroke(path);
-    c.globalAlpha *= 0.6; c.shadowBlur = 0; c.strokeStyle = '#ffffff'; c.lineWidth = 1; c.beginPath(); c.moveTo(x + 3 * P, y + 1.5); c.lineTo(x + Math.min(w * 0.45, 90), y + 1.5); c.stroke();
+    c.fillStyle = o.fill || GLASS; c.shadowColor = 'rgba(0,0,0,0.35)'; c.shadowBlur = 12; c.shadowOffsetY = 3; c.fillRect(x, y, w, h);
+    c.shadowColor = 'transparent'; c.shadowBlur = 0; c.shadowOffsetY = 0;
+    c.strokeStyle = LINE; c.lineWidth = 1; c.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
+    if (w > 20 && h > 16) {
+      const X = Math.round(x), Y = Math.round(y), R2 = Math.round(x + w), B = Math.round(y + h);
+      c.strokeStyle = edge; c.lineWidth = 2; c.beginPath();
+      c.moveTo(X + 1, Y + k); c.lineTo(X + 1, Y + 1); c.lineTo(X + k, Y + 1);
+      c.moveTo(R2 - k, Y + 1); c.lineTo(R2 - 1, Y + 1); c.lineTo(R2 - 1, Y + k);
+      c.moveTo(X + 1, B - k); c.lineTo(X + 1, B - 1); c.lineTo(X + k, B - 1);
+      c.moveTo(R2 - k, B - 1); c.lineTo(R2 - 1, B - 1); c.lineTo(R2 - 1, B - k);
+      c.stroke();
+    }
     c.restore();
   }
   // Words typing themselves in; the last couple land white.
@@ -308,8 +313,8 @@
     add({ z: 9, p: 1, box: [x - 50, y - 50, 100, 100], draw(b, l, t) { const u = (t - this.born) / (big ? 0.45 : 0.35); if (u >= 1) { this.alive = false; return; } const r = rr + u * (big ? 30 : 14); l.save(); l.globalAlpha *= 1 - u; l.strokeStyle = u < 0.3 ? HOT : ACC; l.lineWidth = 2; l.beginPath(); l.arc(x, y, r, 0, Math.PI * 2); l.stroke(); l.restore(); }, live: () => true });
   }
 
-  // ---------------------------------------------------------------- names: pixel tags on the calmest free spot
-  // A solid teal tag with a hard drop shadow; it lands in three pixel steps. Names, step numbers and buttons share it.
+  // ---------------------------------------------------------------- names: tags on the calmest free spot
+  // A solid tag in the accent, square-cornered; it lands in three small steps. Names, step numbers and buttons share it.
   const CHIP = (k = 1) => `700 ${11 * k}px ${MONO}`;
   const pillSize = (s) => [Math.round(textW(s, CHIP()) + 22), 23];
   function chip(b, x, y, w, h, str, age, o = {}) {
@@ -317,9 +322,7 @@
     const u = clamp(age / 0.2, 0, 1), drop = reduced() ? 0 : Math.round((1 - u) * 3) * 3;
     b.save(); b.translate(0, -drop);
     if (o.down) b.translate(0, 2);
-    b.fillStyle = mixHex(fill, '#000000', 0.62); b.fill(steppedPath(x, y + (o.down ? 1 : 3), w, h, P));
-    b.fillStyle = o.hover ? mixHex(fill, '#ffffff', 0.3) : fill; b.fill(steppedPath(x, y, w, h, P));
-    b.fillStyle = 'rgba(255,255,255,0.55)'; b.fillRect(x + P, y + 1, w - 2 * P, 1.5); b.fillStyle = 'rgba(3,39,34,0.25)'; b.fillRect(x + P, y + h - 2.5, w - 2 * P, 1.5);
+    b.fillStyle = o.hover ? mixHex(fill, '#ffffff', 0.3) : fill; b.fillRect(x, y, w, h);
     typed(b, str, cx, cy, CHIP(k), INKDARK, type, { anchor: 'middle', baseline: 'middle', land: false });
     b.restore();
   }
@@ -353,7 +356,6 @@
     if (!str) return null;
     const r = nameSpot(box, str), [tx, ty] = tipNow();
     if (Math.hypot(r[0] + r[2] - 8 - tx, r[1] + r[3] - 4 - ty) > 140) await fly(r[0] + r[2] - 8, r[1] + r[3] - 4);
-    sfx('pop');
     return pillMark(part, r, str, screen);
   }
   // A small report in our chrome near the cursor: copied, opening, handed off.
@@ -403,7 +405,7 @@
       const [x, y, w, h] = rectOf(m), pts = loop(x, y, w, h, { pad: 4, r: Math.min(12, m.at.r ?? shapeRadius(w, h)), over: rnd(0.02, 0.05) });
       const s = strokeMark(m.part, pts, tone(m.tone), { z: 1, fa: 0, marked: [x - 4, y - 4, w + 8, h + 8] });
       s.draw = function (b, l) { if (this.fa) { const path = new Path2D(); pts.forEach((q, i) => (i ? path.lineTo(q[0], q[1]) : path.moveTo(q[0], q[1]))); b.fillStyle = rgba(colorOf(this, this.color), 0.11 * this.fa); b.fill(path); } pen(b, l, this, pts, this.p, this.color); };
-      await drawStroke(s); sfx('scan'); await tween(0.2, (u) => (s.fa = u)); await name(m.part, s.marked, m.label);
+      await drawStroke(s); await tween(0.2, (u) => (s.fa = u)); await name(m.part, s.marked, m.label);
     },
     async underline(m) { const [x, y, w, h] = rectOf(m), s = strokeMark(m.part, handLine([x - 2, y + h + 3], [x + w + 2, y + h + 3 + rnd(-1.5, 1.5)], { bow: rnd(0.01, 0.035) }), tone(m.tone), { w: 3.2 }); await drawStroke(s); await name(m.part, [x, y, w, h + 4], m.label); await rest(x + w, y + h); },
     async strike(m) { const [x, y, w, h] = rectOf(m), s = strokeMark(m.part, handLine([x - 3, y + h / 2 + rnd(-1, 1)], [x + w + 3, y + h / 2 + rnd(-1.5, 1)]), tone(m.tone || 'coral'), { w: 3 }); await drawStroke(s); await name(m.part, [x, y, w, h], m.label); await rest(x + w, y + h / 2); },
@@ -422,11 +424,11 @@
     },
     async num(m, ctx) {
       const [x0, y0] = rectOf(m), x = x0 - 2, y = y0 - 2, n = m.n ?? ++ctx.num;
-      await tap(x, y); sfx('blip');
+      await tap(x, y);
       add({ z: 6, part: m.part, screen: true, p: 1, marked: [x - 12, y - 12, 24, 24], box: [x - 12, y - 14, 26, 28], draw(b, l, t) { chip(b, x - 11, y - 11, 22, 22, String(n), t - this.born, { color: this.color }); } });
       await rest(x, y);
     },
-    async label(m) { const box = rectOf(m), str = m.text || m.label, r = nameSpot(box, str); await fly(r[0] + r[2] - 8, r[1] + 19); sfx('pop'); pillMark(m.part, r, str); },
+    async label(m) { const box = rectOf(m), str = m.text || m.label, r = nameSpot(box, str); await fly(r[0] + r[2] - 8, r[1] + 19); pillMark(m.part, r, str); },
     async write(m) {
       const [x0, y0, w0, h0] = rectOf(m), str = m.text || m.label, S0 = scr(), size = clamp(Math.min(m.size ?? 30, ((S0[2] - S0[0] - 40) / Math.max(1, textW(str, `800 30px ${DOTO}`))) * 30), 12, 64), font = `800 ${size}px ${DOTO}`, w = textW(str, font);
       const x = clamp(x0, scr()[0], scr()[2] - w), y = y0 + h0 + size * 1.05;
@@ -453,8 +455,7 @@
           if (d < BAND && (d / BAND) * 16 * u < B4[(((gy % 4) + 4) % 4) * 4 + (((gx % 4) + 4) % 4)] + 0.5) continue;
           b.fillRect(gx * P, gy * P, P, P);
         }
-      } });
-      sfx('focus'); await fly(x + w * 0.85, y + h + 10); await name(m.part, [x, y, w, h], m.label);
+      } }); await fly(x + w * 0.85, y + h + 10); await name(m.part, [x, y, w, h], m.label);
     },
     async highlight(m) {
       const [x, y, w, h] = rectOf(m), band = handLine([x, y + h / 2], [x + w, y + h / 2 + rnd(-1.5, 1.5)], { jitter: 1 });
@@ -488,7 +489,7 @@
   function glyphSpot(m) { const r = nameSpot(rectOf(m), '', [26, 24]); return [r[0] + 13, r[1] + 12]; }
   function glyph(m, strokes, color) {
     const all = strokes.flat(), s = add({ z: 3, part: m.part, screen: true, pts: all, color, ps: strokes.map(() => 0), marked: boxOf(all), draw(b, l) { strokes.forEach((q, i) => pen(b, l, this, q, this.ps[i], this.color, { key: 's' + i, w: 3.4 })); } });
-    return (async () => { for (const [i, q] of strokes.entries()) await trace(q, 0.22, (e) => (s.ps[i] = e)); sfx('tick'); await name(m.part, s.marked, m.label); await rest(...all[all.length - 1]); })();
+    return (async () => { for (const [i, q] of strokes.entries()) await trace(q, 0.22, (e) => (s.ps[i] = e)); await name(m.part, s.marked, m.label); await rest(...all[all.length - 1]); })();
   }
   async function free(m, pts) { const s = strokeMark(m.part, pts, tone(m.tone)); s.marked = boxOf(pts); await drawStroke(s); await name(m.part, s.marked, m.label); }
   // A curved arrow, the head drawn as two quick strokes after the line.
@@ -510,9 +511,9 @@
   const ACTIONS_DRAW = {
     async type(m) {
       // The sidecar has already typed it into the field (act_in_app's path); this shows where and what.
-      const [x, y, w, h] = rectOf(m); await tap(x + Math.min(w * 0.3, 40), y + h / 2); sfx('focus');
+      const [x, y, w, h] = rectOf(m); await tap(x + Math.min(w * 0.3, 40), y + h / 2);
       const str = String(m.text), font = `400 12px ${MONO}`, n0 = now();
-      for (let i = 0; i < Math.min(str.length, 24); i++) { sfx('key'); await sleep(35 + Math.random() * 35); }
+      for (let i = 0; i < Math.min(str.length, 24); i++) { await sleep(35 + Math.random() * 35); }
       add({ z: 4, part: m.part, screen: true, p: 1, box: [x - 4, y - 30, w + 8, h + 34], live: (t) => t - n0 < 3, draw(b, l, t) {
         const age = t - n0; if (age > 3.2) return;
         if (Math.floor(age * 2) % 2 === 0) { l.fillStyle = this.color; l.fillRect(x + 8, y + 5, 2, h - 10); }
@@ -521,22 +522,21 @@
       } });
       await rest(x + w, y + h);
     },
-    async copy(m) { sfx('tick'); leaveAfter(toast('Copied to your clipboard', m.text), 1800); },
-    async open(m) { let h = m.url; try { h = new URL(m.url).hostname.replace(/^www\./, ''); } catch {} sfx('whoosh'); leaveAfter(toast(`Opening ${h}`, m.url, { spin: true }), 1800); },
-    async handoff(m) { sfx('toolstart'); leaveAfter(toast('Handed off', m.task || m.text || m.label || '', { spin: true }), 2200); },
+    async copy(m) { leaveAfter(toast('Copied to your clipboard', m.text), 1800); },
+    async open(m) { let h = m.url; try { h = new URL(m.url).hostname.replace(/^www\./, ''); } catch {} leaveAfter(toast(`Opening ${h}`, m.url, { spin: true }), 1800); },
+    async handoff(m) { leaveAfter(toast('Handed off', m.task || m.text || m.label || '', { spin: true }), 2200); },
     async button(m) {
       const k = 1.15, w = Math.round(textW(m.text, CHIP(k)) + 34), h = 32;
       const r = m.at ? nameSpot(rectOf(m), m.text, [w, h]) : place(w, h, m.part);
-      await tap(r[0] + w - 14, r[1] + h - 8); sfx('pop');
+      await tap(r[0] + w - 14, r[1] + h - 8);
       add({ z: 6, part: m.part, screen: !!m.at, kind: 'button', pill: r, box: [r[0] - 2, r[1] - 4, w + 4, h + 10], hover: false, down: 0, draw(b, l, t) { chip(b, r[0], r[1], w, h, m.text, t - this.born, { k, color: this.color, hover: this.hover, down: now() - this.down < 0.15 }); },
         hits() { return [{ rect: [r[0], r[1], w, h], kind: 'button', part: m.part }]; } });
     },
     async emote(m) {
-      const [x, y] = tipNow(); agent()?.act?.(m.name);
+      const [x, y] = tipNow();
       for (let k = 0; k < 9; k++) { const a = (k / 9) * Math.PI * 2 + rnd(-0.2, 0.2), r0 = rnd(30, 40), ln = rnd(10, 16), col = k % 3 ? ACC : tone('amber'); add({ z: 9, p: 1, box: [x - 90, y - 90, 180, 180], live: () => true, draw(b, l, t) { const u = (t - this.born) / 0.8; if (u > 1) { this.alive = false; return; } const r = r0 + u * 22; l.save(); l.globalAlpha *= 1 - u; l.strokeStyle = col; l.lineWidth = 3; l.lineCap = 'round'; l.beginPath(); l.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); l.lineTo(x + Math.cos(a) * (r + ln), y + Math.sin(a) * (r + ln)); l.stroke(); l.restore(); } }); }
-      sfx(m.name === 'hype' ? 'hype' : 'pop'); await sleep(900);
+      await sleep(900);
     },
-    async sfx(m) { sfx(m.name); },
   };
 
   // ---------------------------------------------------------------- cards and diagrams on calm space
@@ -616,7 +616,7 @@
         return [...more, ...out, { rect: [x, y, w, h], kind: 'card', part: m.part }];
       },
     });
-    await fly(x, y); sfx('expand');
+    await fly(x, y);
     await tween(0.45, (u) => { const e = ease(u); c.cw = w * e; c.ch = h * e; penApi()?.set?.(x + c.cw, y + c.ch); });
     c.p = 1; c.done = now(); touch(1.5); syncClearAll();
     if (m.tie?.rect) { const T = locRect(m.tie.rect), C = [x, y, w, h], tc = [T[0] + T[2] / 2, T[1] + T[3] / 2]; await arrow(m.part, edgeToward(T, [x + w / 2, y + h / 2], 6), edgeToward(C, tc, 6), { bend: -0.2, screen: false }); }
@@ -669,7 +669,6 @@
       const narrow = wrapRows(m.text, 210 - 28, `500 13px ${MONO}`), w = narrow.length > 12 ? 320 : 210;
       const rows = w === 210 ? narrow : wrapRows(m.text, w - 28, `500 13px ${MONO}`), h = 40 + rows.length * 19;
       await card(m, w, h, function (b, l, t, x, y, age) { b.fillStyle = colorOf(this, this.color); b.fillRect(x + 8, y + 8, w - 16, 3); wrapped(b, rows, x + 14, y + 32, 19, `500 13px ${MONO}`, TEXT, age / (0.3 + m.text.length * 0.025)); }, { bar: false, edge: true });
-      sfx('page');
     },
     async list(m) {
       const TITLE = `800 20px ${DOTO}`;
@@ -767,12 +766,11 @@
           if (q.p >= 1) { const px = Math.round(x + q.to[0]), py = Math.round(y + q.to[1]); b.fillStyle = INKDARK; b.fillRect(px - 4, py - 4, 8, 8); l.fillStyle = HOT; l.fillRect(px - 2, py - 2, 4, 4); }
         });
       }, { title: 'photo' });
-      sfx('scan');
       // Each name in the order given, once the picture is in: its line runs from the words to the part.
       if (named.length) {
         const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
         await sleep(700);
-        for (const q of named) { q.born = now(); await trace(q.line.map(([px, py]) => [px + x, py + y]), 0.3, (e) => (q.p = e)); sfx('blip'); }
+        for (const q of named) { q.born = now(); await trace(q.line.map(([px, py]) => [px + x, py + y]), 0.3, (e) => (q.p = e)); }
         touch(0.6);
       }
       return c;
@@ -845,7 +843,7 @@
       }, { title: m.title || 'timeline' });
       const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
       await trace(line.map(([px, py]) => [px + x, py + y]), 0.8, (e) => (lp = e));
-      for (let i = 0; i < ev.length; i++) { await tap(x + xs[i], y + ty); sfx('blip'); shown[i] = now(); touch(); await sleep(150); }
+      for (let i = 0; i < ev.length; i++) { await tap(x + xs[i], y + ty); shown[i] = now(); touch(); await sleep(150); }
     },
     molecule: (m) => drawMolecule(m),
     async model(m) {
@@ -857,7 +855,6 @@
         // Labels follow their parts as it turns; one that would land on another this frame waits its turn.
         if (u >= 1) { const took = []; for (const lab of f.labels) { const lx = x + 12 + lab.x, ly = y + 6 + lab.y, r = [lx - 2, ly - 14, textW(lab.text, `600 10px ${MONO}`) + 10, 16]; if (took.some((q) => overlap(q, r) > 0)) continue; took.push(r); b.fillStyle = ACC; b.fillRect(lx - 1.5, ly - 1.5, 3, 3); typed(b, lab.text, lx + 6, ly - 4, `600 10px ${MONO}`, TEXT, 1, { rim: 3 }); } }
       }, { title: m.title || m.label || 'model', live: () => !!view3d && !reduced() });
-      sfx('scan');
     },
     table: (m) => drawTable(m),
     bars: (m) => drawBars(m),
@@ -1014,7 +1011,7 @@
       if (fast && i % 3) { ps[i] = 1; const b = bondOf[i]; if (b) for (const v of [b.a, b.b]) if (labels[v] && born[v] == null) born[v] = now(); touch(); continue; }
       await trace(pts, fast ? 0.12 : 0.2, (e) => (ps[i] = e));
       const b = bondOf[i];
-      if (b) for (const v of [b.a, b.b]) if (labels[v] && born[v] == null) { born[v] = now(); sfx('blip'); }
+      if (b) for (const v of [b.a, b.b]) if (labels[v] && born[v] == null) { born[v] = now(); }
     }
     for (let i = 0; i < ps.length; i++) ps[i] = 1;
     labels.forEach((lab, i) => { if (lab && born[i] == null) born[i] = now(); });
@@ -1064,8 +1061,7 @@
         yy += rowH[ri];
         if (ri < rows.length - 1) { b.fillStyle = DEEP; b.fillRect(x + EDGE_X, yy - 1, w - 2 * EDGE_X, 1); }
       });
-    }, { title: m.title || 'table' });
-    sfx('page'); touch(0.6 + rows.length * 0.1);
+    }, { title: m.title || 'table' }); touch(0.6 + rows.length * 0.1);
   }
   // Whole numbers with thousands separators, a couple of decimals for small ones, M and B for the very big.
   const fmtValue = (v) => (Math.abs(v) >= 1e9 ? `${+(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e6 ? `${+(v / 1e6).toFixed(2)}M` : v.toLocaleString('en-US', { maximumFractionDigits: Math.abs(v) < 100 ? 2 : 1 }));
@@ -1092,8 +1088,7 @@
       });
     }, { title: m.title || 'bars' });
     const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4 + 26];
-    await trace(axis.map(([px, py]) => [px + x, py + y]), 0.4, (e) => (ax = e));
-    sfx('blip'); touch(1 + bars.length * 0.08);
+    await trace(axis.map(([px, py]) => [px + x, py + y]), 0.4, (e) => (ax = e)); touch(1 + bars.length * 0.08);
   }
 
   // ---------------------------------------------------------------- flow diagrams
@@ -1191,7 +1186,7 @@
     // A decision: pointed at both ends. A start or an end: rounder. A step: a plain box.
     if (nd.n.shape === 'diamond') { path = new Path2D(); [[x + 11, y], [x + w - 11, y], [x + w, y + h / 2], [x + w - 11, y + h], [x + 11, y + h], [x, y + h / 2]].forEach((q, i) => (i ? path.lineTo(q[0], q[1]) : path.moveTo(q[0], q[1]))); path.closePath(); }
     else if (nd.n.shape === 'round') { path = new Path2D(); roundRect(x, y, w, h, Math.min(h / 2, 15)).forEach((q, i) => (i ? path.lineTo(q[0], q[1]) : path.moveTo(q[0], q[1]))); path.closePath(); }
-    else path = steppedPath(x, y, w, h, P);
+    else path = boxPath(x, y, w, h);
     b.save(); b.globalAlpha *= u;
     b.fillStyle = rgba(ACC, 0.07); b.fill(path); b.strokeStyle = tone(nd.n.tone); b.lineWidth = 1.5; b.stroke(path);
     b.restore();
@@ -1224,7 +1219,7 @@
       show(q.from);
       const pts = q.pts.map(([px, py]) => [px + x, py + y]);
       if (fast && i % 2) ps[i] = 1;
-      else { penApi()?.set?.(pts[0][0], pts[0][1]); await trace(pts, fast ? 0.14 : clamp(q.len / 600, 0.2, 0.5), (e) => (ps[i] = e)); sfx('blip'); }
+      else { penApi()?.set?.(pts[0][0], pts[0][1]); await trace(pts, fast ? 0.14 : clamp(q.len / 600, 0.2, 0.5), (e) => (ps[i] = e)); }
       hs[i] = 1; born[i] = now(); show(q.to);
     }
     for (const nd of L.nodes) show(nd.id);
@@ -1368,7 +1363,7 @@
         await trace([[x0, yb], [x0 + ln.q.w, yb]], clamp(ln.q.w / 420, 0.3, 0.8), (e) => (ln.rev = e));
         ln.rev = 1;
       }
-      born[i] = now(); sfx('blip'); touch(0.6);
+      born[i] = now(); touch(0.6);
       if (i < steps.length - 1) await sleep(450);
     }
   }
@@ -1451,7 +1446,7 @@
     const see = (id) => { if (!seen.has(id)) { seen.set(id, now()); touch(0.4); } };
     for (const q of lines) { see(q.from); await trace(on(q.pts), clamp(len(q.pts) / 500, 0.25, 0.6), (e) => (q.p = e)); q.done = now(); see(q.to); }
     for (const q of rings) { see(q.at); await trace(on(q.pts), 0.7, (e) => (q.p = e)); q.done = now(); }
-    for (const q of angles) { await trace(on(q.pts), 0.25, (e) => (q.p = e)); q.done = now(); sfx('blip'); }
+    for (const q of angles) { await trace(on(q.pts), 0.25, (e) => (q.p = e)); q.done = now(); }
     for (const v of vs) see(v.id);
     touch(1);
   }
@@ -1538,10 +1533,9 @@
       b.strokeStyle = DEEP; b.lineWidth = 1; b.strokeRect(mx + 0.5, my + 0.5, mw - 1, mh - 1);
     }, { title: m.title || 'map' });
     if (!land) return;
-    const [x, y] = [markBox(c)[0] + 4 + X0, markBox(c)[1] + 4 + 26 + Y0], inMap = (p) => p[0] >= 0 && p[0] <= mw && p[1] >= 0 && p[1] <= mh;
-    sfx('scan'); await sleep(350);
+    const [x, y] = [markBox(c)[0] + 4 + X0, markBox(c)[1] + 4 + 26 + Y0], inMap = (p) => p[0] >= 0 && p[0] <= mw && p[1] >= 0 && p[1] <= mh; await sleep(350);
     for (const q of shaded) { if (inMap(q.c)) await tap(x + q.c[0], y + q.c[1]); q.born = now(); touch(0.5); await sleep(120); }
-    for (const p of pins) { if (inMap(p.at)) await tap(x + p.at[0], y + p.at[1]); p.born = now(); sfx('blip'); touch(0.4); await sleep(90); }
+    for (const p of pins) { if (inMap(p.at)) await tap(x + p.at[0], y + p.at[1]); p.born = now(); touch(0.4); await sleep(90); }
     for (const q of routes) await trace(q.pts.map(([px, py]) => [px + x, py + y]), clamp(len(q.pts) / 500, 0.3, 0.9), (e) => (q.p = e));
     touch(1);
   }
@@ -1590,7 +1584,7 @@
       pg.text.forEach((r, k) => typed(b, r, x + PAD, y + 36 + k * 18, QF, TEXT, (a - k * 0.15) / 0.4));
       pg.opts.forEach((rows, k) => {
         const oy = y + pg.tops[k], oh = rows.length * 16 + 14, r = [x + PAD, oy, w - 2 * PAD, oh], right = k === q.right, mine = picked === k, hot = !answered && this.hoverId === `o${k}`;
-        const shown = answered && (right || mine), path = steppedPath(r[0], r[1], r[2], r[3], P);
+        const shown = answered && (right || mine), path = boxPath(r[0], r[1], r[2], r[3]);
         b.save();
         if (answered && !shown) b.globalAlpha *= 0.6;
         b.fillStyle = rgba(ACC, hot ? 0.16 : 0.07); b.fill(path);
@@ -1611,18 +1605,17 @@
     c.more = () => hits.map((q) => ({ ...q, part: m.part }));
     c.keep = true;
     c.pick = (id) => {
-      if (S.done) { if (id === 'again') { picks.length = 0; marks.clear(); Object.assign(S, { i: 0, done: false, at: now() + 0.12, down: now() }); sfx('pip'); touch(1.5); } return; }
+      if (S.done) { if (id === 'again') { picks.length = 0; marks.clear(); Object.assign(S, { i: 0, done: false, at: now() + 0.12, down: now() }); touch(1.5); } return; }
       if (id !== 'next') {
         if (picks[S.i] != null) return;
-        picks[S.i] = +String(id).slice(1); S.answered = now(); sfx(picks[S.i] === qs[S.i].right ? 'done' : 'poof');
+        picks[S.i] = +String(id).slice(1); S.answered = now();
       } else if (picks[S.i] != null) {
-        S.down = now(); S.at = now() + 0.12; sfx('pip');
+        S.down = now(); S.at = now() + 0.12;
         if (S.i < qs.length - 1) S.i++;
-        else { S.done = true; if (score() === qs.length) sfx('hype'); R.ink.send?.({ type: 'quiz_done', part: m.part, picks: qs.map((_, i) => picks[i] ?? -1) }); }
+        else { S.done = true; R.ink.send?.({ type: 'quiz_done', part: m.part, picks: qs.map((_, i) => picks[i] ?? -1) }); }
       }
       touch(1.5);
     };
-    sfx('page');
   }
 
   // ---------------------------------------------------------------- the welcome tour: job tickets and a goal medal
@@ -1642,7 +1635,6 @@
     }, { bar: false, edge: true });
     c.more = () => (br ? [{ rect: br, kind: 'button', part: m.part }] : []);
     c.setHover = (v) => { hover = v; }; c.press = () => { down = now(); };
-    sfx('page');
   }
   async function drawMedal(m) {
     const w = 230, ring = loop(0, 0, 120, 120, { pad: 0, r: 60, over: 0.12 }), star = (() => { const pts = []; for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 16 : 36; pts.push([Math.cos(a) * r, Math.sin(a) * r]); } return handPath(pts, 0.6); })();
@@ -1662,26 +1654,23 @@
     c.color = tone('amber');
     const [x, y] = [markBox(c)[0] + 4, markBox(c)[1] + 4], cx = x + w / 2, cy = y + 86;
     await trace(ring.map(([px, py]) => [px + cx - 60, py + cy - 60]), 0.9, (e) => (rp = e));
-    await trace(star.map(([px, py]) => [px + cx, py + cy]), 0.8, (e) => (sp = e));
-    sfx('hype'); burst(cx, cy, true);
+    await trace(star.map(([px, py]) => [px + cx, py + cy]), 0.8, (e) => (sp = e)); burst(cx, cy, true);
   }
 
   // ---------------------------------------------------------------- edits on what's drawn (part ids p1, p2 …)
   const partMarks = (id) => marks.filter((m) => m.alive && m.part === id);
   const partBox = (ms) => ms.reduce((u, m) => union(u, markBox(m)), null);
   async function edit(e) {
-    if (e.do === 'clear') { sfx('dematerialize'); const live = marks.filter((m) => m.alive && (m.part || m.card) && !m.local); await tween(0.35, (u) => live.forEach((m) => (m.alpha = 1 - u))); live.forEach((m) => (m.alive = false)); return; }
+    if (e.do === 'clear') { const live = marks.filter((m) => m.alive && (m.part || m.card) && !m.local); await tween(0.35, (u) => live.forEach((m) => (m.alpha = 1 - u))); live.forEach((m) => (m.alive = false)); return; }
     const ms = partMarks(e.part);
     if (!ms.length) return;
     const box = partBox(ms);
-    if (e.do === 'recolor') { if (box) await tap(box[0] + box[2] * 0.5, box[1]); for (const m of ms) { m.color0 = colorOf(m, m.color); m.color = tone(e.tone); m.recolor = now(); } sfx('blip'); touch(0.6); await sleep(550); for (const m of ms) m.recolor = null; }
+    if (e.do === 'recolor') { if (box) await tap(box[0] + box[2] * 0.5, box[1]); for (const m of ms) { m.color0 = colorOf(m, m.color); m.color = tone(e.tone); m.recolor = now(); } touch(0.6); await sleep(550); for (const m of ms) m.recolor = null; }
     else if (e.do === 'move') {
       const dx = e.dx ?? 0, dy = e.dy ?? 0, start = ms.map((m) => [m.dx, m.dy]);
       if (box) await fly(box[0] + box[2] / 2, box[1] + box[3] / 2);
-      sfx('whoosh');
       await tween(0.6, (u) => { const k = ease(u); ms.forEach((m, i) => { m.dx = start[i][0] + dx * k; m.dy = start[i][1] + dy * k; }); if (box) penApi()?.set?.(box[0] + box[2] / 2 + dx * k, box[1] + box[3] / 2 + dy * k); });
     } else if (e.do === 'erase') {
-      sfx('dematerialize');
       // Strokes are taken back the way they were drawn (backwards); everything else fades.
       for (const m of [...ms].reverse()) {
         if (m.pts && m.p > 0) { const pts = m.pts, p0 = m.p; await fly(...at(pts, p0)); await tween(0.45, (u) => { m.p = p0 * (1 - u); }); }
@@ -1710,14 +1699,12 @@
   function clearDrawing() {
     stop();
     R.ink.send?.({ type: 'ink_cleared' });
-    sfx('dematerialize');
     fadeOut(marks.filter((m) => m.alive && !m.local));
   }
   function clearEverything() {
     stop();
     for (const id of new Set(marks.filter((m) => m.alive && m.part && !m.local).map((m) => m.part))) R.ink.send?.({ type: 'ink_closed', part: id });
     R.ink.send?.({ type: 'ink_cleared' });
-    sfx('dematerialize');
     fadeOut(marks.filter((m) => m.alive));
   }
 
@@ -1742,7 +1729,7 @@
 
   // ---------------------------------------------------------------- the player
   const G = { gen: 0, q: [], playing: false, held: false, wait: null, ptr: null, idle: [] };
-  const PEN_FREE = new Set(['sfx', 'copy', 'open', 'handoff']);
+  const PEN_FREE = new Set(['copy', 'open', 'handoff']);
   const onScreen = (r) => !!r && r[0] + r[2] > 0 && r[1] + r[3] > 0 && r[0] < W && r[1] < H;
   async function runMark(m, ctx) {
     const f = SCREEN_MARKS[m.kind] ?? ACTIONS_DRAW[m.kind] ?? CARDS_DRAW[m.kind];
@@ -1786,7 +1773,6 @@
     R.ink.send?.({ type: 'draw_wait_done', id: e.id, beat: b.n, result });
     // That step is done: its screen marks go (the screen has changed under them), and the sidecar forgets them.
     if (result === 'clicked' || result === 'hovered') {
-      sfx('done');
       const gone = marks.filter((m) => m.alive && m.screen && b.marks.some((q) => q.part && q.part === m.part));
       for (const id of new Set(gone.map((m) => m.part))) R.ink.send?.({ type: 'ink_closed', part: id });
       fadeOut(gone, 0.3);
@@ -1967,7 +1953,6 @@
       },
     });
     Object.assign(c, remLayout(x, y));
-    sfx('page');
     clearInterval(REM.timer);
     // Stays while the pointer rests on it (or it's being dragged), then fades.
     REM.timer = setInterval(() => {
@@ -1982,21 +1967,19 @@
     if (REM.flashAt === -1) REM.flashAt = (REM.shown.get(REM.flash) ?? c.opened) + 0.3;
     touch(2 + c.rows.length * 0.08); syncClearAll();
   }
-  function remClose(sound) { if (!remOpen()) return; clearInterval(REM.timer); if (sound) sfx('poof'); REM.until = 0; fadeOut([REM.m]); }
+  function remClose(sound) { if (!remOpen()) return; clearInterval(REM.timer); REM.until = 0; fadeOut([REM.m]); }
   function reminders(msg = {}) {
     const today = msg.today ?? [], later = msg.later ?? [], all = [...today, ...later], t = now();
     const before = new Map([...REM.data.today, ...REM.data.later].map((i) => [i.id, i]));
     REM.data = { today, later };
-    let fresh = false;
     for (const i of all) {
       const was = before.get(i.id);
-      if (REM.known && !was) { fresh = true; REM.shown.set(i.id, t); }
-      if (was && was.done !== i.done) { if (i.done) { REM.ticked.set(i.id, t); sfx('done'); } else REM.ticked.delete(i.id); }
+      if (REM.known && !was) REM.shown.set(i.id, t);
+      if (was && was.done !== i.done) { if (i.done) { REM.ticked.set(i.id, t); } else REM.ticked.delete(i.id); }
     }
     const ids = new Set(all.map((i) => i.id));
     for (const map of [REM.shown, REM.ticked, REM.rings, REM.checks]) for (const id of [...map.keys()]) if (!ids.has(id)) map.delete(id);
     for (const key of [...REM.strikes.keys()]) if (!ids.has(key.split(':')[0])) REM.strikes.delete(key);
-    if (fresh && remOpen()) sfx('scribble');
     REM.known = true;
     // Not open yet: it pulses once its row has come in.
     if (msg.flash != null) { REM.flash = String(msg.flash); REM.flashAt = remOpen() ? t : -1; }
@@ -2065,7 +2048,6 @@
           { rect: [cx + FOUND_W - 28, cy + 2, 26, 22], kind: 'close', part: FOUND_PART }, { rect: [cx, cy, FOUND_W - 30, 26], kind: 'drag', part: FOUND_PART }, { rect: [cx, cy, FOUND_W, this.h], kind: 'card', part: FOUND_PART }];
       },
     });
-    sfx('page');
     await tween(0.35, (u) => { const e = ease(u); c.cw = FOUND_W * e; c.ch = c.h * e; });
     c.ready = true; c.opened = now();
     touch(2 + c.rows.length * 0.08); syncClearAll();
@@ -2097,11 +2079,11 @@
     const h = hitAt(e.clientX, e.clientY);
     if (!h) return;
     e.stopPropagation(); e.preventDefault();
-    if (h.kind === 'close') { sfx('tick'); if (!h.m.local) R.ink.send?.({ type: 'ink_closed', part: h.part }); if (h.part === FOUND_PART) R.ink.send?.({ type: 'found_closed', id: FOUND.id }); fadeOut(partMarks(h.part)); }
-    else if (h.kind === 'found') { sfx('pip'); touch(0.3); R.ink.send?.({ type: 'found_pick', id: FOUND.id, n: h.n }); }
-    else if (h.kind === 'tick') { sfx(h.done ? 'tick' : 'pip'); REM.until = Math.max(REM.until, now() + 4); R.ink.send?.({ type: 'list_toggle', id: h.id }); }
-    else if (h.kind === 'button') { h.m.down = now(); h.m.press?.(); sfx('pip'); touch(0.3); R.ink.send?.({ type: 'ink_action', part: h.part }); }
-    else if (h.kind === 'link') { sfx('pip'); R.ink.send?.({ type: 'open_link', url: h.url }); }
+    if (h.kind === 'close') { if (!h.m.local) R.ink.send?.({ type: 'ink_closed', part: h.part }); if (h.part === FOUND_PART) R.ink.send?.({ type: 'found_closed', id: FOUND.id }); fadeOut(partMarks(h.part)); }
+    else if (h.kind === 'found') { touch(0.3); R.ink.send?.({ type: 'found_pick', id: FOUND.id, n: h.n }); }
+    else if (h.kind === 'tick') { REM.until = Math.max(REM.until, now() + 4); R.ink.send?.({ type: 'list_toggle', id: h.id }); }
+    else if (h.kind === 'button') { h.m.down = now(); h.m.press?.(); touch(0.3); R.ink.send?.({ type: 'ink_action', part: h.part }); }
+    else if (h.kind === 'link') { R.ink.send?.({ type: 'open_link', url: h.url }); }
     else if (h.kind === 'pick') { h.m.pick?.(h.id); touch(1); }
     else if (h.kind === 'clearall') clearEverything();
     // A click on a card's body: they're after what's under it, so the drawing goes, as it does when another window
@@ -2109,7 +2091,7 @@
     // and not the reminders card or a drawing that goes by itself, which still move by the body.
     else if (h.kind === 'card' && h.m.keep) return;
     else if (h.kind === 'card' && !h.m.local && !drawnBy.has(h.part)) clearDrawing();
-    else if (h.kind === 'drag' || h.kind === 'card') { drag = { part: h.part, x: e.clientX, y: e.clientY, ms: partMarks(h.part), start: partMarks(h.part).map((m) => [m.dx, m.dy]) }; sfx('grab'); touch(); }
+    else if (h.kind === 'drag' || h.kind === 'card') { drag = { part: h.part, x: e.clientX, y: e.clientY, ms: partMarks(h.part), start: partMarks(h.part).map((m) => [m.dx, m.dy]) }; touch(); }
   }, true);
   addEventListener('pointermove', (e) => {
     if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.ms.forEach((m, i) => { m.dx = drag.start[i][0] + dx; m.dy = drag.start[i][1] + dy; }); touch(0.2); return; }

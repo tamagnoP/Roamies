@@ -24,6 +24,7 @@ checks, fixed since. Everything else is below.
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Settings that can't be used | 1 to 12 | new, 2026-11-28 (the fault on your Mac; 12 added at 12:06) |
 | The natural voice at start | 1 to 3 | new, 2026-11-28 |
+| Feature 21 (a): the orb and the bubbles | 1 to 14 | new; how it looks is yours to judge |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -533,7 +534,44 @@ cp ~/Documents/roamies-pi/settings.json ~/Documents/roamies-pi/settings.backup.j
 
 ## Group 3: features 19 and 21
 
-Not on `next` yet.
+### Feature 21, part (a): the orb, its states, the bubbles and cards
+
+**Before.** Build from `next`. Keep `artboards` open beside it: `~/Documents/roamies-reports/roamies-design/project/`
+(`OrbStates`, `InstrumentSend`, `InstrumentQuestion`) and `orb/index.html`. Checks 1 to 8, 11 and 13 are about how it
+looks: no test can judge them.
+
+1. **At rest, from across the room**, on a dark window, then on the desktop, then on a white page.
+   You should see: the orb on its dark disc, the same over all three; the dial with today's blocks; completely
+   still. In Activity Monitor, Roamies' overlay page uses no CPU after a few seconds.
+2. **Listening:** hold the talk keys and say something.
+   You should see: a bright open ring, the particles rippling with your voice; still again after the reply.
+3. **Thinking:** type a request that needs a tool ("What's on my list?").
+   You should see: one arc travelling round a dotted ring in the centre while it works; it moves smoothly, not jerky.
+4. **Speaking:** with spoken replies on, ask something with a longer answer.
+   You should see: five bars in the centre following the voice, flat in its pauses.
+5. **Waiting on you:** stand down for a minute while a reminder comes, then speak.
+   You should see, while something waits in the quiet queue: an amber half ring and its count in the centre.
+6. **Stood down** (your phrase or shortcut).
+   You should see: one dim grey ring with a flat dash, nothing else; readable as "off" from across the room.
+7. **Pi working:** send a read-only task to pi.
+   You should see: three short arcs that don't move while pi works; gone when it reports back.
+8. **The dial:** check it against your day (`calendar.dayStart` to `calendar.dayEnd`).
+   You should see: your blocks where their times are round the face, from the start of the day at the top; the line
+   for now at the right place; it moves on every five minutes.
+9. **Size:** set `"orb": { "size": 140 }` in settings.json, then 80, then take it out.
+   You should see, from your next request: the orb larger, then smaller, then 100. Its home corner keeps the same
+   margin in orb widths.
+10. **Clicks:** click the orb's edge, then its centre.
+    You should see: a click on the edge reaches the window underneath; the centre can be dragged.
+11. **The Send bubble and a yes/no question** against `InstrumentSend` and `InstrumentQuestion`.
+    You should see: near-black, thin line, square corners with short blue corner marks, the buttons 44 points high,
+    Send filled in blue; the text in the system fonts. (The label row with the countdown ticks, the tags and the
+    prompt block of the artboard are not built: see the report.)
+12. **No sounds:** a reply, a drawing, a list, the setup guide.
+    You should hear: nothing from the page (the voice helper's own listening chime still plays if Sound is on).
+13. **Cards and the research card** (a list, the day, found files, a web answer): the same style as the bubbles.
+14. **The setup guide** (the panel's "Setup guide" link): Welcome, Permissions, Connect AI, Replies, Shortcuts, Find me; the orb
+    beside it; no look or size picker, no chat, no drawing demo; and no tour on the desktop after Done.
 
 ## Group 4: features 17, 28, 15, 20 and 27
 

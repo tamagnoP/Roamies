@@ -35,15 +35,15 @@ import { downloadModel, isReady, modelDir, sizeLabel, totalBytes } from './voice
 import { createTools, expand, fitImage, frontLine, handsWithInput, imageBlock, run as runHelper, winOpen } from './tools.mjs'; // Local-only build: frontLine and run, for whereFront
 import { describeMarks } from './marks.mjs';
 import { faviconFor } from './draw.mjs';
-import { QUESTIONS, openNote, answerTurn, wantsSkip, endsChat, splitTurn, plain, stripNote, tourBeats, goalFrom, showcaseBeats } from './intro.mjs';
+import { stripNote } from './intro.mjs'; // feature 21: the guide's chat, tour and showcase went; what notes the model may add is still taken out
 import { SpeechText, CueFilter, VOICE_CUES, endsWithQuestion } from './speech.mjs';
 import { createSpeaker } from './speaker.mjs';
-import { DEFAULT_VOICE, FISH_CHOICES } from './fish.mjs';
+import { FISH_CHOICES } from './fish.mjs';
 import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, settingsFolder, settingsPath, settingsProblem, voiceFor } from './pi.mjs';
+import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, settingsFolder, settingsPath, settingsProblem, macVoice } from './pi.mjs';
 import { READABLE_AGAIN, isSettingsProblem } from './settingsproblem.mjs'; // the owner, 2026-11-28: settings.json that can't be used
 import { OUT_TOKENS, codeLines, compose, digestText, updatePrompt } from './piwatch.mjs'; // Local-only build (feature 41)
 import { SHORT, leanTools } from './lean.mjs';
@@ -76,9 +76,7 @@ console.log = console.info = (...a) => console.error(...a);
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 // While the setup guide is open, Sidekick talks through it instead of the desktop overlay.
 let onboarding = false;
-let intro = null; // the get-to-know-you chat, while it's on
-// The get-to-know-you chat runs in the guide window: its replies and voice go there, not to the desktop.
-// A reply's voice keeps going where it started, even after the chat ends mid-sentence; "stop" goes to both.
+// A line said while the setup guide is open (spoken replies switched on there) is heard in the guide; "stop" goes to both.
 const guideVoices = new Set();
 // Local-only build (feature 22): while an answer window is open the microphone is on, so nothing is played: speech
 // is held here and goes out when the window closes. If a key press took the window over, what was held is dropped
@@ -92,7 +90,7 @@ function releaseSpeech(drop) {
 // Local-only build (feature 24, fix 6): the overlay page's rebuild after a quiet stretch (rebuild.mjs), made below.
 // What is sent to the page counts as something shown or spoken, except its settings.
 let pageRebuild = null;
-const PAGE_SETTINGS = new Set(['sound', 'size', 'home', 'look', 'greet', 'settle', 'stand', 'queue']);
+const PAGE_SETTINGS = new Set(['orb', 'home', 'settle', 'stand', 'queue', 'dial', 'pi']); // feature 21: the orb's size, the working day and pi working
 // Local-only build (feature 33): stand down (standdown.mjs), made once the activity log is (logLine). While it lasts,
 // what is on its way to the page unasked stops here, whatever sent it: a line for a bubble is kept in the quiet queue
 // (feature 31, kind "caught") to be shown when it ends, speech is dropped (what waits for it to finish is answered, so
@@ -116,7 +114,6 @@ const ui = (msg) => {
     if (msg.stop) { send({ type: 'onboard', msg }); return send({ type: 'ui', msg }); }
     if (guideVoices.has(msg.id)) { if (msg.end) guideVoices.delete(msg.id); return send({ type: 'onboard', msg }); }
   }
-  if (intro && msg.kind === 'agent') return send({ type: 'onboard', msg: { kind: 'chat', e: msg.e } });
   if (!PAGE_SETTINGS.has(msg.kind)) pageRebuild?.shown();
   send({ type: 'ui', msg });
 };
@@ -156,7 +153,7 @@ const DEFAULT_KEYS = process.platform === 'win32'
   : { talk: ['control', 'option'], summon: 'Control+Alt+KeyS', snap: 'Control+Alt+KeyA', list: 'Control+Alt+KeyL' };
 const DEFAULTS = {
   provider: null, model: null, sound: true, allowActions: false, voice: true,
-  onboarded: false, onboardStep: 0, filesAsked: false, keys: DEFAULT_KEYS, muteWhileTalking: true, autoListen: false, setupVersion: 0, size: 'default', look: 'classic', introDone: false,
+  onboarded: false, onboardStep: 0, filesAsked: false, keys: DEFAULT_KEYS, muteWhileTalking: true, autoListen: false, setupVersion: 0,
   replies: 'text', // 'voice': spoken with Fish Audio as well as shown
   fishModel: FISH_CHOICES[0].id, // Drama 3 (most expressive) or S2.1 Pro (natural pace, cheaper)
 };
@@ -167,24 +164,11 @@ const SESSION = LINUX ? linuxSession() : '';
 const WAYLAND = SESSION === 'wayland';
 const POINTER_OK = seesPointer(process.platform, SESSION);
 const HOTKEYS_OK = hasHotkeys(process.platform, SESSION);
-// Cursor size follows the pointer, which a Wayland session can't see over other apps.
-const SIZES = [['default', 'Default'], ['small', 'Small'], ...(POINTER_OK ? [['cursor', 'Cursor']] : [])];
-const sizeNow = () => (SIZES.some(([s]) => s === config.size) ? config.size : 'default');
-// What the sidekick looks like: the goo blob, JARVIS (a globe of light with a HUD reticle at cursor size) or
-// one of three characters, each with its own Fish Audio voice. Roamie's used to be JARVIS's, saved in every
-// config as fishVoice, so the voice comes from the look and that setting is no longer read.
-const LOOKS = [
-  ['classic', 'Roamie', DEFAULT_VOICE],
-  ['jarvis', 'JARVIS', 'e13fa398a7f445a685316a3de6089ce7'],
-  ['anime', 'Anime Girl', 'd8f3b4c1199f4568a767ec54112d2b17'],
-  ['sarah', 'Sarah', '933563129e564b19a115bedd57b7406a'],
-  ['adrian', 'Adrian', 'bf322df2096a46f18c579d0baa36f41d'],
-];
-// Local-only build: each look's Mac voice is in ~/Documents/roamies-pi/settings.json ("voices", else "voice"); '' is the system voice.
-const lookVoice = () => voiceFor(config.look ?? 'classic', HOME);
-// Its name is its look's: Roamie, JARVIS, Anime Girl, Sarah or Adrian. Roamies is the app.
-const lookName = () => (LOOKS.find(([id]) => id === config.look) ?? LOOKS[0])[1];
-const LOOK_BODY = { classic: 'a tiny glowing pixel creature', jarvis: 'a glowing sphere of light', anime: 'a pixel anime girl', sarah: 'a pixel woman', adrian: 'a pixel man' };
+// Feature 21: one look, the orb (showcase/roamies/orb.js). Its name is the persona's (Jarvis by default); its size on
+// screen is orb.size in settings.json; its voice, when the natural one isn't used, is "voice" in settings.json.
+const lookName = () => personaNow().name || 'Roamies';
+const voiceNow = () => macVoice(HOME);
+const orbSize = () => { try { return loadSettings(HOME).orb.size; } catch { return settingsDefaults(HOME).orb.size; } };
 const VOICE_OK = hasVoice(process.platform);
 // Windows and Linux have no on-device speech API apps can use, so voice there runs Parakeet on the PC. Its model
 // is downloaded once: from the setup guide, or the first time voice is used.
@@ -303,7 +287,7 @@ const speech = createSpeaker({
     say('My voice isn\'t working right now, so replies are text for now.', 'concerned');
   },
 });
-speech.setVoice(lookVoice());
+speech.setVoice(voiceNow());
 speech.setModel(config.fishModel);
 // Read once, and again later if the keychain couldn't be read yet (locked at login, or its prompt unanswered): before,
 // one failed read left spoken replies off until the app restarted.
@@ -438,7 +422,7 @@ function voiceLine(text, mark = false, asIs = false) {
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
   if (turnVoice && !turnVoice.done) { for (const p of parts) turnVoice.say(p); return mark ? turnVoice.mark() : null; }
   lineUntil = Date.now() + 1500 + String(text).length * 75; // roughly how long it takes to say: sync lines wait for it (calQuiet)
-  speech.setVoice(lookVoice());
+  speech.setVoice(voiceNow());
   const v = speech.start();
   for (const p of parts) v.say(p);
   const name = mark ? v.mark() : null;
@@ -492,7 +476,7 @@ const pi = createPi({
     });
   },
   log: (kind, data) => { logLine(kind, data); if (kind === 'pi_start') ledger.record({ kind: 'pi', where: 'provider' }); }, // feature 32: each hand-off; pi's own requests are not counted
-  onChange: () => menu(),
+  onChange: () => { menu(); piMark(); },
 });
 // Local-only build: at start-up settings.default.json is written beside the owner's settings.json (every setting with
 // its default, and what stays in code), and what settings.json lacks or has wrong is said once, in a bubble. The
@@ -714,7 +698,7 @@ const flow = createFlow({
   speak: (text) => lineDone(text),
   // closing: the reply to "thanks" carries the form of address whatever the clock says
   announce: (text, { closing = false } = {}) => { addressClock.allow(closing); try { say(text, 'happy'); return lineDone(forVoice(text)); } finally { addressClock.allow(false); } },
-  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !intro && !onboarding && !stood?.on()) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); } }, // feature 24: the natural voice wakes for the answer
+  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !onboarding && !stood?.on()) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); } }, // feature 24: the natural voice wakes for the answer
   cancel: () => send({ type: 'listen_cancel' }),
   bubbles: () => [pi, answers],
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),
@@ -732,7 +716,7 @@ for (const [kind, run] of Object.entries({ ...pi.resume, ...cal.resume })) flow.
 // The setting is read at each check.
 pageRebuild = createPageRebuild({
   minutes: () => limitsFor(HOME).pageRebuildQuietMinutes,
-  quiet: () => calQuietBase() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window() && !intro && !showcase,
+  quiet: () => calQuietBase() && !pi.bubble() && !answers.open() && !micWindow && !heldSpeech.length && !turnVoice && !cal.hasHeld() && !flow.open() && !flow.window(),
   rebuild: ({ measure }) => send({ type: 'rebuild_overlays', measure }),
   measure: () => loadSettings(HOME).measurePageRebuild,
   log: (kind, data) => logLine(kind, data),
@@ -781,8 +765,6 @@ function standDownNow(by) {
   for (const [id, resolve] of [...pending]) { pending.delete(id); ui({ kind: 'cancel_ask', id }); resolve(null); }
   if (barAsk) { barAsk.abort(); barAsk = null; }
   interruptQuietly();
-  if (intro) endIntro();
-  stopShowcase();
   if (pi.busy()) { piStood = true; pi.stop(); }
   speech.stop();
   ink.clear();
@@ -1064,7 +1046,7 @@ Before anything slow (reading a file, looking at the screen, acting in an app, r
 `;
 // Local-only build (feature 21a): who is speaking, and how, comes from the persona (persona.mjs), not from the look.
 const stablePrompt = () => `${opening(personaNow(), userName)} You live in Roamies, a desktop app by Ken Kai (Mac, Windows and Linux) that puts little companions on your screen; this is Roamies ${VERSION}. ${nameRule(personaNow())}
-About Roamies, for when ${userName} asks about you or the app: ${MAC ? 'it lives in the menu bar at the top of the screen (no Dock icon)' : LINUX ? 'it lives in the system tray (no window of its own); GNOME shows tray icons only with the AppIndicator extension, and opening Roamies again from the app list opens the panel, tray or not' : 'it lives in the system tray at the bottom right of the taskbar (no taskbar button); Windows may tuck the icon behind the ^ arrow next to the clock, and dragging it onto the taskbar keeps it in view'}. ${LINUX ? 'Clicking the tray icon shows a short menu (Open Panel,' : `Clicking the ${MAC ? 'menu bar' : 'tray'} icon opens the Roamies panel; right-clicking it shows a short menu (Open Panel,`} Show ${lookName()}, Ask ${lookName()}…, ${SNAP_OK ? 'Ask About an Area…, ' : ''}Stop, Quit Roamies). The panel has a header (your name, the Roamies version with one update button beside it: Check for Updates, which becomes Update to <version> when one is out and installs it and restarts in one go; By Ken Kai under the name; and Quit at the top right, which asks to confirm) and a sidebar of pages; long lists show a page at a time, with arrows in the page's footer. Home: a list of what you did recently (questions, files read, searches, reminders), today's usage, and buttons for Ask, Show List (reminders and commitments on screen: Today and Later; tick them off there; finished ones clear at midnight)${SNAP_OK ? ', Ask About an Area' : ''}, Stop and New Conversation. Memory: two tabs, What I Remember (everything you remember about them, each with Forget, a search once there's more than a page, and Forget Everything in the footer) and Commitments (their open commitments, Done or Drop), with Get to Know Me at the end of the tab row (a four-question chat so you learn who they are and what they're going for). Then the settings pages: Model (pick the AI provider and model, and sign in to providers), Appearance (Look: ${LOOKS.map(([, label]) => label).join(', ').replace(/, ([^,]*)$/, ' or $1')}, each with its own voice; Size: Default, Small${POINTER_OK ? ' or Cursor, a little arrow pointer' : ''}), Voice (Replies: Text Only, or Voice and Text, which speaks replies out loud with Fish Audio and needs their own Fish Audio API key, added right there; Voice Model: Drama 3, the most expressive (acts out feelings, slower, pricier) or S2.1 Pro (a natural, quicker pace with less emotion, cheaper), billed to their own Fish Audio account${VOICE_OK ? `; Voice Control, ${HOTKEYS_OK ? 'hold the talk keys to talk' : 'press the talk shortcut to talk'}` : ''}), Behavior (Sound Effects, Allow File Edits & Commands, ${VOICE_OK ? 'Auto-listen (open the mic when you end on a question), ' : ''}Open at Login), and About (who made Roamies with links, Setup Guide, Show Logs, Save Diagnostics). Updates are signature-checked${LINUX ? '; they install by themselves when Roamies runs as an AppImage; installed from a .deb or .rpm, the update button opens the download page instead' : ''}. When something isn't working (the microphone, voice, the panel, a crash, an error), tell them to use Save Diagnostics (in About, or the tray icon's menu): it saves one .log file in Downloads with the logs, system and microphone details, keys and personal details removed, for them to attach to a GitHub issue at github.com/KenKaiii/Roamies/issues or send to Ken. Sign-in is shared with GG Coder. Downloads and source: github.com/KenKaiii/Roamies. Don't invent features or settings that aren't listed here.
+About Roamies, for when ${userName} asks about you or the app: ${MAC ? 'it lives in the menu bar at the top of the screen (no Dock icon)' : LINUX ? 'it lives in the system tray (no window of its own); GNOME shows tray icons only with the AppIndicator extension, and opening Roamies again from the app list opens the panel, tray or not' : 'it lives in the system tray at the bottom right of the taskbar (no taskbar button); Windows may tuck the icon behind the ^ arrow next to the clock, and dragging it onto the taskbar keeps it in view'}. ${LINUX ? 'Clicking the tray icon shows a short menu (Open Panel,' : `Clicking the ${MAC ? 'menu bar' : 'tray'} icon opens the Roamies panel; right-clicking it shows a short menu (Open Panel,`} Show ${lookName()}, Ask ${lookName()}…, ${SNAP_OK ? 'Ask About an Area…, ' : ''}Stop, Quit Roamies). The panel has a header (your name, the Roamies version with one update button beside it: Check for Updates, which becomes Update to <version> when one is out and installs it and restarts in one go; By Ken Kai under the name; and Quit at the top right, which asks to confirm) and a sidebar of pages; long lists show a page at a time, with arrows in the page's footer. Home: a list of what you did recently (questions, files read, searches, reminders), today's usage, and buttons for Ask, Show List (reminders and commitments on screen: Today and Later; tick them off there; finished ones clear at midnight)${SNAP_OK ? ', Ask About an Area' : ''}, Stop and New Conversation. Memory: two tabs, What I Remember (everything you remember about them, each with Forget, a search once there's more than a page, and Forget Everything in the footer) and Commitments (their open commitments, Done or Drop). Then the settings pages: Model (pick the AI provider and model, and sign in to providers), Voice (Replies: Text Only, or Voice and Text, which speaks replies out loud with Fish Audio and needs their own Fish Audio API key, added right there; Voice Model: Drama 3, the most expressive (acts out feelings, slower, pricier) or S2.1 Pro (a natural, quicker pace with less emotion, cheaper), billed to their own Fish Audio account${VOICE_OK ? `; Voice Control, ${HOTKEYS_OK ? 'hold the talk keys to talk' : 'press the talk shortcut to talk'}` : ''}), Behavior (Sound Effects, Allow File Edits & Commands, ${VOICE_OK ? 'Auto-listen (open the mic when you end on a question), ' : ''}Open at Login), and About (who made Roamies with links, Setup Guide, Show Logs, Save Diagnostics). Updates are signature-checked${LINUX ? '; they install by themselves when Roamies runs as an AppImage; installed from a .deb or .rpm, the update button opens the download page instead' : ''}. When something isn't working (the microphone, voice, the panel, a crash, an error), tell them to use Save Diagnostics (in About, or the tray icon's menu): it saves one .log file in Downloads with the logs, system and microphone details, keys and personal details removed, for them to attach to a GitHub issue at github.com/KenKaiii/Roamies/issues or send to Ken. Sign-in is shared with GG Coder. Downloads and source: github.com/KenKaiii/Roamies. Don't invent features or settings that aren't listed here.
 ${replyStyle()}Your body does the acting: to act out a feeling, start your reply with one tag, which is never shown: ${EMOTES.map((e) => `[${e}]`).join(' ')}. hype marks a real win, remind goes with a reminder, wave is hello or goodbye; upset and motivate are not used. Most replies need no tag.
 Lead with the answer: the fact, number, pick or result they asked for, then only the context that makes it useful, then stop. A count or total gathered over several pages, files or results: note each one's count in a few words as you go ("Page 1: two."), add those up, and check the total you lead with against the items you then name. No opener about checking, looking or searching ("Let me see…", "I found…").
 After using a tool, never repeat what you already said; only add what's new.
@@ -1235,7 +1217,7 @@ function enqueue(text, { interrupt = false, image = null, note = '', byVoice = f
   if (interrupt && busy) interruptQuietly();
   if (interrupt && byVoice) flow.start(); // Local-only build (feature 22): a request made by voice opens the exchange
   queued++;
-  const own = !intro && !text.startsWith('('); // feature 33: the owner's own request, typed or spoken
+  const own = !text.startsWith('('); // feature 33: the owner's own request, typed or spoken
   running = running.then(() => prompt(text, image, note, byVoice, briefing, kind)).catch((e) => { if (!isSettingsProblem(e)) return console.error('prompt', e); if (own) refuse(e, byVoice); else skipped(kind); flow.settle(); })
     .finally(() => {
       if (briefing) briefingWaiting = false;
@@ -1246,51 +1228,6 @@ function enqueue(text, { interrupt = false, image = null, note = '', byVoice = f
     });
   return running;
 }
-// The welcome tour: job tickets for what it can do and a medal for their goal, spoken when replies are.
-let tourPending = null, tours = 0;
-async function playTour() {
-  const t = tourPending;
-  if (!t || busy) return;
-  tourPending = null;
-  const voice = VOICE_ON() ? speech.start() : null;
-  turnVoice = voice;
-  // Like the rest of the app's drawings it can be cleared, and it also goes by itself a while after it's done.
-  try { await ink.show(tourBeats(userName, lookName(), t.goal, { mac: MAC }), `tour-${++tours}`, { fade: 45 }); }
-  catch (e) { console.error('tour', e); }
-  finally { if (turnVoice === voice) turnVoice = null; voice?.end(); }
-}
-// The setup guide's showcase: a fixed drawing of what it can do, while the guide steps aside. The guide follows
-// along (each beat as it starts, done when drawn) and comes back once every card is gone: faded 2.5 s after the end,
-// closed, cleared with Esc, or the screen changed.
-let showcase = null, showcases = 0;
-async function playShowcase() {
-  if (busy) return ob({ kind: 'showcase', phase: 'failed' });
-  endShowcase(null);
-  ink.clear(); // a replay starts clean, even while the last one is still fading
-  const me = showcase = { id: `showcase-${++showcases}`, watch: null, drawn: false };
-  const voice = VOICE_ON() ? speech.start() : null;
-  turnVoice = voice;
-  try { await ink.show(showcaseBeats(userName, lookName()), me.id, { fade: 2.5 }); }
-  catch (e) { console.error('showcase', e); if (showcase === me) endShowcase('failed'); }
-  finally { if (turnVoice === voice) turnVoice = null; voice?.end(); }
-}
-// Ended before it was all drawn (Esc, leaving the step): its voice stops with it.
-function endShowcase(phase) {
-  const s = showcase;
-  if (!s) return;
-  showcase = null; clearInterval(s.watch);
-  if (phase === 'gone' && !s.drawn) speech.stop();
-  if (phase) ob({ kind: 'showcase', phase });
-}
-function showcaseDrawn() {
-  ob({ kind: 'showcase', phase: 'done' });
-  const s = showcase;
-  s.drawn = true;
-  s.watch = setInterval(() => { if (!ink.describe()) endShowcase('gone'); }, 400);
-}
-// Its web card's site icons, fetched when the step opens (they're cached), so the first card isn't held up by them.
-function warmShowcase() { for (const b of showcaseBeats(userName)) for (const m of b.marks) for (const s of m.sources ?? []) if (checkDrawAction({ kind: 'favicon', url: s.url }).level === SAFE) faviconFor(s.url).catch(() => {}); }
-function stopShowcase() { if (!showcase) return; endShowcase('gone'); ink.clear(); }
 // A next-step button on a drawing: ask sends its words as a new request; open and copy are checked again first.
 function onInkButton(part) {
   const a = ink.button(part);
@@ -1328,7 +1265,7 @@ const syncSession = () => {
 };
 
 // ---------- folding old turns (compaction) ----------
-// After a finished request, with nothing queued and no intro chat on: if the last model call's real input (from
+// After a finished request, with nothing queued: if the last model call's real input (from
 // usage) passed 75 % of the request budget, older turns are summarised in the background and replaced by the
 // summary, raw turns archived locally. fitContext's hard trim and the overflow retry stay as safety nets.
 let lastInput = null; // { session, tokens, measured } from the newest model call
@@ -1336,7 +1273,7 @@ let lastInput = null; // { session, tokens, measured } from the newest model cal
 const fixedTokens = () => Math.round((system().length + tools.reduce((n, t) => { let schema = 600; try { schema = JSON.stringify(resolveToolSchema(t)).length; } catch { /* counted as a small one */ } return n + t.name.length + (t.description ?? '').length + schema; }, 0)) / 3.6);
 let compacting = null, pendingFold = null;
 function maybeCompact() {
-  if (compacting || intro || busy || queued || !session?.messages.length || !config.model) return;
+  if (compacting || busy || queued || !session?.messages.length || !config.model) return;
   if (trouble()) { skipped('fold'); return; } // the owner, 2026-11-28: no request while the settings can't be used
   const tokens = lastInput?.session === session.id ? lastInput.tokens : 0;
   // Local-only build (feature 24): the fold point is a setting, and the plan counts what is really sent.
@@ -1750,7 +1687,7 @@ async function whereFront() {
 let frontSoon = null;
 // Auto-listen: the turn whose reply ended on a question, until the overlay says it's been typed out and said.
 let autoTurn = null;
-const autoListenOn = () => VOICE_OK && !!config.voice && !!config.autoListen && voiceReady() && !intro;
+const autoListenOn = () => VOICE_OK && !!config.voice && !!config.autoListen && voiceReady();
 // Local-only build (feature 18): the first request of a new day (handover.mjs). The conversation that ends is handed
 // over: part one written by code in its last day's daily note, part two by one model request (the fold's route),
 // while a "one moment" line worded by code is shown (and said, in an exchange started by voice). Then a new
@@ -1799,9 +1736,9 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   { const p = trouble(); if (p) { if (!briefing && !text.startsWith('(')) refuse(p, byVoice); else skipped(briefing ? 'briefing' : kind); flow.settle(); return; } }
   brokeDuring = null;
   if (briefing) { pi.briefing.done(briefing.kind); briefing.given = true; logLine('briefing', { kind: briefing.kind }); }
-  if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
+  if (!text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
   // Local-only build (feature 23, stage 4): which model answers, decided by code (route.mjs).
-  const ownAsk = !intro && !text.startsWith('(');
+  const ownAsk = !text.startsWith('(');
   let privateThis = false;
   if (ownAsk) {
     const pa = privateAsk(text);
@@ -1819,27 +1756,26 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   if (route === 'local') return localPrompt(text, byVoice, priv ? 'private' : 'offline', priv);
   const backLine = announcer.before('claude');
   if (backLine) { say(backLine, 'happy'); if (byVoice || flow.spoken()) voiceLine(forVoice(backLine)); }
-  ownWords = intro || briefing || text.startsWith('(') ? '' : text; ownTurn++; // Local-only build (feature 18): for item_dealt_with; feature 14: the file tools and edit_note
+  ownWords = briefing || text.startsWith('(') ? '' : text; ownTurn++; // Local-only build (feature 18): for item_dealt_with; feature 14: the file tools and edit_note
   let problem = await readyAgent();
-  if (!problem && !intro && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
+  if (!problem && await dayTurn(byVoice)) problem = await readyAgent(); // Local-only build (feature 18)
   if (problem) { aloud(problem, 'concerned'); flow.settle(); return; } // Local-only build: said too, in an exchange started by voice; feature 31: its quiet time starts, so it ends (and the quiet queue is given)
   const mk = agentMasker?.active ? agentMasker : null; // Local-only build (feature 34): masking
   if (ownAsk && mk && agentRoute === 'api' && WEB_SEARCH.includes(config.provider) && isWebAsk(text)) { logLine('web_off', {}); aloud(WEB_OFF, 'concerned'); flow.settle(); return; } // web search is off while the list has words
   busy = true; quiet = false; autoTurn = null;
   flow.activity(); // Local-only build (feature 22): the exchange's quiet time starts again after this reply
   let replyDone = null; // resolves when the overlay reports that this reply has finished playing
-  if (!intro && !text.startsWith('(')) activity.asked(text);
+  if (!text.startsWith('(')) activity.asked(text);
   menu();
   controller = new AbortController();
   agent.setSignal(controller.signal);
   ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: an edit of "home" in settings.json shows from the next request
   ui({ kind: 'agent', e: { type: 'start' } });
   // Voice: the socket opens now, while the model thinks; sentences are spoken as soon as each is ready.
-  if (VOICE_ON()) speech.setVoice(lookVoice()); // local-only build: picks up a voice changed in the settings file
+  if (VOICE_ON()) speech.setVoice(voiceNow()); // local-only build: picks up a voice changed in the settings file
   speech.setBeats(beatsNow()); // feature 21a: the short lines before something slow are the persona's
   const voice = VOICE_ON() ? speech.start() : (speech.stop(), null);
   turnVoice = voice;
-  if (voice && intro) guideVoices.add(voice.id);
   const spoken = voice && new SpeechText((t) => voice.say(t));
   let stalled = false, watch = null;
   try {
@@ -2131,14 +2067,6 @@ function openUrl(url) {
 }
 
 // ---------- replies: text only, or voice and text ----------
-// A new look brings its voice: the next thing said is in it (its "One sec." beats are made again).
-function setLook(l) {
-  if (!LOOKS.some(([id]) => id === l)) return;
-  config.look = l; saveConfig();
-  agentStale = true; // its name is in the prompt
-  speech.setVoice(lookVoice());
-  ui({ kind: 'look', look: l }); menu();
-}
 
 async function setReplies(mode) {
   await fishKeyLoaded;
@@ -2313,7 +2241,7 @@ async function saveDiagnostics() {
       busy, sidecarUpMinutes: Math.round(process.uptime() / 6) / 10,
       voice: { on: VOICE_OK && config.voice !== false, needsModel: NEEDS_MODEL, model: { status: voiceModel.status, error: voiceModel.error ?? undefined }, hotkeys: HOTKEYS_OK, keys: keys() },
       replies: config.replies, fishKey: speech.on, hands: hasHands(process.platform, process.env.ROAMIES_HANDS), handsPath: process.env.ROAMIES_HANDS ? 'set' : 'none',
-      update: { available: update.available, result: update.result }, onboarded: config.onboarded, look: config.look, size: config.size,
+      update: { available: update.available, result: update.result }, onboarded: config.onboarded, orbSize: orbSize(),
     };
     const sections = [
       ['System', system], ['Roamies', app], ['Screens, tray, panel, helpers and permissions (from the app)', shellOut],
@@ -2400,8 +2328,7 @@ function panelState() {
     usage: usageToday.requests ? { requests: usageToday.requests, tokens: usageToday.tokens } : null,
     facts: listFacts().slice().reverse().map((f) => ({ id: f.id, text: f.text })),
     commitments: openCommitments().map((c) => ({ id: c.id, text: c.text, due: c.due ?? null, when: c.due ? fmtWhen(c.due) : '', overdue: !!(c.due && c.due < Date.now()) })),
-    look: config.look ?? 'classic', looks: LOOKS.map(([id, label]) => [id, label]), name: lookName(),
-    size: sizeNow(), sizes: SIZES,
+    name: lookName(),
     replies: config.replies === 'voice' ? 'voice' : 'text', fishKey: speech.on,
     fishModel: speech.pick, fishModels: [], fishFree: false, // local-only build: the Mac's voice has no models to pick
     voice: VOICE_OK ? {
@@ -2411,7 +2338,6 @@ function panelState() {
     sound: !!config.sound, actions: !!config.allowActions,
     login: login.supported ? { on: login.on } : null,
     update: { available: update.available, installing: update.installing, checking: update.checking, result: update.result, page: update.page, done: update.done },
-    intro: !!intro,
   };
 }
 
@@ -2552,9 +2478,8 @@ function onWriteTap() {
 async function onMenu(id) {
   if (id === 'show') ui({ kind: 'summon', show: true });
   else if (id === 'ask') await typeToAsk();
-  else if (id === 'stop') { const cancelled = busy; pi.stop(); endIntro(); controller?.abort(); speech.stop(); ink.stop(cancelled); }
+  else if (id === 'stop') { const cancelled = busy; pi.stop(); controller?.abort(); speech.stop(); ink.stop(cancelled); }
   else if (id === 'new') {
-    endIntro();
     freshSession('new'); menu();
     say('Fresh start. What are we doing?', 'happy');
   } else if (id.startsWith('forget:')) { await forgetFact(id.slice(7)); menu(); }
@@ -2579,8 +2504,6 @@ async function onMenu(id) {
     say(`Switched to ${getModel(config.model)?.name ?? config.model}.`, 'happy');
   } else if (id.startsWith('login:')) oauthLogin(id.slice(6));
   else if (id.startsWith('key:')) apiKeyLogin(id.slice(4));
-  else if (id.startsWith('size:') && SIZES.some(([s]) => s === id.slice(5))) { config.size = id.slice(5); saveConfig(); ui({ kind: 'size', size: config.size }); menu(); }
-  else if (id.startsWith('look:')) setLook(id.slice(5));
   else if (id === 'replies:text') setReplies('text');
   else if (id === 'replies:voice') setReplies('voice');
   else if (id.startsWith('fishmodel:') && FISH_CHOICES.some((c) => c.id === id.slice(10))) {
@@ -2588,7 +2511,7 @@ async function onMenu(id) {
   }
   else if (id === 'fishkey') fishKeyLogin();
   else if (id === 'fishkey_remove') removeFishKey();
-  else if (id === 'sound') { config.sound = !config.sound; saveConfig(); ui({ kind: 'sound', on: config.sound }); voiceConfig(); menu(); }
+  else if (id === 'sound') { config.sound = !config.sound; saveConfig(); voiceConfig(); menu(); } // the voice helper's own cues (the page has no sounds since feature 21)
   else if (id === 'actions') {
     config.allowActions = !config.allowActions; saveConfig(); menu(); // live section picks this up
     say(config.allowActions ? 'File edits and commands are on. I promise to be careful.' : 'File edits and commands are off. Hands to myself!', config.allowActions ? 'determined' : 'happy');
@@ -2598,7 +2521,6 @@ async function onMenu(id) {
   else if (id === 'logs') fs.mkdir(LOG_DIR, { recursive: true, mode: 0o700 }).then(() => openUrl(LOG_DIR)).catch(() => {});
   else if (id === 'diagnostics') saveDiagnostics();
   else if (id === 'setup') send({ type: 'onboarding' });
-  else if (id === 'intro') send({ type: 'onboarding', mode: 'chat' });
   else if (id === 'snap') areaSnap();
   else if (id === 'list') showList({ seconds: 20 });
   else if (id === 'mutetalk') { config.muteWhileTalking = config.muteWhileTalking === false; saveConfig(); voiceConfig(); menu(); }
@@ -2690,74 +2612,16 @@ function takeSnap() {
   return s.image;
 }
 
-// ---------- getting to know them (a step of the setup guide, or the guide opened from the menu) ----------
-// Roamie asks in the guide window; they type or hold the talk keys (the guide gets the words and sends them
-// here). The chat is its own conversation; when it ends, a memory pass over it saves what it learned as facts.
-let introKnown = new Set(); // facts that existed before the chat, so the end can show only what it learned
-let beforeIntro = null; // the conversation the chat interrupted: it carries on afterwards
-const introFacts = () => listFacts().filter((f) => !introKnown.has(f.id)).map((f) => ({ id: f.id, text: f.text }));
-async function startIntro() {
-  if (intro) return ob({ kind: 'chat_state', status: 'busy' });
-  await refreshAuth();
-  if (!ensureModel()) return ob({ kind: 'chat_state', status: 'no_model' });
-  intro = { n: 0 };
-  introKnown = new Set(listFacts().map((f) => f.id));
-  beforeIntro = session?.messages.length ? session : null;
-  freshSession(null);
-  session.kind = 'intro';
-  ob({ kind: 'chat_state', status: 'thinking', n: 0, total: QUESTIONS });
-  await enqueue(openNote(userName, lookName()));
-  introTurn();
-}
-// However it ends, the chat's notes and questions don't steer what comes next (what it learned is in memory):
-// the conversation from before it carries on, or a clean one if there wasn't one.
-// Resolves once the memory pass over the chat is done (right away if they never answered).
-function endIntro() {
-  if (!intro) return Promise.resolve([]);
-  const answered = intro.n > 0;
-  intro = null;
-  controller?.abort();
-  const learned = freshSession(answered ? 'intro' : null);
-  if (beforeIntro) session = beforeIntro;
-  beforeIntro = null;
-  menu();
-  return learned;
-}
-// After each reply: the next question, or the end (all answered, they wanted out, or it failed).
-async function introTurn() {
-  const me = intro;
-  if (!me) return;
-  if (lastFailed) { endIntro(); return ob({ kind: 'chat_state', status: 'failed' }); }
-  const last = me.n >= QUESTIONS || (me.n > 0 && endsChat(lastReply));
-  if (last) {
-    config.introDone = true; saveConfig();
-    const text = plain(lastReply);
-    await endIntro(); // chat_done lists what the memory pass learned
-    // The drawn tour plays on the desktop once the guide window is closed.
-    tourPending = { goal: goalFrom(introFacts()) };
-    return ob({ kind: 'chat_done', text, facts: introFacts() });
-  }
-  ob({ kind: 'chat_turn', n: me.n, total: QUESTIONS, ...splitTurn(lastReply) });
-}
-async function introAnswer(text) {
-  const me = intro;
-  if (!me || !text || busy) return;
-  if (wantsSkip(text)) { endIntro(); config.introDone = true; saveConfig(); return ob({ kind: 'chat_done', skipped: true, facts: [] }); }
-  const n = ++me.n;
-  ob({ kind: 'chat_state', status: 'thinking', n, total: QUESTIONS });
-  await enqueue(answerTurn(n, userName, text));
-  if (intro === me) await introTurn();
-}
-
 // ---------- setup guide ----------
 function obState() {
   const current = getModel(config.model);
   ob({
     kind: 'state',
     platform: process.platform,
+    name: lookName(), // feature 21: the orb's name is the persona's
     // What this computer can do (platform.mjs): Ask About an Area, circling while talking, and on Wayland no
     // global shortcuts (bind: the commands to bind in the desktop's settings instead) and no Cursor size.
-    snap: SNAP_OK, circle: CIRCLE_OK, session: SESSION, bind: HOTKEYS_OK ? null : BIND, sizes: SIZES,
+    snap: SNAP_OK, circle: CIRCLE_OK, session: SESSION, bind: HOTKEYS_OK ? null : BIND,
     step: config.onboardStep ?? 0,
     oauth: signInCards(Object.keys(OAUTH), (id) => oauthOn.get(id), PROVIDER_LABELS),
     apikey: keyCards(AUTH_PROVIDERS, (id) => keyOn.get(id)),
@@ -2769,8 +2633,6 @@ function obState() {
     voice: VOICE_OK && config.voice,
     voiceModel: NEEDS_MODEL ? { status: voiceModel.status, done: voiceModel.done, total: voiceModel.total, error: voiceModel.error, size: sizeLabel() } : null,
     filesAsked: config.filesAsked,
-    look: config.look ?? 'classic',
-    size: sizeNow(),
     replies: config.replies === 'voice' ? 'voice' : 'text',
     fishKey: speech.on,
   });
@@ -2794,14 +2656,7 @@ async function filesStatus(request) {
 let keysBefore = null;
 async function onGuide(m) {
   if (m.type === 'ob_hello') { onboarding = true; await refreshAuth(); await fishKeyLoaded; obState(); }
-  else if (m.type === 'ob_closed') { onboarding = false; guideClosed = true; endIntro(); stopShowcase(); if (tourPending) setTimeout(playTour, 800); offerSettingsNotice(); offerKokoroNotice(); } // Local-only build: the held settings notice, and the natural voice's
-  else if (m.type === 'ob_showcase') playShowcase();
-  else if (m.type === 'ob_showcase_warm') warmShowcase();
-  else if (m.type === 'ob_showcase_stop') stopShowcase();
-  else if (m.type === 'chat_start') startIntro();
-  else if (m.type === 'chat_answer' && typeof m.text === 'string') introAnswer(m.text.trim().slice(0, 2000));
-  else if (m.type === 'chat_skip') { endIntro(); config.introDone = true; saveConfig(); menu(); }
-  else if (m.type === 'chat_forget' && typeof m.id === 'string') { await forgetFact(m.id); ob({ kind: 'chat_facts', facts: introFacts() }); menu(); }
+  else if (m.type === 'ob_closed') { onboarding = false; guideClosed = true; offerSettingsNotice(); offerKokoroNotice(); } // Local-only build: the held settings notice, and the natural voice's
   else if (m.type === 'ob_step') { config.onboardStep = Math.max(0, Math.min(7, m.step | 0)); saveConfig(); }
   // Voice needs a working key first: without one, the guide asks for it (ob_fishkey) instead.
   else if (m.type === 'ob_replies' && (m.mode === 'text' || (m.mode === 'voice' && speech.on))) { await fishKeyLoaded; await setReplies(m.mode); }
@@ -2816,8 +2671,6 @@ async function onGuide(m) {
   else if (m.type === 'set_actions') { config.allowActions = !!m.on; saveConfig(); menu(); obState(); }
   else if (m.type === 'set_login') setLogin(!!m.on);
   else if (m.type === 'ob_voice_model') getVoiceModel();
-  else if (m.type === 'ob_look') setLook(m.look);
-  else if (m.type === 'ob_size' && SIZES.some(([s]) => s === m.size)) { config.size = m.size; saveConfig(); ui({ kind: 'size', size: config.size }); menu(); }
   else if (m.type === 'set_keys') {
     const now = keys(), next = { ...now };
     // Talk and type-to-ask never share a pair: picking the pair the other one has swaps the two.
@@ -2872,22 +2725,20 @@ function shellMessage(m) {
   else if (m.type === 'ui_ready') {
     const keep = pageRebuild?.ready(); // Local-only build (feature 24, fix 6): a page rebuilt after a quiet stretch is not greeted
     retired.then((notes) => { if (notes.length) { retired = Promise.resolve([]); say(`${notes.join(' ')} Do it on the Model page in ${PANEL}.`, 'concerned'); } });
-    ui({ kind: 'sound', on: config.sound });
-    ui({ kind: 'size', size: sizeNow() });
+    ui({ kind: 'orb', size: orbSize() }); // feature 21: the orb's size on screen (orb.size in settings.json)
     ui({ kind: 'home', home: homeFor(HOME) }); // Local-only build: where it rests on the desktop ("home" in settings.json)
-    ui({ kind: 'look', look: config.look ?? 'classic' });
+    whenReadable('dial', () => pageDial(true)); piShown = pi.busy(); ui({ kind: 'pi', on: piShown }); // feature 21: the working day and today's blocks, and pi working
     if (stood?.on()) ui({ kind: 'stand', on: true }); // Local-only build (feature 33): a new page (a rebuild, a restart) keeps the stood-down look
     if (privateMode()) ui({ kind: 'private', on: true }); // feature 23: and private mode's mark (it never ends by itself)
     queueCount(); // feature 31: and the quiet queue's count
     if (keep) ui({ kind: 'settle', hold: SETTLE_HOLD_SECONDS, ...(Number.isFinite(keep.spin) ? { spin: keep.spin } : {}) });
-    else if (config.onboarded && !stood?.on()) ui({ kind: 'greet' });
     uiReady = true; offerSettingsNotice(); offerKokoroNotice(); offerStandKeyNotice(); // Local-only build: what settings.json lacks, said once per start-up
   } else if (m.type === 'stand_down') standDownNow(m.by === 'key' ? 'key' : 'phrase'); // Local-only build (feature 33): from the shell
   else if (m.type === 'memory') timing.memory(m); // feature 23, stage 5: the shell's memory reading (memory.rs)
   else if (m.type === 'speech_first') timing.firstSound(); // feature 23, stage 5: the reply's first sound played (voice-out.js)
   else if (m.type === 'presence') presenceSeen(m); // Local-only build (feature 31): idle seconds and the microphone, from the shell
   else if (m.type === 'keybind_error' && m.which === 'stand') standKeyNotice(m);
-  else if (m.type?.startsWith('ob_') || m.type?.startsWith('chat_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
+  else if (m.type?.startsWith('ob_') || m.type === 'set_keys' || m.type === 'set_actions' || m.type === 'set_login' || m.type === 'keybind_error') onGuide(m).catch((e) => console.error('guide', e));
   else if (m.type?.startsWith('voice')) onVoice(m);
   else if (m.type === 'snap') areaSnap();
   else if (m.type === 'write_tap') onWriteTap();
@@ -2910,13 +2761,12 @@ function shellMessage(m) {
   else if (m.type === 'found_closed' && found && m.id === found.id) { found.ctl.abort(); found = null; } // feature 40: its × or Esc
   else if (m.type === 'show_list') showList({ seconds: 20, toggle: true });
   // The overlay's drawing: a segment started, a wait for a click or hover ended, a card was closed, a button clicked.
-  else if (m.type === 'draw_started') { ink.started(String(m.id), m.seg | 0); if (String(m.id) === showcase?.id) ob({ kind: 'showcase', phase: 'beat', beat: m.seg | 0 }); }
-  else if (m.type === 'draw_done') { if (String(m.id) === showcase?.id) showcaseDrawn(); }
+  else if (m.type === 'draw_started') ink.started(String(m.id), m.seg | 0);
   else if (m.type === 'draw_wait_done') ink.waitDone(String(m.id), m.beat | 0, String(m.result));
   else if (m.type === 'ink_closed') ink.closed(m.part);
   else if (m.type === 'ink_action') onInkButton(String(m.part));
   else if (m.type === 'quiz_done') onQuizDone(String(m.part), Array.isArray(m.picks) ? m.picks.slice(0, 12).map((v) => (Number.isInteger(v) ? v : -1)) : []);
-  else if (m.type === 'ink_cleared') { ink.cleared(); endShowcase('gone'); if (found) { found.ctl.abort(); found = null; } } // feature 40: Esc took the card of found files too
+  else if (m.type === 'ink_cleared') { ink.cleared(); if (found) { found.ctl.abort(); found = null; } } // feature 40: Esc took the card of found files too
   else if (m.type === 'user_click' && Number.isFinite(m.x) && Number.isFinite(m.y)) ink.userClick({ x: m.x, y: m.y, role: String(m.role ?? ''), app: String(m.app ?? ''), acts: m.acts === true });
   else if (m.type === 'update_status') onUpdateStatus(m);
   // Wayland: the guide or panel copies one of the commands to bind (only those, never other text).
@@ -3044,6 +2894,19 @@ const doneLines = () => { if (!doneInApp) return; doneInApp = false; dailyDo('ti
 // The owner, 2026-11-28: while the settings can't be used, the start-up step and the syncs wait (afterReadable).
 let calStarted = false;
 const calStart = () => { if (calStarted || trouble()) return; calStarted = true; cal.startup().catch((e) => failed('calendar', e)).finally(doneLines); };
+// Feature 21: the orb's dial: the working day (calendar.dayStart to calendar.dayEnd) and today's blocks, sent to the page
+// when they change (looked at every 30 s), and in full to a new page. From what is known here: no request.
+let dialSent = '';
+function pageDial(force = false) {
+  const c = loadSettings(HOME).calendar, msg = { kind: 'dial', start: c.dayStart, end: c.dayEnd, ...cal.todayArcs() };
+  const key = JSON.stringify(msg);
+  if (!force && key === dialSent) return;
+  dialSent = key; ui(msg);
+}
+setInterval(() => whenReadable('dial', () => pageDial()), 30_000);
+// Feature 21: pi working, for the orb's three arcs.
+let piShown = false;
+function piMark() { let on; try { on = !!pi.busy(); } catch { return; } if (on === piShown) return; piShown = on; ui({ kind: 'pi', on }); }
 if (startTrouble) skipped('calendar'); else calStart();
 (function calTick() {
   let wait = 60;

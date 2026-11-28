@@ -157,7 +157,7 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   // questions are closed (and kept) before the request they belong to is cut off, which would take them down as no answer
   const body = side.slice(side.indexOf('function standDownNow('), side.indexOf('function standUp('));
   assert.ok(body.indexOf('flow.standDown()') < body.indexOf('interruptQuietly()') && body.indexOf('flow.standDown()') < body.indexOf('pending.delete(id)'), 'questions first');
-  for (const part of ["send({ type: 'listen_cancel' })", 'pi.stop()', 'speech.stop()', 'ink.clear()', 'stopShowcase()', 'barAsk.abort()']) assert.ok(body.includes(part), `stops: ${part}`);
+  for (const part of ["send({ type: 'listen_cancel' })", 'pi.stop()', 'speech.stop()', 'ink.clear()', 'barAsk.abort()']) assert.ok(body.includes(part), `stops: ${part}`);
   assert.match(side, /if \(r\.status === 'stopped' && piStood\) \{ piStood = false; stood\.add\(\{ pi: true, processes: r\.ended \?\? 0 \}\); return; \}/, '"Stopped pi." waits for the line at the end');
   assert.match(side, /if \(stood\?\.on\(\)\) ui\(\{ kind: 'stand', on: true \}\);/, 'a new page keeps the look');
   // a briefing chosen just before, waiting behind a request (the owner, 2026-11-25): marked given only once its request
@@ -173,7 +173,7 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   assert.match(side, /if \(own && !flow\.spoken\(\)\) queue\?\.exchanged\(\);/); assert.match(side, /ended: \(\) => queue\?\.exchanged\(\),/);
   assert.match(side, /const said = !!g\.summary && noticesOn\(\);/, 'said under the usual rule');
   assert.match(side, /queue\.prune\(\);[^\n]*\n\s*const ended = stood\.end\(by, queue\.count\(\) \+ due\);\n\s*ui\(\{ kind: 'stand', on: false \}\);\n\s*if \(ended\) queue\.stoodDown\(ended\.counts\);/, 'what it stopped goes to the queue');
-  assert.match(side, /else if \(config\.onboarded && !stood\?\.on\(\)\) ui\(\{ kind: 'greet' \}\);/, 'and is not greeted');
+  assert.ok(!/kind: 'greet'/.test(side), 'and is not greeted (feature 21: there is no greeting at all)');
 }
 
 fs.rmSync(home, { recursive: true, force: true });

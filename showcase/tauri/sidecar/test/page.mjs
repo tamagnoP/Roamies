@@ -1,6 +1,6 @@
 // The overlay page run without a screen, for the tests: the page's scripts are loaded as they are, with a stand-in
 // for the browser (a canvas that draws nowhere, a clock moved by hand) and for the Tauri shell. Shared by
-// home.test.mjs, looks-rest.test.mjs and rebuild.test.mjs. Not a test of its own.
+// home-page.test.mjs, orb.test.mjs, rebuild.test.mjs and the other page tests. Not a test of its own.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -58,7 +58,7 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
   const ctx = vm.createContext(win);
   const run = (f) => vm.runInContext(fs.readFileSync(new URL(`roamies/${f}`, ROOT), 'utf8'), ctx, { filename: f });
   // desktop.html's order, less what only draws cards, sounds and drawings
-  for (const f of ['core.js', 'measure.js', 'glass.js', 'home.js', 'agent.js', 'agent-tools.js', 'jarvis.js', 'people.js', '10-dither.js', '12-sidekick.js']) run(f);
+  for (const f of ['core.js', 'measure.js', 'glass.js', 'home.js', 'agent.js', 'agent-tools.js', 'orb.js']) run(f);
   win.Roamie.setSafe(safe);
   win.Roamie.bootDesktop(canvas);
   if (ink) for (const f of ['ink3d.js', 'world.js', 'ink.js', 'pen.js']) run(f); // the drawings and cards (feature 40's card of found files)
@@ -96,17 +96,17 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
     },
   };
 }
-/** The page as the app starts it: the sidecar answers ui_ready with the size and the home. */
-export async function started({ size = 'default', home = 'bottom-left', ...o } = {}) {
+/** The page as the app starts it: the sidecar answers ui_ready with the orb's size (orb.size, points) and the home. */
+export async function started({ size = 100, home = 'bottom-left', ...o } = {}) {
   const p = page(o);
   await p.tick(0.5);
   assert.deepEqual(p.sent.map((s) => s.type), ['ui_ready']);
-  p.host({ kind: 'size', size });
+  p.host({ kind: 'orb', size });
   if (home !== null) p.host({ kind: 'home', home });
   await p.tick(4);
   return p;
 }
-export const HOME = { 'bottom-left': [144, 706], 'bottom-right': [1296, 706], 'top-left': [144, 177], 'top-right': [1296, 177] }; // radius 60, as in part 1
+export const HOME = { 'bottom-left': [117.6, 726.9], 'bottom-right': [1322.4, 726.9], 'top-left': [117.6, 150.6], 'top-right': [1322.4, 150.6] }; // feature 21: the orb at 100 points, radius 49
 export const atSpot = (p, [x, y], what) => assert.ok(Math.hypot(p.m.x - x, p.m.y - y) <= 6, `${what}: at (${x}, ${y}), is at (${p.m.x.toFixed(1)}, ${p.m.y.toFixed(1)})`);
 export const bubbleOnScreen = (p, what) => {
   const b = p.agent.bubble, S = p.bounds();
@@ -116,6 +116,6 @@ export const bubbleOnScreen = (p, what) => {
   assert.ok(b.w.x > 40 && b.h.x > 10, `${what}: the bubble has opened`);
   // beside the body: its nearest edge within three body radii of the body's centre
   const dx = Math.max(x0 - p.m.x, 0, p.m.x - x1), dy = Math.max(y0 - p.m.y, 0, p.m.y - y1);
-  assert.ok(Math.hypot(dx, dy) <= 60 * 3, `${what}: the bubble is beside the body (${Math.round(Math.hypot(dx, dy))} px away)`);
+  assert.ok(Math.hypot(dx, dy) <= 49 * 3.5, `${what}: the bubble is beside the body (${Math.round(Math.hypot(dx, dy))} px away)`);
 };
 export const SEND = 'Send to pi?  CAN EDIT files and run commands · in ~/Documents/cell-segmentation\nUndo snapshot taken.\nSandboxed: pi can read 3 folders and write only in this project.\n\n[[ Please read segment.py and explain what the watershed step does, then add a short docstring to each function that has none, keeping the code itself exactly as it is. ]]';

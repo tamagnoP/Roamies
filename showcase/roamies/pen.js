@@ -76,7 +76,6 @@
       cur.pts = cur.pts.slice(m.from); cur.pts.push(cur.pts[0]);
       cur.closed = true;
       if (!reducedMQ.matches) cur.pulseAt = performance.now();
-      R.sfx?.play('tick');
       cur = null;
     } else if (m.ev === 'drop' && cur) { fade(cur, 350); cur = null; }
     else if (m.ev === 'fade') { cur = null; for (const s of strokes) if (s.fadeAt == null) fade(s, 450, (+m.after || 0) * 1000); }

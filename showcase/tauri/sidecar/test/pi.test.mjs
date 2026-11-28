@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { codeReference, createPi, describeStep, forVoice, gateTools, isAppName, isDontSend, isSend, loadSettings, messageText, projectProblem, REMOVED, snapshot, voiceFor } from '../pi.mjs';
+import { codeReference, createPi, describeStep, forVoice, gateTools, isAppName, isDontSend, isSend, loadSettings, messageText, projectProblem, REMOVED, snapshot, macVoice } from '../pi.mjs';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-home-')));
 const dir = path.join(home, 'Documents', 'roamies-pi');
@@ -48,17 +48,19 @@ assert.equal(s0.project, work); assert.deepEqual(s0.projects, [{ name: 'workspac
 assert.ok(fs.statSync(work).isDirectory());
 assert.deepEqual(s0.neverLook.slice(0, 2), ['1Password', 'Bitwarden']); assert.equal(s0.keepLogsDays, 30);
 assert.ok(fs.existsSync(path.join(dir, 'settings.json')) && fs.existsSync(path.join(dir, 'log')));
-// voices: JARVIS is British out of the box; "voices" sets one per look, "voice" one for all, '' is the system voice
-assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).voices, { jarvis: 'Daniel' });
-assert.equal(voiceFor('jarvis', home), 'Daniel'); assert.equal(voiceFor('classic', home), '');
-fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ voice: 'Samantha', voices: { JARVIS: ' Jamie (Premium) ', sarah: '' } }));
-assert.equal(voiceFor('jarvis', home), 'Jamie (Premium)'); assert.equal(voiceFor('sarah', home), 'Samantha'); assert.equal(voiceFor('adrian', home), 'Samantha');
-fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ voices: {} }));
-assert.equal(voiceFor('jarvis', home), '', 'an empty "voices" switches the JARVIS default off');
+// the voice (feature 21: one look, one voice): British (Daniel) out of the box, "voice" sets it, '' is the system voice;
+// "voices" is no longer read
+const made = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+assert.equal(made.voice, 'Daniel'); assert.ok(!('voices' in made));
+assert.equal(macVoice(home), 'Daniel');
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ voice: 'Samantha', voices: { jarvis: ' Jamie (Premium) ' } }));
+assert.equal(macVoice(home), 'Samantha', '"voices" is not read');
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ voice: '' }));
+assert.equal(macVoice(home), '', 'the system voice');
 fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ project: '~/Documents/roamies-pi' }));
-assert.equal(voiceFor('jarvis', home), 'Daniel', 'a settings file from before this still gets the JARVIS default');
+assert.equal(macVoice(home), 'Daniel', 'a settings file without "voice" gets Daniel');
 fs.writeFileSync(path.join(dir, 'settings.json'), '{ broken');
-assert.equal(voiceFor('jarvis', home), '', 'a broken file never stops the voice');
+assert.equal(macVoice(home), '', 'a broken file never stops the voice');
 fs.rmSync(path.join(dir, 'settings.json'));
 loadSettings(home);
 assert.equal(projectProblem(work, home), '');

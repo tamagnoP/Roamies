@@ -155,7 +155,7 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   assert.match(side, /const callNow = \(\) => speakingNow\(\)\.quietInCalls && [^\n]*voiceState === 'idle' && !micWindow && Date\.now\(\) - ownMicAt > OWN_MIC_MS;/);
   assert.match(side, /logLine\('presence', JSON\.parse\(now_\)\)/, 'logged as true/false when it changes');
   // the count on the character: a page setting, hidden while stood down
-  assert.match(side, /const PAGE_SETTINGS = new Set\(\[[^\]]*'queue'\]\);/); assert.match(side, /ui\(\{ kind: 'queue', n: stood\?\.on\(\) \? 0 : queue\.count\(\) \}\)/);
+  assert.match(side, /const PAGE_SETTINGS = new Set\(\[[^\]]*'queue'[^\]]*\]\);/); assert.match(side, /ui\(\{ kind: 'queue', n: stood\?\.on\(\) \? 0 : queue\.count\(\) \}\)/);
   // nothing of it goes to the model
   for (const f of ['quiet.mjs', 'checkin.mjs']) assert.ok(!/enqueue|oneShot|fetch\(|http|agent\./.test(read(f)), `${f} makes no request`);
   const giving = side.slice(side.indexOf('async function giveItem('), side.indexOf('function checkTick()'));

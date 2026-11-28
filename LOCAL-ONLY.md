@@ -310,8 +310,8 @@ wrong value gets a notice and its default.
   "toolFoldersOff": ["~/.npm"],
   "docker": ["~/Documents/cell-segmentation"],
   "home": "bottom-left",
-  "voice": "",
-  "voices": { "jarvis": "Daniel (Enhanced)" },
+  "voice": "Daniel (Enhanced)",
+  "orb": { "size": 100 },
   "vault": "~/Documents/roamies-vault",
   "dailyFolder": "Daily",
   "autoListenQuestions": true,
@@ -407,9 +407,13 @@ wrong value gets a notice and its default.
 - `vault`: the Obsidian vault Roamies keeps notes in (see below). It must be a folder inside your home folder.
 - `dailyFolder`: the folder in the vault for the daily notes (see "The daily note"). Default `"Daily"`. One plain
   folder name: no slash, not starting with a dot.
-- `voice`: the Mac voice every character speaks in; `""` means the system voice.
-- `voices`: a voice per character, which wins over `voice`. The characters are `classic` (Roamie), `jarvis`, `anime`,
-  `sarah` and `adrian`. If you leave `voices` out, JARVIS speaks as `Daniel` (British English).
+- `voice`: the Mac voice Roamies speaks in when the natural voice isn't used; `""` means the system voice. Default
+  `"Daniel"` (British English, shipped with macOS). Feature 21: one look, so one voice; `voices` (one per look) is no
+  longer read, and a file that still has it gets one start-up notice saying so and which line to add, for example
+  `"voice": "Daniel"`.
+- `orb`: the orb (feature 21). `size`: how wide it is on screen, in points, 80 to 140 (whole), default 100. The rest
+  of its design is fixed in the app and shown under `reference.orb` in settings.default.json. It replaces the size
+  picked in the panel (Default, Small or Cursor), which is gone.
 - `autoListenQuestions`: `true` or `false`. With Auto Listen on, whether the microphone opens after a reply of
   Roamies' own that ends in a question. `false` switches that off; the answer windows of bubbles are not affected.
 - `closingReply`: what Roamies says when you end an exchange with a closing phrase ("thanks"). The default is
@@ -465,7 +469,7 @@ wrong value gets a notice and its default.
 
   | Part | Default | Allowed | What it is |
   | --- | --- | --- | --- |
-  | `name` | `Jarvis` | up to 40 characters | The name the model is given for itself. Menus and labels still say the look's name. |
+  | `name` | `Jarvis` | up to 40 characters | The name the model is given for itself, and (feature 21) the orb's name in menus and labels. |
   | `address` | `sir` | up to 30 letters, or `""` for none | How you are addressed. |
   | `manner` | `calm, precise, formally polite, loyal` | up to 200 characters | A description of the tone, given to the model in quotation marks. |
   | `humour` | `dry and rare` | up to 100 characters | The same, for humour. |
@@ -559,6 +563,53 @@ prompt.
 below it, named `<title> <YYYY-MM-DD HHMM>.md`. Roamies never deletes one; you may. `state.json` remembers the last 50
 edits under `noteEdits`, for "undo the last note edit".
 
+## The look (feature 21, part a; the owner, 2026-11-28)
+
+One look: the orb, the owner's design of 2026-11-17 (`showcase/roamies/orb.js`; the values under `reference.orb` in
+settings.default.json). The five looks from upstream (the goo blob, JARVIS, Anime Girl, Sarah, Adrian), their
+faces, hands, acts and sounds are deleted. The credit stays: "Based on Roamies by Ken Kai, AGPL-3.0".
+
+- **The orb** sits on its own dark disc, so it reads the same over any window. From the outside in: the working day
+  as a dial (`calendar.dayStart` to `calendar.dayEnd` round the whole face from the top, a mark each hour), today's
+  blocks as arcs (blue for yours, grey for time taken by tasks of your own in Super Productivity, dimmer once over),
+  a line for now (only within the working day), the particle ring, and the centre.
+- **Its states differ in shape**, so they can be read from across the room:
+
+  | State | What is drawn | Moves? |
+  | --- | --- | --- |
+  | At rest | the centre rings and the particles, still | no |
+  | Listening | a bright open ring; the particles ripple with the microphone's level | yes |
+  | Thinking (a request, a tool call) | one arc travelling round a dotted ring | yes |
+  | Speaking (the reply's words or voice) | five bars that follow the voice's loudness | yes |
+  | Waiting on you | an amber half ring and the quiet queue's count ("9+" past nine) | no |
+  | Stood down | one dim grey ring with a flat dash; no dial, particles or count | no |
+  | Pi working | three short arcs, with any state but stood down | no |
+
+  "Private" sits under it while private mode is on.
+- **Still at rest.** A state that doesn't move is drawn once and the page stops drawing. The moving states are
+  painted at most 30 times a second. The dial is drawn again every five minutes and when a block starts or ends,
+  nothing in between (one timer). With macOS's Reduce Motion on, each state is drawn once and holds still. Measured
+  without a screen (`test/orb.test.mjs`): no frame in 20 s at rest in each still state; 50 to 62 paints in 2 s while
+  listening, with the page at 60 frames a second.
+- **Its size** is `orb.size` (points, 80 to 140, default 100); the panel's size picker (Default, Small, Cursor) is
+  gone. While it draws on screen or works in another app it becomes a small reticle (26 points) whose centre is the
+  pen's tip, as the pointer form was.
+- **Bubbles, cards, the ask field and the research card** are in the instrument style: near-black, a thin line,
+  square corners with short corner marks in the accent (`#62D5F8`), amber (`#F7C078`) for a warning, buttons at
+  least 44 points high (the first filled in the accent). What each one does is unchanged.
+- **Fonts**: the system's own (SF Pro for text, SF Mono for numbers, paths and the bubbles' streaming text, which is
+  laid out in columns so a letter never moves once it lands). Nothing is downloaded; the bundled Martian Mono and
+  Doto are deleted.
+- **No sounds.** The chiptune sounds of the page and the setup guide are deleted (`sfx.js`), and the `sfx` step of a
+  drawing with them. The menu's Sound switch now covers only the voice helper's own cues (the listening chime, the
+  snap of a circle).
+- **The setup guide** keeps Welcome, Permissions, Connect AI, Replies, Shortcuts and Find me, restyled, with the orb
+  beside it. The look and size pickers, the get-to-know-you chat (and its menu item), the drawing demo and the tour
+  after the guide are deleted.
+- **What the page is told** (sidecar → page; settings, so a page rebuild passes them on): `orb` (the size), `dial`
+  (the working day and today's blocks, in minutes from midnight, sent when they change, looked at every 30 s), `pi`
+  (pi working or not). All from what is known on the Mac: no request.
+
 ## Where the character sits
 
 In its default and small sizes the character has a home: one fixed spot on the desktop, set by `home` in
@@ -581,13 +632,13 @@ the pointer, followed it, and hopped out of its way; in these two sizes it now d
   before. The character rests at the home corner of whichever display the overlay is on. A point is in screen
   points across all displays; when the overlay is on a display that doesn't contain it, the character rests at the
   nearest edge of that display.
-- **Clicks.** Only the character takes clicks, so it can be dragged: a circle around its centre, 165 points across
-  in the default size and 83 in the small one, a little wider than the body you see. A click or scroll there
+- **Clicks.** Only the orb's centre takes clicks, so it can be dragged: a circle around its centre, 36 points across
+  at the default size (0.36 of `orb.size`), as agreed on 2026-11-17; the rest of the orb lets clicks through. A click or scroll there
   doesn't reach what is underneath. Everything else on the desktop is clicked straight through, as before, and so
   is the character itself while it is pointing something out.
 - **At rest nothing runs.** Once it has been still at home for a second, the page stops drawing altogether: no
-  frames, no animation, and its eyes look straight ahead rather than at the pointer. So at rest it doesn't blink,
-  and JARVIS doesn't turn. It doesn't doze off, yawn or snore, and plays no idle gestures of its own. It starts
+  frames, no animation. So at rest the orb's particles hold still, and the dial is drawn again only every five
+  minutes and when a block starts or ends (feature 21). It starts
   again for a message from Roamies, the pointer on its body, a change of Dock or display, and stops again when it is
   still. What keeps running is what ran before while it was hidden: the app reading the pointer's position, which is
   how it knows a click is on the character, and a check every 150 ms of whether Esc should be held.
@@ -598,7 +649,7 @@ the pointer, followed it, and hopped out of its way; in these two sizes it now d
   card, drawing, list or field), nothing is being said or heard, no question is on screen or waiting for its answer
   in an answer window, nothing is being made, and nothing is waiting to be shown; and something was shown or
   spoken since the last time. The new page is made beside the old one, on the same display; the character appears
-  in it at its home spot at once, with no entrance, sound or greeting, and JARVIS's globe turned as it was. The spot
+  in it at its home spot at once, with no entrance, and the orb's particles turned as they were. The spot
   is worked out from the page's newest size, screen edges and character size (before 2026-11-25 it could use the
   default size's radius for one frame and then glide to the small size's spot), and for 3 seconds a change of the
   spot moves it there at once rather than gliding. The old page goes once the new page reports that it has drawn
@@ -762,9 +813,8 @@ down: pi was stopped and 2 processes it had left running were ended; 1 calendar 
 shown, and said when `speakNotices` is on; then what was held, most urgent first, with the review's line and
 questions if it is still that day.
 
-**The look.** Grey, dim and still: every look is drawn in grey at about half its brightness and holds still where it
-rests, so the page stops drawing. JARVIS's globe stops turning and its heart is a flat dash. Normal rest is in colour
-with JARVIS's globe turning slowly and its heart a dot.
+**The look.** The orb's stood-down state (feature 21): one dim grey ring (`#6B7B88`) with a flat dash, and nothing
+else: no dial, no particles, no count. It holds still where it rests, so the page stops drawing.
 
 **Kept** in `state.json` under `standDown` while it lasts, and what it held under `quiet`: a restart and a new
 overlay page keep both, look and all.
@@ -1887,8 +1937,8 @@ own `voices` folder.
 - It ends when Roamies does: its input closes, it checks every 3 seconds that Roamies is still its parent, and at
   Quit it is killed after 2 seconds if it is still there.
 
-**The Mac's own voices** speak with `"voiceEngine": "system"`, and whenever the natural voice can't. Which one is set in `~/Documents/roamies-pi/settings.json` (`voice` and
-`voices`, above), using names exactly as `say -v '?'` lists them in Terminal, for example `Daniel (Enhanced)`.
+**The Mac's own voices** speak with `"voiceEngine": "system"`, and whenever the natural voice can't. Which one is set in `~/Documents/roamies-pi/settings.json` (`voice`,
+above), using names exactly as `say -v '?'` lists them in Terminal, for example `Daniel (Enhanced)`.
 Download better voices in System Settings > Accessibility > Spoken Content > System voice > Manage Voices. A change
 to the file is picked up the next time Roamies speaks. A voice that isn't installed is skipped and the system voice
 speaks instead.
@@ -1919,7 +1969,7 @@ as "sir". It is a manner only.
 - The short line before something slow is one of `beats`, picked by code and spoken from audio made beforehand. The
   model is told to say nothing first; no request is made for a beat. A beat comes just before a reply, so it is said
   with the form of address taken out ("One moment."), unless `addressEverySeconds` is 0.
-- The name is for the model only. Menus and labels keep the look's name.
+- Feature 21: the name is also the orb's, in menus, labels and the setup guide (one look, so no look's name).
 
 ## Updating
 
