@@ -2200,6 +2200,16 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   `~/Documents/roamies-reports/2026-11-28_1152_feature-21-plan.md`. It supersedes the 2026-11-15 decision to keep
   upstream's characters hidden (the spec's rule 6 deletes them). Sixteen questions, among them two guarantee changes
   (the undo button against guarantee 2; a new guarantee 11). Nothing built; waiting for his go.
+- **2026-11-28 12:06.** Settings fault accepted, the added protecting settings kept, the snapshot limits off the list.
+  Answer: `~/Documents/roamies-reports/2026-11-28_1206_owner-accepts-settings-fault-kokoro-start-and-feature-21-go.md`.
+  Order: (1) `settings-followups` off `next`: a notice when a save removes a protecting setting, the skipped memory
+  pass done once readable, a test that every tool call of a running request is refused while broken, pi finishing
+  while broken in the run test if cheap; (2) `kokoro-start` off `next`: Kokoro starts with the app
+  (`kokoro.startWith` "app" or "firstReply"), a reply waits up to `kokoro.waitAtStartSeconds` (8); report start-up
+  time, memory and whether mlx_audio Kokoro can blend two voices; (3) feature 21 go, part (a) `look-orb` then part
+  (b) `mission-control`, with his sixteen answers (guarantee 2 unchanged, no undo button; guarantee 11 in his
+  wording; `orb.size` 80–140 in settings.json; `voices` dropped; the working-day dial; sounds deleted; no Windows or
+  Linux work).
 
 ## 6. Still to test
 
