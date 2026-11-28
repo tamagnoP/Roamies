@@ -80,22 +80,87 @@
     return { cluster, n };
   };
 
-  const wrap = (text, cols) => {
+  // Lines of at most `cols` columns, broken at a space. adv(i): how many columns the letter at i takes (one each in
+  // SF Mono; its own width in SF Pro). Each line keeps where each of its letters starts (x, in columns) and its width
+  // (w). A letter's place depends only on the letters before it on its line, so it never moves once it has landed.
+  const wrap = (text, cols, adv = () => 1) => {
     const lines = [];
     let i = 0;
     const n = text.length;
     while (i <= n) {
-      let end = i, lastSpace = -1;
-      while (end < n && text[end] !== '\n' && end - i < cols) { if (text[end] === ' ') lastSpace = end; end++; }
-      if (end < n && text[end] !== '\n' && end - i >= cols && lastSpace > i) end = lastSpace;
+      let end = i, lastSpace = -1, w = 0;
+      while (end < n && text[end] !== '\n') {
+        const a = adv(end);
+        if (end > i && w + a > cols + 1e-6) break;
+        if (text[end] === ' ') lastSpace = end;
+        w += a; end++;
+      }
+      if (end < n && text[end] !== '\n' && lastSpace > i) end = lastSpace;
       // Never cut an emoji (a surrogate pair) across two lines.
       else if (end < n && end > i + 1 && /[\ud800-\udbff]/.test(text[end - 1])) end--;
-      lines.push({ start: i, s: text.slice(i, end) });
+      const x = [0];
+      for (let j = i; j < end; j++) x.push(x[x.length - 1] + adv(j));
+      lines.push({ start: i, s: text.slice(i, end), x, w: x[x.length - 1] });
       if (end >= n) break;
       i = text[end] === ' ' || text[end] === '\n' ? end + 1 : end;
     }
     return lines;
   };
+
+  // ---------- the bubbles' text font (the owner, 2026-11-28 14:09) ----------
+  // One constant, so SF Pro and SF Mono can be compared by eye: 'sans' is SF Pro for replies and notices, with
+  // numbers, times, paths and code in SF Mono; 'mono' is SF Mono throughout (as before).
+  const BUBBLE_TEXT = 'sans';
+  R.bubbleText = BUBBLE_TEXT;
+  const PATH_START = /^[(\[{"'\u201c\u2018]*(?:~|\.{1,2}\/|\/)/;
+  /** Which letters are drawn in SF Mono: numbers and times (a digit, and : . , / - between two digits), paths (a word
+   *  that starts with / ~ ./ or ../) and code. Decided by what comes before a letter, or by the very next letter
+   *  only for a mark between digits, so a letter that has landed keeps its place. */
+  const monoMask = (text, sty) => {
+    const n = text.length, mono = new Uint8Array(n);
+    if (BUBBLE_TEXT === 'mono') return mono.fill(1);
+    const code = R.md?.CODE ?? 0, digit = (c) => c >= '0' && c <= '9';
+    for (let i = 0, word = 0; i < n; i++) {
+      const c = text[i];
+      if (c === ' ' || c === '\n' || c === '\t') { word = i + 1; continue; }
+      if (i === word) {
+        let e = i; while (e < n && !/\s/.test(text[e])) e++;
+        if (PATH_START.test(text.slice(i, Math.min(e, i + 6)))) { mono.fill(1, i, e); i = e - 1; continue; }
+      }
+      if (digit(c) || (':.,/-'.includes(c) && digit(text[i - 1] ?? '') && digit(text[i + 1] ?? '')) || (code && sty?.[i] & code)) mono[i] = 1;
+    }
+    return mono;
+  };
+  // Letter widths in columns (one SF Mono letter), measured once per letter and font.
+  let mcan = null, mctx = null, monoPx = 0;
+  const widths = new Map();
+  const measure = (ch, font) => {
+    if (!mctx) { mcan = document.createElement('canvas'); mctx = mcan.getContext?.('2d'); }
+    try { mctx.font = font; const w = Number(mctx.measureText(ch).width); return Number.isFinite(w) && w > 0 ? w : null; } catch { return null; }
+  };
+  const advance = (ch, bold) => {
+    const k = (bold ? 'b' : 'r') + ch;
+    let a = widths.get(k);
+    if (a == null) {
+      monoPx ||= measure('0', `500 100px ${R.glass.MONO}`) ?? 60;
+      const w = measure(ch, `${bold ? 700 : 500} 100px ${R.glass.SANS}`);
+      a = w ? w / monoPx : 0.85; // a page without a real canvas (the tests): about the average letter
+      widths.set(k, a);
+    }
+    return a;
+  };
+  /** The text laid out in a bubble's lines, and which of its letters are in SF Mono. */
+  const layout = (text, sty, cols) => {
+    const mono = monoMask(text, sty), bold = R.md?.BOLD ?? 0;
+    const adv = (i) => {
+      if (mono[i]) return 1;
+      const c = text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdfff) return 1; // an emoji: two columns, as in SF Mono
+      return advance(text[i], bold && sty?.[i] & bold);
+    };
+    return { lines: wrap(text, cols, adv), mono };
+  };
+  R.bubbleLayout = layout; // for the tests
   // The typing caret (an index into the text) as a wrapped line and column, so it's drawn where the next letter goes.
   const caretAt = (lines, caret) => {
     let li = 0;
@@ -391,10 +456,12 @@
       k.appear(entrance(), x, y);
     };
     const MAX_COLS = 38, MAX_LINES = 7, THINK_COLS = 28, THINK_LINES = 1, METER = 7;
-    // Bubble text: the system's monospace (SF Mono, 0.6 em per letter), sized to the bubble's line grid. It stays in
-    // columns as it streams in, so a letter never moves once it has landed (feature 21: no font is downloaded).
+    // Bubble text (BUBBLE_TEXT, above): sized to the bubble's line grid, measured in columns of one SF Mono letter
+    // (0.6 em). Each letter's place is fixed by the letters before it on its line, so it never moves once it has
+    // landed, in SF Pro as in SF Mono (feature 21: no font is downloaded).
     const fontPx = (t) => Math.round(CH * t * 0.72 * 2) / 2;
     const colW = (t) => fontPx(t) * 0.61 + 0.3;
+    const xAt = (line, j) => line?.x?.[j] ?? j; // where letter j of a line starts, in columns
     const TEXT_INK = '#F2F7FB', TEXT_ACCENT = '#62D5F8';
     const T = () => clamp(k.P * 0.42, 1.4, 2.4);
     const G = R.glass;
@@ -426,7 +493,7 @@
         bb.raw = (bb.raw ?? '') + s;
         const f = R.md ? R.md.flat(bb.raw) : { s: bb.raw, sty: null };
         bb.text = f.s; bb.sty = f.sty;
-        bb.lines = wrap(bb.text, bb.kind === 'thought' ? THINK_COLS : MAX_COLS);
+        ({ lines: bb.lines, mono: bb.mono } = layout(bb.text, bb.sty, bb.kind === 'thought' ? THINK_COLS : MAX_COLS));
         return this;
       },
       end() { bb.ended = true; return this; },
@@ -473,10 +540,10 @@
       const maxCols = bb.kind === 'thought' ? THINK_COLS : bb.expanded ? Math.min(72, Math.floor((W - 80) / colW(t))) : MAX_COLS;
       const maxRows = bb.kind === 'thought' ? THINK_LINES : bb.expanded ? Math.max(MAX_LINES, Math.floor((H * 0.62) / (CH * t))) : MAX_LINES;
       if (bb.input) {
-        const src = bb.text ? bb.lines : wrap(bb.input.placeholder || ' ', MAX_COLS);
+        const src = bb.text ? bb.lines : layout(bb.input.placeholder || ' ', null, MAX_COLS).lines;
         // A live transcript arrives in jumps, so its bubble is full width from the start and only grows down.
         let cols = bb.input.listen ? MAX_COLS : 18;
-        for (const l of src) cols = Math.max(cols, Math.min(l.s.length + 1, MAX_COLS));
+        for (const l of src) cols = Math.max(cols, Math.min(Math.ceil(l.w ?? l.s.length) + 1, MAX_COLS));
         // Local-only build: a bubble with buttons (pi's Send bubble) grows to show its whole question, up to most of the screen.
         const cap = bb.input.choices ? Math.max(MAX_LINES, Math.floor((H * 0.62) / (CH * t))) : MAX_LINES;
         const rows = clamp(src.length, 1, cap);
@@ -486,7 +553,7 @@
       }
       const shownLines = bb.lines.filter((l) => l.start < Math.max(1, bb.shown) || l === bb.lines[0]);
       let cols = 4;
-      for (const l of (bb.expanded ? bb.lines : shownLines)) cols = Math.max(cols, Math.min(l.s.length, maxCols));
+      for (const l of (bb.expanded ? bb.lines : shownLines)) cols = Math.max(cols, Math.min(Math.ceil(l.w ?? l.s.length), maxCols));
       if (bb.lines.length > 1) cols = Math.max(cols, Math.min(maxCols, 18));
       const rows = clamp(bb.expanded ? bb.lines.length : shownLines.length, 1, maxRows);
       return { cols, rows, maxRows, w: Math.max(cols * colW(t) + dotsDx(bb), tagH(bb) ? G.textW(bb.tag, HINT_F) + 12 : 0), h: rows * CH * t + tagH(bb) };
@@ -709,7 +776,8 @@
       tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       tctx.clearRect(0, 0, iw + 2, ih + 2);
       const dim = bb.kind === 'thought' || (ph && !bb.input.choices);
-      const lines = ph ? wrap(bb.input.placeholder || '', MAX_COLS) : bb.lines;
+      const laid = ph ? layout(bb.input.placeholder || '', null, MAX_COLS) : null;
+      const lines = ph ? laid.lines : bb.lines, monoAt = ph ? laid.mono : bb.mono;
       const s0 = ph ? 0 : bb.scroll.x, first = Math.max(0, Math.floor(s0)), last = Math.min(lines.length - 1, first + bb.rows);
       const shown = ph ? 1e9 : Math.floor(bb.shown);
       const shownLines = lines.filter((l) => l.start < shown).length;
@@ -717,11 +785,12 @@
       // Real type, not LED dots: crisp at any size, so a long answer stays easy to read.
       const fpx = fontPx(t), base = bb.kind === 'thought' ? 400 : 500, md = R.md;
       const fonts = new Map();
-      const fontFor = (st) => {
-        let f = fonts.get(st);
+      const fontFor = (st, mono) => {
+        const key = st * 2 + (mono ? 1 : 0);
+        let f = fonts.get(key);
         if (!f) {
           const w = st & (md?.BOLD ?? 0) ? 700 : base, it = st & (md?.ITAL ?? 0) ? 'italic ' : '';
-          f = `${it}${w} ${fpx}px ${G.MONO}`; fonts.set(st, f);
+          f = `${it}${w} ${fpx}px ${mono ? G.MONO : G.SANS}`; fonts.set(key, f);
         }
         return f;
       };
@@ -739,20 +808,20 @@
           if (idx >= shown) break;
           if (line.s[j] === ' ') {
             // A link's underline runs on under the spaces between its words.
-            if (R.md && (bb.sty?.[idx] ?? 0) & R.md.LINK && (bb.sty?.[idx + 1] ?? 0) & R.md.LINK) { tctx.fillStyle = TEXT_ACCENT; tctx.fillRect(j * cw, cy + lh * 0.36, cw, Math.max(1, t * 0.4)); }
+            if (R.md && (bb.sty?.[idx] ?? 0) & R.md.LINK && (bb.sty?.[idx + 1] ?? 0) & R.md.LINK) { tctx.fillStyle = TEXT_ACCENT; tctx.fillRect(xAt(line, j) * cw, cy + lh * 0.36, (xAt(line, j + 1) - xAt(line, j)) * cw, Math.max(1, t * 0.4)); }
             continue;
           }
           const em = emojiAt(line.s, j);
           const ch = em ? em.cluster : line.s[j];
           // Each new letter lands white, then settles to the text colour (code and links in the accent). It lands
           // in place: a little hop per letter made the line being read shake while it streamed in.
-          const st = ph ? 0 : bb.sty?.[idx] ?? 0, f = fontFor(st);
+          const st = ph ? 0 : bb.sty?.[idx] ?? 0, f = fontFor(st, monoAt?.[idx] ?? 1);
           if (f !== curFont) { tctx.font = f; curFont = f; }
-          const age = ph ? 9 : now - (bb.at[idx] ?? 0), x = j * cw + (em ? cw * 0.15 : 0), y = cy;
+          const age = ph ? 9 : now - (bb.at[idx] ?? 0), x = xAt(line, j) * cw + (em ? cw * 0.15 : 0), y = cy;
           const marked = md && st & (md.CODE | md.LINK);
           tctx.fillStyle = age < 0.12 ? '#ffffff' : marked ? accent : ink;
           tctx.fillText(ch, x, y);
-          if (md && st & md.LINK) tctx.fillRect(x, cy + lh * 0.36, cw, Math.max(1, t * 0.4));
+          if (md && st & md.LINK) tctx.fillRect(x, cy + lh * 0.36, (xAt(line, j + 1) - xAt(line, j)) * cw, Math.max(1, t * 0.4));
           if (em) j += em.n - 1;
         }
       }
@@ -761,9 +830,10 @@
         // caret where the next letter goes (or at the start, over the placeholder)
         let li = 0, col = 0;
         if (bb.text) ({ li, col } = caretAt(bb.lines, bb.input.caret ?? bb.text.length));
-        if (col >= bb.cols) col = bb.cols - 1;
+        let cx = bb.text ? xAt(bb.lines[li], col) : 0;
+        if (cx >= bb.cols) cx = bb.cols - 1;
         const cy = (li - s0) * lh;
-        if (cy > -1 && cy < ih) { tctx.fillStyle = css(HOT); tctx.fillRect(col * cw + 0.5, cy + lh * 0.15, Math.max(1.5, t * 0.8), lh * 0.7); }
+        if (cy > -1 && cy < ih) { tctx.fillStyle = css(HOT); tctx.fillRect(cx * cw + 0.5, cy + lh * 0.15, Math.max(1.5, t * 0.8), lh * 0.7); }
       }
       // Clip to the frame as it is this instant: it may still be growing, or shrinking away on close.
       const cx1 = fr.x + fr.w - padX(bb) + 2, cy1 = fr.y + fr.h - padY(bb) - (bb.input?.listen ? (METER + 1) * P : 0) - footH(bb) + 2;
@@ -1023,7 +1093,7 @@
             let i = 0;
             while (i < text.length && i < bb.text.length && text[i] === bb.text[i]) i++;
             for (let j = i; j < text.length; j++) bb.at[j] = now;
-            bb.text = text; bb.sty = null; bb.lines = wrap(text, MAX_COLS); bb.shown = text.length;
+            bb.text = text; bb.sty = null; ({ lines: bb.lines, mono: bb.mono } = layout(text, null, MAX_COLS)); bb.shown = text.length;
             return this;
           },
           level(v) { bb.input.target = clamp(v, 0, 1); return this; },
@@ -1051,7 +1121,7 @@
             const v = bb.input.mask ? '•'.repeat(value.length) : value;
             bb.input.caret = clamp(caret, 0, v.length);
             const prev = bb.text.length;
-            bb.text = v; bb.sty = null; bb.lines = wrap(v, MAX_COLS); bb.shown = v.length;
+            bb.text = v; bb.sty = null; ({ lines: bb.lines, mono: bb.mono } = layout(v, null, MAX_COLS)); bb.shown = v.length;
             for (let i = prev; i < v.length; i++) bb.at[i] = now;
             bb.input.caretAt = now;
             return this;

@@ -596,9 +596,13 @@ faces, hands, acts and sounds are deleted. The credit stays: "Based on Roamies b
 - **Bubbles, cards, the ask field and the research card** are in the instrument style: near-black, a thin line,
   square corners with short corner marks in the accent (`#62D5F8`), amber (`#F7C078`) for a warning, buttons at
   least 44 points high (the first filled in the accent). What each one does is unchanged.
-- **Fonts**: the system's own (SF Pro for text, SF Mono for numbers, paths and the bubbles' streaming text, which is
-  laid out in columns so a letter never moves once it lands). Nothing is downloaded; the bundled Martian Mono and
-  Doto are deleted.
+- **Fonts**: the system's own, nothing downloaded (the bundled Martian Mono and Doto are deleted). Titles, buttons,
+  tags and cards in SF Pro. The bubbles' text is one constant, `BUBBLE_TEXT` in `showcase/roamies/agent.js`, so the
+  two can be compared by eye (the owner, 14:09): `'sans'` (the default) is SF Pro for replies, notices, questions and
+  typing, with numbers, times (a digit, and `:` `.` `,` `/` `-` between two digits), paths (a word starting with `/`,
+  `~`, `./` or `../`) and code in SF Mono; `'mono'` is SF Mono throughout, as before. Either way each letter's place
+  is fixed by the letters before it on its line, so nothing shifts along a line while a reply streams in; a word that
+  no longer fits moves down whole, as before (`test/bubble-text.test.mjs`). Changing it needs a rebuild.
 - **No sounds.** The chiptune sounds of the page and the setup guide are deleted (`sfx.js`), and the `sfx` step of a
   drawing with them. The menu's Sound switch now covers only the voice helper's own cues (the listening chime, the
   snap of a circle).

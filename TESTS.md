@@ -24,7 +24,7 @@ checks, fixed since. Everything else is below.
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Settings that can't be used | 1 to 12 | new, 2026-11-28 (the fault on your Mac; 12 added at 12:06) |
 | The natural voice at start | 1 and 2 | new, 2026-11-28 |
-| Feature 21 (a): the orb and the bubbles | 1 to 15 | new; how it looks is yours to judge; 14 changed and 15 added at 14:09 |
+| Feature 21 (a): the orb and the bubbles | 1 to 17 | new; how it looks is yours to judge; 14 changed and 15 to 17 added at 14:09 |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -576,6 +576,14 @@ looks: no test can judge them.
     You should see: when the microphone opens for your answer, the ring drains from the top over the answer window
     (10 s), over a faint ring. Say a word or two and stop: it goes on from where it was. Then hold the talk keys or
     clap: a full ring.
+16. **SF Pro against SF Mono:** with `BUBBLE_TEXT` at `'sans'` (in `showcase/roamies/agent.js`), ask something with a
+    time, a number and a path in its answer ("Where's my plan, and when's my next call?").
+    You should see: the words in SF Pro; 10:30, the number and `~/…` in SF Mono; no letter shifts along its line
+    while the reply streams in. Then set it to `'mono'`, `./build.sh dev`, and ask the same: all in SF Mono, as
+    before. Keep the one you prefer.
+17. **The read-only countdown:** send a read-only task to pi with `autoSendReadOnly` on.
+    You should see: the Send bubble's first line still says "Asking pi in 10 s" with "Send now" and "Don't send", as
+    before (the artboard's countdown ticks come with part b).
 
 ## Group 4: features 17, 28, 15, 20 and 27
 

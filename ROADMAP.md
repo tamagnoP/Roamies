@@ -2260,6 +2260,10 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   the orb's ring drains from the top with the time left; a clap, the talk keys or a key press taking the window over
   give a full ring. `test/page.mjs` now gives the page a wall clock that moves with the test's clock (LESSONS.md: a
   run had met a five-minute mark of the dial).
+- **2026-11-28, the bubbles' font** (on `look-orb`): one constant, `BUBBLE_TEXT` in `agent.js`, `'sans'`: SF Pro for
+  replies, notices, questions and typing, with numbers, times, paths and code in SF Mono; `'mono'` as before. The lines
+  are laid out by each letter's own width, and a letter's place is fixed by those before it on its line, so nothing
+  shifts while a reply streams in (`test/bubble-text.test.mjs`, letter by letter with a proportional stand-in font).
 
 ## 6. Still to test
 
