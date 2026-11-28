@@ -2237,6 +2237,8 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   the line to add), `voice` defaults to Daniel. The page is told `orb`, `dial` and `pi`. Tests: `orb.test.mjs`,
   `orb-rest.test.mjs` (replaces `looks-rest`), the page and run tests brought up to date. Not merged: waiting for his
   review. Part (b), Mission Control, starts after it is reviewed and merged.
+- **2026-11-28 13:53.** Report on the settings follow-ups, Kokoro at start and feature 21 (a), with `test:all` passed
+  on `look-orb` (`20f28b3`): `~/Documents/roamies-reports/2026-11-28_1353_settings-followups-kokoro-start-feature-21a-report.md`.
 
 ## 6. Still to test
 
