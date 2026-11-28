@@ -355,6 +355,10 @@ export const KOKORO = {
   memoryMB: { default: 400, min: 100, max: 16384, ok: (v) => Number.isInteger(v) && v >= 100 && v <= 16384 },
   // Feature 24: minutes without a sentence after which the helper is ended to give its memory back (0: never).
   sleepAfterMinutes: { default: 0, min: 0, max: 1440, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 1440 },
+  // The owner, 2026-11-28: when the helper is started ("app": with Roamies; "firstReply": at the first spoken reply),
+  // and how long a reply ready while it is still loading at start waits for it before the Mac's voice speaks it.
+  startWith: { default: 'app', ok: (v) => v === 'app' || v === 'firstReply' },
+  waitAtStartSeconds: { default: 8, min: 0, max: 30, ok: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 30 },
 };
 /** The parts of "persona": how Roamies speaks, and nothing about what it may do (persona.mjs). address may be "". */
 export const PERSONA = {

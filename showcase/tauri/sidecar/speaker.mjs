@@ -47,7 +47,7 @@ export function bundledBeats(dir = path.join(path.dirname(fileURLToPath(import.m
 export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl: FixedVoice = LocalVoice, pickVoice = null, account = localAccount, beatPhrases = BEATS, bundled = () => null }) {
   // Local-only build (feature 16): which voice a reply uses is asked when it is made (pickVoice: the natural voice
   // while its helper is up, else nothing, which means the macOS voice), and the audio's rate comes from the voice.
-  const voiceImpl = () => pickVoice?.() ?? FixedVoice;
+  const voiceImpl = (o) => pickVoice?.(o) ?? FixedVoice;
   const voiceName = (I) => (I === FixedVoice ? 'mac' : 'natural'); // for the log: which of this build's voices
   const beatRate = new Map(); // phrase → the rate its kept audio was made at
   const beatVoice = new Map(); // Local-only build (feature 24): phrase → the voice its kept audio was made in
@@ -153,7 +153,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     };
     const connect = (m) => {
       tries++;
-      Impl = voiceImpl();
+      Impl = voiceImpl({ reply: true });
       v = new Impl({
         key, voice, model: m,
         onAudio: (pcm) => {
@@ -182,8 +182,8 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         },
       }).open();
     };
-    log('speech_start', { id, voice: voiceName(voiceImpl()) });
     connect(model);
+    log('speech_start', { id, voice: voiceName(Impl) });
     current = me;
     return me;
   }

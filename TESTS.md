@@ -23,6 +23,7 @@ checks, fixed since. Everything else is below.
 | Feature 34 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Settings that can't be used | 1 to 12 | new, 2026-11-28 (the fault on your Mac; 12 added at 12:06) |
+| The natural voice at start | 1 to 3 | new, 2026-11-28 |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -517,6 +518,18 @@ cp ~/Documents/roamies-pi/settings.json ~/Documents/roamies-pi/settings.backup.j
     `settings_reminder`, one `settings_unreadable` for each kind skipped, and no `uncaught`, `error prompt`,
     `daily_failed` or `calendar_error` from the time it was broken. Then put your settings back:
     `mv ~/Documents/roamies-pi/settings.backup.json ~/Documents/roamies-pi/settings.json`.
+
+### The natural voice at start (2026-11-28)
+
+**Before.** Build from `next`. Spoken replies on, `"voiceEngine": "kokoro"`.
+
+1. **Quit Roamies, start it, and at once type** "What's first today?"
+   You should hear: the reply in the natural voice (George), its first word a few seconds after the text appears,
+   not the Mac's voice. In the activity log: `kokoro_ready` before `speech_first_audio {"voice":"natural"}`.
+2. **Set `"waitAtStartSeconds": 0`** under `"kokoro"`, quit, start, and type the same at once.
+   You should hear: the Mac's voice for that reply, and George for the next one once it has loaded. Set it back to 8.
+3. **Set `"startWith": "firstReply"`**, quit and start. In Activity Monitor there is no `python` helper until your
+   first spoken reply; that reply waits for it (up to 8 s) and is spoken by George. Set it back to `"app"`.
 
 ## Group 3: features 19 and 21
 

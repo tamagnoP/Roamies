@@ -130,6 +130,11 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
   let lastUse = now(), holds = 0; // feature 24: when a sentence was last asked for or a reply's voice let go; replies' voices open now
   let child = null, tmp = null, buf = Buffer.alloc(0), seq = 0, current = null, startTimer = null, why = '', t0 = 0, rate = 24000, profile = '';
   const waiting = []; // sentences asked for while another is being made
+  // The owner, 2026-11-28: the first load of the session ("at start", not a wake from sleep), and the replies' voices
+  // waiting for it (whenReady).
+  let loads = 0;
+  const readyWaiters = new Set();
+  const settle = (ok) => { for (const w of [...readyWaiters]) w(ok); };
   const limitMs = () => { try { return settings().limits.kokoroTimeoutSeconds * 1000; } catch { return 20_000; } };
   const clean = () => { if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } tmp = null; } };
   const kill = () => { try { child?.kill('SIGKILL'); } catch { /* already gone */ } child = null; };
@@ -145,6 +150,7 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     const err = new Error('The natural voice stopped.');
     if (current) { clearTimeout(current.timer); current.reject(err); current = null; }
     for (const w of waiting.splice(0)) w.reject(err);
+    settle(false);
     log('kokoro_down', { reason: why, was });
     onDown(why);
   }
@@ -178,6 +184,7 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     if (head.ready === true && state === 'starting') {
       state = 'ready'; rate = Number(head.rate) || 24000; clearTimeout(startTimer); lastUse = now();
       log('kokoro_ready', { ms: Date.now() - t0, rate, voices: head.voices });
+      settle(true);
       onReady();
       return next();
     }
@@ -217,7 +224,7 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     if (problem) return down(problem);
     const place = modelPlace(k.model, home);
     if (!fs.existsSync(place.dir)) return down('the model is not on this Mac');
-    state = 'starting'; t0 = Date.now();
+    state = 'starting'; t0 = Date.now(); loads++;
     try {
       tmp = fs.realpathSync(fs.mkdtempSync(path.join(tmpRoot, 'roamies-kokoro-'))); // owner-only (0700)
       const copy = path.join(tmp, SCRIPT);
@@ -253,6 +260,7 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     const err = new Error('The natural voice stopped.');
     if (current) { clearTimeout(current.timer); current.reject(err); current = null; }
     for (const w of waiting.splice(0)) w.reject(err);
+    settle(false);
     if (!c || was === 'down') return clean();
     try { c.stdin.end(); } catch { /* already closed */ }
     const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* gone */ } }, QUIT_KILL_MS);
@@ -272,8 +280,22 @@ export function createKokoro({ settings, home = os.homedir(), script = path.join
     return true;
   }
 
+  /** The owner, 2026-11-28: → true once the helper is ready, false if it goes down or stops, or after ms. At once when
+   *  it isn't loading. */
+  function whenReady(ms) {
+    if (state === 'ready') return Promise.resolve(true);
+    if (state !== 'starting' || !(ms > 0)) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const done = (ok) => { readyWaiters.delete(done); clearTimeout(t); resolve(ok); };
+      const t = setTimeout(() => done(state === 'ready'), ms);
+      readyWaiters.add(done);
+    });
+  }
+
   return {
-    start, make, stop, wake,
+    start, make, stop, wake, whenReady,
+    /** Loading for the first time this session (at start; a wake from sleep doesn't count). */
+    get loadingAtStart() { return state === 'starting' && loads === 1; },
     /** A reply's voice in this helper's voice is open: it doesn't sleep until it is let go (release). */
     hold() { holds++; return true; },
     release() { holds = Math.max(0, holds - 1); lastUse = now(); },
@@ -294,6 +316,10 @@ export class KokoroVoice extends LocalVoice {
     super(rest);
     this.engine = engine; this.settings = settings;
     this.holding = !!engine.hold?.(); // feature 24: the helper doesn't sleep while this reply is open
+    // The owner, 2026-11-28: a reply ready while the helper is still loading at start waits for it, up to
+    // kokoro.waitAtStartSeconds from its first sentence; past that it is spoken by the Mac's voice to its end.
+    this.waitMs = 0; this.deadline = 0; this.fellBack = false;
+    if (engine.loadingAtStart) { try { this.waitMs = settings().kokoro.waitAtStartSeconds * 1000; } catch { this.waitMs = 0; } }
   }
 
   close() {
@@ -312,7 +338,13 @@ export class KokoroVoice extends LocalVoice {
   }
 
   async make(text) {
-    if (this.engine.ready) {
+    if (!this.engine.ready && !this.fellBack && this.waitMs > 0) {
+      this.deadline ||= Date.now() + this.waitMs;
+      const ok = await this.engine.whenReady(this.deadline - Date.now());
+      if (this.state === 'done') throw new Error('The reply ended.');
+      if (!ok) this.fellBack = true;
+    }
+    if (this.engine.ready && !this.fellBack) {
       try {
         const k = this.settings().kokoro;
         const { pcm, rate } = await this.engine.make(text, { voice: k.voice, speed: k.speed });

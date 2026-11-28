@@ -2218,6 +2218,12 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   first refusal ends the request (so Claude's program takes no next step by itself) with the settings line. Run test
   `settings-broken-tools-run.test.mjs` (in `test:all`): both routes, plus the memory pass, the notice and a pi task
   finishing while broken. TESTS.md check 11 added (now 1 to 12).
+- **2026-11-28, `kokoro-start`.** The helper already started with the app (since feature 16); what is new: a reply
+  ready while it is still loading for the first time waits for it up to `kokoro.waitAtStartSeconds` (8) from its
+  first sentence, then the Mac's voice to its end; `kokoro.startWith` `"app"` (default) or `"firstReply"` (started by
+  the first spoken reply, which then waits). A wake from sleep doesn't wait. Measured: ready 7.6 to 7.9 s after start,
+  the sidecar's start unchanged (0.47 s), the helper 654 to 683 MB. mlx-audio 0.6.5 can blend voices
+  (`"bm_george,bm_lewis"`, an equal mean), not used: `kokoro_server.py` takes one voice name. Not built.
 
 ## 6. Still to test
 
