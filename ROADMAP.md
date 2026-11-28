@@ -2239,6 +2239,13 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   review. Part (b), Mission Control, starts after it is reviewed and merged.
 - **2026-11-28 13:53.** Report on the settings follow-ups, Kokoro at start and feature 21 (a), with `test:all` passed
   on `look-orb` (`20f28b3`): `~/Documents/roamies-reports/2026-11-28_1353_settings-followups-kokoro-start-feature-21a-report.md`.
+- **2026-11-28 14:09, his answer** (`2026-11-28_1409_owner-accepts-followups-and-kokoro-wait-feature-21a-changes.md`):
+  the follow-ups and the Kokoro wait accepted; `kokoro.startWith` taken out again (`waitAtStartSeconds` kept). On
+  `look-orb` before merging: all the dead Fish Audio code deleted, with a source test that nothing shipped or shown
+  says "fish" (and the guide's providers beyond Anthropic too, if the installed app can reach them); the listening
+  ring drains with the time left when an answer window opened the microphone (a clap or the talk keys: a full ring);
+  the bubble font one constant, SF Pro for replies and notices, numbers, times and paths mono. Then merge and start
+  part (b).
 
 ## 6. Still to test
 
