@@ -532,7 +532,7 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   assert.match(side, /if \(MAC\) \{ try \{ if \(settingsNow\(\)\.voiceEngine === 'kokoro'\) kokoro\.start\(\); \}/);
   assert.equal((side.match(/kokoro\.start\(\)/g) ?? []).length, 1, 'the one place the helper is started');
   assert.match(side, /else if \(id === 'quit'\) \{ pi\.stopAll\(\); kokoro\.stop\(\);/, 'it is stopped when Roamies quits');
-  assert.match(side, /pickVoice: \(\) => \(kokoro\.ready \? KokoroReplyVoice : null\)/, 'feature 24: the natural voice for a reply only if its helper is ready when the reply starts');
+  assert.match(side, /pickVoice: \(\) => \(kokoro\.ready && !trouble\(\) \? KokoroReplyVoice : null\)/, 'feature 24: the natural voice for a reply only if its helper is ready when the reply starts');
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

@@ -27,17 +27,16 @@ export function writeReference(home = os.homedir()) {
 }
 
 const shown = (v) => { const t = JSON.stringify(v); return t.length > 80 ? `${t.slice(0, 79)}…` : t; };
-// Safety settings fall back to the safe side, and the bubble says so.
-const USING = { sandbox: () => 'The sandbox stays on.', neverLook: () => 'I\'m using the built-in list.', mask: () => 'Nothing is masked until it is fixed.' };
 
 /** The start-up bubble's text: which settings settings.json lacks, and which hold a value that can't be used, one
- *  line each. '' when there's nothing to say. */
+ *  line each. '' when there's nothing to say. A wrong value in a setting that protects something isn't among them: the
+ *  file is then refused as a whole, and the text is the refusal line (the owner, 2026-11-28). */
 export function settingsNotice(home = os.homedir()) {
   let s;
   try { s = loadSettings(home); } catch (e) { return e.message; }
   const lines = [];
   if (s.missing.length) lines.push(`settings.json doesn't have: ${s.missing.join(', ')}. I'm using the values in settings.default.json until you add them.`);
-  for (const { name, using } of s.invalid) lines.push(`settings.json has a value I can't use for: ${name}. ${USING[name]?.() ?? `I'm using ${shown(using)}.`}`);
+  for (const { name, using } of s.invalid) lines.push(`settings.json has a value I can't use for: ${name}. I'm using ${shown(using)}.`);
   // Feature 34: what on the masking list can't be used (these lines name words: shown, never logged).
   if (s.masking !== false) lines.push(...cleanMask(s.mask, { maxEntries: s.limits.maskEntries }).problems);
   return lines.join('\n');

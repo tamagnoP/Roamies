@@ -28,6 +28,7 @@ import { QUEUE_ORDER, WAITING_PHRASES, WHY } from './quiet.mjs'; // feature 31: 
 import { CHECK_AGAIN_TIMES, DONE_WORDS as CHECK_DONE_WORDS, NOT_YET_WORDS, SKIP_BEFORE_START_MINUTES, STILL_WORDS } from './checkin.mjs'; // feature 25: shown in settings.default.json
 import { localAddress } from './local.mjs'; // feature 23: the one address the local model may have
 import { GROUPS as MASK_GROUPS, LABELS as MASK_LABELS, MASK_NOTE, WEB_OFF, cleanMask, listedCount } from './mask.mjs'; // feature 34: masking
+import { SettingsProblem, isSettingsProblem, jsonError, placeOf, readWhy } from './settingsproblem.mjs'; // the owner, 2026-11-28: a settings file that can't be used
 import { MAX_SENTENCES as UPDATE_SENTENCES, NOT_SEEN, RECOGNISED, UPDATE_MODES, URGENT_KINDS, URGENT_SECONDS, createSchedule, createWatch } from './piwatch.mjs'; // feature 41: pi's updates in plain words
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -420,6 +421,31 @@ const limitOk = (name, v) => typeof v === 'number' && Number.isFinite(v) && v >=
 // pi's own folder is a subfolder, so the settings file isn't in the folder pi is started in. "projects" is empty
 // because the current project is always on the list, whatever it holds.
 const DEFAULTS = (dir) => ({ project: `${dir}/${PATHS.workspace}`, projects: [], pi: 'pi', maxMinutes: 60, keepLogsDays: 30, autoSendReadOnly: 5, progressSeconds: 90, piUpdates: UPDATE_MODES[0], piUpdatesOwnWork: true, piWatch: { installs: [], network: [], pushes: [] }, routines: {}, briefings: {}, voice: '', voices: { ...DEFAULT_VOICES }, vault: '~/Documents/roamies-vault', dailyFolder: 'Daily', neverLook: [...NEVER_LOOK], sandbox: true, readOnly: [], calendar: calendarDefaults(), toolFolders: [], toolFoldersOff: [], docker: [], home: HOME_CORNERS[0], autoListenQuestions: true, closingReply: 'Any time.', speakNotices: true, files: true, fileContents: FILE_CONTENTS[0], findAnywhere: true, findDrives: true, findLeaveOut: [], masking: true, mask: Object.fromEntries(MASK_GROUPS.map((g) => [g, []])), measurePageRebuild: false, measureRequests: false, voiceEngine: VOICE_ENGINES[0], kokoro: partDefaults(KOKORO), persona: partDefaults(PERSONA), standDown: partDefaults(STAND_DOWN), speaking: partDefaults(SPEAKING), local: partDefaults(LOCAL), limits: limitDefaults() });
+/** The owner, 2026-11-28: the settings that protect something. A wrong value in one of these (or in a part of one) is
+ *  treated like a file that can't be read: requests are refused until it is fixed (SettingsProblem). A wrong value in
+ *  any other setting gets a notice and that setting's default, as before. "limits" itself, when it isn't an object,
+ *  counts too: it holds the protecting limits. */
+export const PROTECTING = ['mask', 'masking', 'neverLook', 'sandbox', 'readOnly', 'toolFoldersOff', 'findLeaveOut', 'files', 'fileContents', 'findAnywhere', 'findDrives', 'autoSendReadOnly', 'local', 'standDown', 'piUpdates', 'maxMinutes', 'keepLogsDays', 'autoListenQuestions', 'limits.maskEntries', 'limits.fileReadChars', 'limits.localFileChars', 'limits.filesPerRequest', 'limits.piReplyChars', 'limits.piStatements', 'limits.piStatementChars'];
+export const protects = (name) => name === 'limits' || PROTECTING.some((p) => name === p || name.startsWith(`${p}.`));
+const BOOL = 'should be true or false', FOLDERS = 'should be a list of folders, each in quotes', OBJ = 'should be an object, in { }';
+const range = (t, whole = true) => `should be a ${whole ? 'whole ' : ''}number from ${t.min} to ${t.max}`;
+/** What a protecting setting should be, in words, for the refusal line (never its value: it could be a private word). */
+export const SHOULD = {
+  mask: 'should be an object with the groups people, organisations, projects and other', masking: BOOL,
+  neverLook: 'should be a list of app names, each in quotes', sandbox: BOOL,
+  readOnly: FOLDERS, toolFoldersOff: FOLDERS, findLeaveOut: FOLDERS,
+  files: BOOL, fileContents: `should be ${FILE_CONTENTS.map((v) => `"${v}"`).join(' or ')}`, findAnywhere: BOOL, findDrives: BOOL,
+  autoSendReadOnly: 'should be a number of seconds, 0 or more', get piUpdates() { return `should be ${UPDATE_MODES.map((v) => `"${v}"`).join(', ').replace(/, ([^,]*)$/, ' or $1')}`; }, // read when used: piwatch.mjs may still be loading
+  maxMinutes: 'should be a number of minutes above 0', keepLogsDays: 'should be a number of days, 0 or more', autoListenQuestions: BOOL,
+  local: OBJ, standDown: OBJ, limits: OBJ, 'local.start': OBJ,
+  'local.address': 'should be "" or http://127.0.0.1:<port>/v1', 'local.model': 'should be "" or the model\'s id as its server lists it',
+  'local.whenOffline': BOOL, 'local.confirmChanges': BOOL, 'local.historyExchanges': range(LOCAL.historyExchanges), 'local.maxSteps': range(LOCAL.maxSteps),
+  'local.start.python': 'should be "" or a full path, starting with /', 'local.start.model': `should be ${LOCAL_MODELS.map((v) => `"${v}"`).join(' or ')}`,
+  'local.start.port': range(LOCAL_START.port), 'local.start.sleepAfterMinutes': range(LOCAL_START.sleepAfterMinutes), 'local.start.draft': BOOL, 'local.start.waitSeconds': range(LOCAL_START.waitSeconds),
+  'standDown.phrase': 'should be one to four words, letters only, and not a phrase Roamies already acts on', 'standDown.shortcut': 'should be a key with at least one modifier, like "Control+Alt+Period"',
+  'standDown.endsAtDayTurn': BOOL, 'standDown.waitSeconds': range(STAND_DOWN.waitSeconds, false),
+  ...Object.fromEntries(PROTECTING.filter((p) => p.startsWith('limits.')).map((p) => [p, range(LIMITS[p.slice(7)], !!LIMITS[p.slice(7)].whole)])),
+};
 /** Every setting with its default, as settings.json is first made and as settings.default.json shows it. */
 export const settingsDefaults = (home) => DEFAULTS(tilde(path.join(home, PATHS.folder), home));
 
@@ -533,9 +559,15 @@ export function loadSettings(home) {
   fs.mkdirSync(path.join(dir, PATHS.workspace), { recursive: true });
   const defaults = DEFAULTS(tilde(dir, home));
   if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(defaults, null, 2)}\n`);
-  let raw;
-  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new Error(`${tilde(file, home)} isn't valid JSON (${e.message}). Fix or delete it.`); }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${tilde(file, home)} should be a JSON object.`);
+  // The owner, 2026-11-28: what can't be used is one problem (SettingsProblem), worded by code with the place it is.
+  const shownFile = tilde(file, home);
+  let raw, text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new SettingsProblem({ kind: 'read', file: shownFile, why: readWhy(e) }); }
+  try { raw = JSON.parse(text); } catch {
+    const at = jsonError(text) ?? { offset: 0, comma: false, end: false, empty: false };
+    throw new SettingsProblem({ kind: 'json', file: shownFile, ...placeOf(text, at.offset), comma: at.comma, end: at.end, empty: at.empty });
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SettingsProblem({ kind: 'object', file: shownFile });
   // set: each setting as the file has it when it's there and usable, else its default.
   const missing = [], invalid = [], set = {};
   for (const name of Object.keys(defaults)) {
@@ -592,6 +624,11 @@ export function loadSettings(home) {
       }
     }
     parts.local.start = start; parts.local.address = parts.local.address ? localAddress(parts.local.address) : ''; }
+  // The owner, 2026-11-28: a wrong value in a setting that protects something refuses requests until it is fixed;
+  // so does an entry on the masking list that would leave a word unmasked (while masking is on).
+  const wrong = invalid.filter((i) => protects(i.name)).map((i) => ({ name: i.name, what: SHOULD[i.name] ?? 'has a value that can\'t be used' }));
+  if (set.masking !== false && !invalid.some((i) => i.name === 'mask')) wrong.push(...cleanMask(set.mask, { maxEntries: limits.maskEntries }).wrong);
+  if (wrong.length) throw new SettingsProblem({ kind: 'value', file: shownFile, wrong });
   const calendar = { dayStart: clock(cal.dayStart), dayEnd: clock(cal.dayEnd), lunch: cal.lunch?.length ? cal.lunch.map(clock) : null, gapMinutes: cal.gapMinutes, syncSeconds: cal.syncSeconds, dayTurnsAt: clock(cal.dayTurnsAt), reviewAt: cal.reviewAt === '' ? null : clock(cal.reviewAt) };
   // projects: a list of folders (named by their last part), or { name: folder }.
   const listed = Array.isArray(set.projects) ? set.projects.map((p) => [base(expand(p, home)), p]) : Object.entries(set.projects);
@@ -624,6 +661,15 @@ export function loadSettings(home) {
   const homeSpot = isObj(set.home) ? { x: set.home.x, y: set.home.y } : set.home.trim().toLowerCase();
   return { dir, file, raw, missing, invalid, limits, calendar, home: homeSpot, project, fileProject, projects, sandbox: set.sandbox, readOnly: folders(set.readOnly), toolFolders, docker: folders(set.docker), vault, dailyFolder: set.dailyFolder, neverLook, routines, briefings, autoSendReadOnly: Number(set.autoSendReadOnly), progressSeconds: Number(set.progressSeconds), piUpdates: set.piUpdates, piUpdatesOwnWork: set.piUpdatesOwnWork, piWatch: set.piWatch, keepLogsDays: Number(set.keepLogsDays), voice: set.voice.trim(), voices, pi: set.pi.trim(), maxMinutes: Number(set.maxMinutes), autoListenQuestions: set.autoListenQuestions, closingReply: set.closingReply.trim(), speakNotices: set.speakNotices, files: set.files, fileContents: set.fileContents, findAnywhere: set.findAnywhere, findDrives: set.findDrives, findLeaveOut: folders(set.findLeaveOut), masking: set.masking, mask: set.mask, measurePageRebuild: set.measurePageRebuild, measureRequests: set.measureRequests, voiceEngine: set.voiceEngine, kokoro: parts.kokoro, persona: parts.persona, standDown: parts.standDown, speaking: parts.speaking, local: parts.local };
 }
+
+/** The owner, 2026-11-28: why settings.json can't be used now (a SettingsProblem: its message is the line shown, its
+ *  spoken the line said), or null when it can. Never throws. */
+export function settingsProblem(home = os.homedir()) {
+  try { loadSettings(home); return null; } catch (e) { return isSettingsProblem(e) ? e : new SettingsProblem({ kind: 'read', file: tilde(path.join(home, PATHS.folder, PATHS.settings), home), why: readWhy(e) }); }
+}
+/** The folder settings.json and state.json are in, known without reading the settings. */
+export const settingsFolder = (home = os.homedir()) => path.join(home, PATHS.folder);
+export const settingsPath = (home = os.homedir()) => path.join(home, PATHS.folder, PATHS.settings);
 
 /** Where the character rests on the desktop (the "home" setting): a corner, or { x, y }. Never throws. */
 export function homeFor(home = os.homedir()) {
@@ -1248,6 +1294,7 @@ export function codeReference() {
   const h = '~', dir = `~/${PATHS.folder.split(path.sep).join('/')}`;
   const blocked = BLOCKED(h, dir);
   return {
+    refusedWhenWrong: { settings: [...PROTECTING, 'limits (when it isn\'t an object)', 'an entry on the masking list that would leave a word unmasked (while masking is on)'], what: 'a wrong value in one of these is treated like a file that can\'t be read: every request gets one line saying which setting and what it should be, and nothing else, until it is fixed; a wrong value in any other setting gets a notice and its default' },
     limitRanges: Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, { min: v.min, max: v.max, ...(v.whole ? { wholeNumber: true } : {}), ...(v.zero ? { zero: v.zero } : {}) }])),
     kokoroRanges: { python: 'a full path to a program that exists; started directly, never through a shell', model: 'a name as downloaded ("owner/name"), or a folder', voice: 'a voice that ships with the model, such as bm_george', lang: 'one letter', speed: { min: KOKORO.speed.min, max: KOKORO.speed.max }, cacheMB: { min: KOKORO.cacheMB.min, max: KOKORO.cacheMB.max, wholeNumber: true, zero: 'MLX keeps no freed memory for reuse' }, memoryMB: { min: KOKORO.memoryMB.min, max: KOKORO.memoryMB.max, wholeNumber: true }, memory: 'read when the helper starts', sleepAfterMinutes: { min: KOKORO.sleepAfterMinutes.min, max: KOKORO.sleepAfterMinutes.max, wholeNumber: true, zero: 'it never sleeps', wakes: `on the talk key, an answer window, a spoken request, and ${WAKE_BEFORE_BRIEFING_MINUTES} minutes before a briefing; meanwhile the Mac's voice speaks` } },
     personaRanges: { name: 'up to 40 characters', address: 'up to 30 letters, or "" for none', manner: 'up to 200 characters', humour: 'up to 100 characters', maxSentences: { min: PERSONA.maxSentences.min, max: PERSONA.maxSentences.max, wholeNumber: true }, beats: 'one to forty short lines', addressEverySeconds: { min: PERSONA.addressEverySeconds.min, max: PERSONA.addressEverySeconds.max, wholeNumber: true, zero: 'the form of address is used every time' }, rule: 'the persona changes how Roamies speaks and nothing about what it may do' },

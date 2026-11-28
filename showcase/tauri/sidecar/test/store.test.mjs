@@ -49,8 +49,9 @@ assert.equal((await S.loadLatestSession()).id, s.id, 'a conversation quiet for d
 }
 // Regression: a reply still running when the app restarted (an update) wasn't saved.
 {
-  const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8'), close = side.slice(side.indexOf(".on('close', () => {"));
-  assert.ok(/if \(busy\) syncSession\(\);[\s\S]*flushWrites\(\)/.test(close.slice(0, 400)), 'closing saves a running reply before flushing');
+  const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8'), close = side.slice(side.indexOf('function onShellClosed() {'));
+  assert.match(side, /\.on\('close', onShellClosed\);/);
+  assert.ok(/if \(busy\) syncSession\(\);[\s\S]*flushWrites\(\)/.test(close.slice(0, 600)), 'closing saves a running reply before flushing');
 }
 
 // corrupt newest session → skipped, kept aside, older one still loads

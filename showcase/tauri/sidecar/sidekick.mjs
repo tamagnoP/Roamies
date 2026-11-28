@@ -15,7 +15,7 @@ import {
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
-import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,7 +43,8 @@ import { createSecrets, retryLoad } from './secrets.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
 import { keyCards, keyKinds, signInCards } from './providers.mjs';
-import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, voiceFor } from './pi.mjs';
+import { createPi, tellResult, forVoice, gateTools, homeFor, limitsFor, loadSettings, settingsDefaults, settingsFolder, settingsPath, settingsProblem, voiceFor } from './pi.mjs';
+import { READABLE_AGAIN, isSettingsProblem } from './settingsproblem.mjs'; // the owner, 2026-11-28: settings.json that can't be used
 import { OUT_TOKENS, codeLines, compose, digestText, updatePrompt } from './piwatch.mjs'; // Local-only build (feature 41)
 import { SHORT, leanTools } from './lean.mjs';
 import { createFind, foundLine, nothingLine, pickRow, WHICH_FILE } from './findany.mjs'; // Local-only build (feature 40): find a file anywhere, by code alone
@@ -213,6 +214,64 @@ let voiceProblemAt = 0;
 // Local-only build (feature 16): the natural voice's helper (kokorovoice.mjs). When it can't start or stops, that is
 // said once, and the macOS voice speaks for the rest of the session.
 const settingsNow = () => loadSettings(HOME);
+// Local-only build (the owner, 2026-11-28): settings.json that can't be used (not readable, not valid JSON, not one
+// object, or a wrong value in a setting that protects something: PROTECTING in pi.mjs). Every request of the owner's
+// gets one line worded by code, shown and said, and nothing else; no request goes to any model; what runs by itself
+// is skipped (logged once per kind until it can be used again), but for the reminders he set. Nothing throws out of a
+// timer or an event handler because of it. The file is watched: a save that leaves it broken gives the line once, and
+// one that mends it says so.
+const DIR = settingsFolder(HOME); // where state.json is: known without reading the settings
+const trouble = () => settingsProblem(HOME); // the problem, or null; never throws
+let settingsBad = false; // the owner was told it can't be used, and not yet that it can be again
+const skippedFrom = new Set();
+function skipped(from) { if (skippedFrom.has(from)) return; skippedFrom.add(from); logLine('settings_unreadable', { from }); }
+const failed = (from, e) => (isSettingsProblem(e) ? skipped(from) : console.error(from, e));
+/** A timer's or a handler's work: skipped while the settings can't be used; never throws (nor does what it returns). */
+function whenReadable(from, fn) {
+  if (trouble()) { skipped(from); return undefined; }
+  try { const r = fn(); if (r && typeof r.catch === 'function') r.catch((e) => failed(from, e)); return r; } catch (e) { failed(from, e); return undefined; }
+}
+/** A line about the settings (or a reminder followed by it): shown as it is, with no form of address, and said in the
+ *  Mac's own voice with its default, whatever the settings would choose, whenever this computer has that voice. */
+// One after another: a line (a reminder's among them) isn't cut off by the next one.
+let settingsSpeech = Promise.resolve();
+function settingsSay(shown, spoken, mood = 'concerned') {
+  sayAsIs(shown, mood);
+  if (!spoken || !speech.on) return;
+  settingsSpeech = settingsSpeech.then(() => {
+    lineUntil = Date.now() + 1500 + spoken.length * 75;
+    speech.setVoice('');
+    const v = speech.start();
+    for (const part of spoken.match(/[^.!?\n]+[.!?]*\s*/g) ?? [spoken]) v.say(part);
+    const mark = v.mark();
+    v.end();
+    return Promise.race([whenPlayed(mark), new Promise((r) => setTimeout(r, 3000 + spoken.length * 100))]);
+  }).catch((e) => failed('settings line', e));
+}
+/** The line for a request of the owner's while the settings can't be used. */
+function refuse(p, byVoice) {
+  settingsBad = true;
+  logLine('settings_refused', { by: byVoice ? 'voice' : 'typed', kind: p.problem?.kind ?? 'read' });
+  if (byVoice) ui({ kind: 'heard' });
+  settingsSay(p.message, p.spoken);
+}
+/** Before a request of the owner's, typed or spoken: → true when the settings can't be used (the line was given, and
+ *  nothing more is done). When they can be used again and he hasn't been told, that comes first, once. */
+function settingsGate(byVoice) {
+  const p = trouble();
+  if (p) { refuse(p, byVoice); return true; }
+  if (settingsBad) readableAgain(byVoice);
+  return false;
+}
+/** The settings can be used again: said once (shown; said too when asked by voice, or by the speakNotices rule). */
+function readableAgain(spokenToo) {
+  settingsBad = false;
+  skippedFrom.clear();
+  logLine('settings_readable', {});
+  sayAsIs(READABLE_AGAIN, 'happy');
+  if (spokenToo) voiceLine(READABLE_AGAIN, false, true);
+  afterReadable();
+}
 const kokoro = createKokoro({
   settings: settingsNow, home: HOME,
   log: (kind, data) => logLine(kind, data),
@@ -221,7 +280,7 @@ const kokoro = createKokoro({
 });
 const KokoroReplyVoice = kokoroVoiceFor(kokoro, settingsNow);
 const speech = createSpeaker({
-  pickVoice: () => (kokoro.ready ? KokoroReplyVoice : null), // feature 24: a reply keeps one voice: the natural one only if its helper is ready when the reply starts
+  pickVoice: () => (kokoro.ready && !trouble() ? KokoroReplyVoice : null), // feature 24: a reply keeps one voice: the natural one only if its helper is ready when the reply starts
   beatPhrases: beatsNow(),
   emit: (m) => ui(m),
   log: (kind, data) => logLine(kind, data),
@@ -361,9 +420,9 @@ const { tools, hands, ink, nextTurn } = createTools({ // Local-only build: where
 // A line read aloud by the app itself: in the reply's own voice while a reply is being made, else in a voice of its own.
 // Feature 22: with mark it returns a mark's name: the overlay reports that name when the line has finished playing
 // (null when replies aren't spoken). A reply's voice that was ended or stopped is not used.
-function voiceLine(text, mark = false) {
+function voiceLine(text, mark = false, asIs = false) {
   if (!text || !VOICE_ON()) return null;
-  text = sir(text, { said: true }); // feature 21a: a line worded by the app carries the form of address, when the clock allows
+  if (!asIs) text = sir(text, { said: true }); // feature 21a: a line worded by the app carries the form of address, when the clock allows
   const parts = String(text).match(/[^.!?\n]+[.!?]*\s*/g) ?? [String(text)];
   if (turnVoice && !turnVoice.done) { for (const p of parts) turnVoice.say(p); return mark ? turnVoice.mark() : null; }
   lineUntil = Date.now() + 1500 + String(text).length * 75; // roughly how long it takes to say: sync lines wait for it (calQuiet)
@@ -397,8 +456,12 @@ const pi = createPi({
     if (r.status === 'stopped' && piStood) { piStood = false; stood.add({ pi: true, processes: r.ended ?? 0 }); return; }
     if (stood?.on()) { queue.hold({ kind: 'caught', text: String(r.shown ?? '').slice(0, 2000), mood: r.status === 'error' ? 'concerned' : 'happy' }, 'stood'); return; } // finished as it began: shown when it ends
     if (r.status === 'stopped') { say(r.shown); voiceLine(r.shown); return; }
+    // The owner, 2026-11-28: a task approved before the settings broke runs on. Its summary isn't requested: the settings
+    // line, then code's lines for the events and pi's reply word for word, as with text replies.
+    const broken = trouble();
+    if (broken) { settingsBad = true; logLine('settings_unreadable', { from: 'pi summary' }); settingsSay(broken.message, broken.spoken); }
     await tellResult(r, {
-      voiceOn: VOICE_ON(),
+      voiceOn: VOICE_ON() && !broken,
       summarise: async () => {
         // Feature 41: one small request from code's digest of the whole task (piwatch.mjs), checked by code, with code's
         // own line for any event it leaves out: said, put on screen and kept for the live state. If pi asked something, the
@@ -410,7 +473,7 @@ const pi = createPi({
         const done = lineDone(out.text);
         if (asks && autoListenOn() && flow.replyWindow(done)) logLine('auto_listen', { turn: 'pi' });
       },
-      plainLines: (res) => (res.watch ? codeLines(res.watch.digest({ status: res.status, problem: res.problem, reply: res.reply }).toTell, '', { own: settingsNow().piUpdatesOwnWork, max: settingsNow().limits.piNamesSaid }).join(' ') : ''), // feature 41: spoken replies off
+      plainLines: (res) => (res.watch ? codeLines(res.watch.digest({ status: res.status, problem: res.problem, reply: res.reply }).toTell, '', { own: (() => { try { return settingsNow().piUpdatesOwnWork; } catch { return true; } })(), max: limitsFor(HOME).piNamesSaid }).join(' ') : ''), // feature 41: spoken replies off
       show: (text) => sayAsIs(text, r.status === 'error' ? 'concerned' : 'happy'), // pi's own words: no form of address
       speak: (text) => voiceLine(text), // feature 24: the leftovers notice, after the gist
       played: quietAgain,
@@ -434,15 +497,22 @@ function kokoroNotice(text) {
   offerKokoroNotice();
 }
 const offerKokoroNotice = () => kokoroSaid(uiReady && !onboarding && (!!config.onboarded || guideClosed));
-const settingsNotice = heldNotice(startupSettings(HOME), (text) => { logLine('settings_notice', { chars: text.length }); unasked({ kind: 'notice', text, mood: 'concerned' }); });
+// The owner, 2026-11-28: when the file can't be used, the start-up notice is the refusal line, said too (whatever
+// speakNotices says: it can't be read), and not counted against the speaking budget.
+const startTrouble = trouble();
+const startNotice = startupSettings(HOME); // settings.default.json is written either way
+const settingsNotice = startTrouble
+  ? heldNotice(startTrouble.message, () => { const p = trouble(); if (!p) return; settingsBad = true; logLine('settings_notice', { chars: p.message.length, refused: true }); settingsSay(p.message, p.spoken); })
+  : heldNotice(startNotice, (text) => { logLine('settings_notice', { chars: text.length }); unasked({ kind: 'notice', text, mood: 'concerned' }); });
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
-if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be read: the start-up bubble says so, and the macOS voice speaks */ } }
+function startKokoro() { if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be used: the macOS voice speaks; started once it can (afterReadable) */ } } }
+startKokoro();
 // Roamies' own file and command tools are taken out, pi's are added, and the rest are refused while pi works.
 // Local-only build (feature 23): what is made while a private request runs carries the private mark (privacy.mjs).
 let privateRequest = false;
 setPrivateContext(() => privateRequest);
-const privateNotes = () => { try { const l = readState(settingsNow().dir).privateNotes; return Array.isArray(l) ? l.filter((t) => typeof t === 'string') : []; } catch { return []; } };
-const setPrivateNotes = (list) => { const dir = settingsNow().dir; writeState(dir, { ...readState(dir), privateNotes: [...new Set(list)] }); };
+const privateNotes = () => { try { const l = readState(DIR).privateNotes; return Array.isArray(l) ? l.filter((t) => typeof t === 'string') : []; } catch { return []; } };
+const setPrivateNotes = (list) => { const dir = DIR; writeState(dir, { ...readState(dir), privateNotes: [...new Set(list)] }); };
 /** What Claude must never see: the titles and ids of the private to-dos and reminders, and the private notes' titles. */
 const privateWords = () => [...openCommitments().filter((c) => c.private).flatMap((c) => [c.text, c.id]), ...privateNotes()];
 const forClaude = (text) => redact(text, privateWords());
@@ -512,6 +582,7 @@ const handover = createHandover({
 let dailyFailed = '';
 function dailyDo(what, fn) {
   try { const out = fn(); dailyFailed = ''; return out; } catch (e) {
+    if (isSettingsProblem(e)) { skipped(`daily ${what}`); return null; } // the owner, 2026-11-28
     const why = String(e?.message ?? e).slice(0, 200);
     if (why !== dailyFailed) { dailyFailed = why; logLine('daily_failed', { what, error: why }); }
     return null;
@@ -646,7 +717,7 @@ pageRebuild = createPageRebuild({
   measure: () => loadSettings(HOME).measurePageRebuild,
   log: (kind, data) => logLine(kind, data),
 });
-setInterval(() => { try { pageRebuild.tick(); } catch (e) { console.error('page rebuild', e); } }, 15_000);
+setInterval(() => whenReadable('page rebuild', () => pageRebuild.tick()), 15_000);
 tools.splice(0, tools.length, ...gateTools(cal.wrap(guard.wrap(tools)), pi, [...notes.tools, ...files.tools, ...cal.tools, ...flow.tools, ...handover.tools])); // Local-only build: cal, flow, the open items (feature 18), the file tools (feature 14)
 leanTools(tools, { describe: SHORT(userName) }); // Local-only build (feature 23, stage 1): short schemas for every model, our own descriptions in shorter words (lean.mjs)
 // Local-only build (feature 23): a tool's result for Claude never holds a private title or id (privacy.mjs). The local
@@ -1095,6 +1166,7 @@ function makeAgent(cc) {
     tools: mk.active ? tools.map((t) => { const d = mk.out(t.description ?? ''); return d === (t.description ?? '') ? t : { ...t, description: d }; }) : tools,
     maxTurns: 24,
     transformContext: (msgs, o) => {
+      { const p = trouble(); if (p) throw p; } // the owner, 2026-11-28: no further model call once the settings can't be used
       const fitted = fitContext(msgs, { budgetTokens: requestBudget(), force: o?.force });
       // Claude Code starting a session of its own (nothing to continue) has none of the earlier blocks: all parts again.
       if (o?.fresh) liveBlocks.clear();
@@ -1143,7 +1215,7 @@ function enqueue(text, { interrupt = false, image = null, note = '', byVoice = f
   if (interrupt && byVoice) flow.start(); // Local-only build (feature 22): a request made by voice opens the exchange
   queued++;
   const own = !intro && !text.startsWith('('); // feature 33: the owner's own request, typed or spoken
-  running = running.then(() => prompt(text, image, note, byVoice, briefing, kind)).catch((e) => console.error('prompt', e))
+  running = running.then(() => prompt(text, image, note, byVoice, briefing, kind)).catch((e) => { if (!isSettingsProblem(e)) return console.error('prompt', e); if (own) refuse(e, byVoice); else skipped(kind); flow.settle(); })
     .finally(() => {
       if (briefing) briefingWaiting = false;
       // Features 31 and 33: a typed request's reply is an exchange of the owner's (a spoken one ends in flow.mjs,
@@ -1244,6 +1316,7 @@ const fixedTokens = () => Math.round((system().length + tools.reduce((n, t) => {
 let compacting = null, pendingFold = null;
 function maybeCompact() {
   if (compacting || intro || busy || queued || !session?.messages.length || !config.model) return;
+  if (trouble()) { skipped('fold'); return; } // the owner, 2026-11-28: no request while the settings can't be used
   const tokens = lastInput?.session === session.id ? lastInput.tokens : 0;
   // Local-only build (feature 24): the fold point is a setting, and the plan counts what is really sent.
   const trigger = compactTrigger(requestBudget(), process.env.ROAMIES_COMPACT_AT, limitsFor(HOME).historyTokens);
@@ -1294,6 +1367,7 @@ async function learnFacts(facts) {
   return added;
 }
 async function memoryPass(s, why) {
+  if (trouble()) { skipped('memory pass'); return []; } // the owner, 2026-11-28
   const turns = transcript(s.messages.filter((m) => !isSummary(m) && !isHandover(m)), userName, stripNote); // Local-only build (feature 18): nor the handover
   if (!turns.trim() || !config.model) return [];
   const t0 = Date.now();
@@ -1327,11 +1401,11 @@ const logLine = (kind, data) => {
   const line = `${now.toISOString()} ${kind} ${typeof data === 'string' ? data : JSON.stringify(data)}\n`;
   fs.mkdir(LOG_DIR, { recursive: true, mode: 0o700 }).then(() => fs.appendFile(path.join(LOG_DIR, `${day}.log`), line, { mode: 0o600 })).catch(() => {});
 };
-stood = createStandDown({ home: HOME, log: (kind, data) => logLine(kind, data) }); // Local-only build (feature 33)
+stood = createStandDown({ home: HOME, dir: () => DIR, log: (kind, data) => logLine(kind, data) }); // Local-only build (feature 33)
 // Local-only build (feature 31): the quiet queue. What went out of date is told by the kind's own rule: a check-in
 // (checkin.mjs), a deadline at risk, a briefing whose window has closed, a review whose day has turned.
 queue = createQuiet({
-  home: HOME, log: (kind, data) => logLine(kind, data), stood: () => !!stood?.on(), away: awayNow, call: callNow, onCount: () => queueCount(),
+  home: HOME, dir: () => DIR, log: (kind, data) => logLine(kind, data), stood: () => !!stood?.on(), away: awayNow, call: callNow, onCount: () => queueCount(),
   stale: (item, line) => (item.kind === 'checkIn' ? checks.stale(item) : item.kind === 'deadlineAtRisk' ? !!line && checks.riskStale(line) : item.kind === 'briefing' ? !pi.briefing.open(item.data?.kind) : item.kind === 'review' ? item.data?.key !== dailyDo('review', () => daily.today().key) : false),
 });
 async function pruneLogs() {
@@ -1354,11 +1428,14 @@ console.error = (...a) => {
   logLine('error', text.slice(0, 2000));
 };
 // Node exits on an unhandled rejection by default; one stray promise shouldn't take the agent down.
-process.on('unhandledRejection', (e) => console.error('unhandled rejection:', e));
+process.on('unhandledRejection', (e) => (isSettingsProblem(e) ? logLine('settings_unreadable', { from: 'unhandled' }) : console.error('unhandled rejection:', e)));
 // Local-only build (feature 24): however this process ends (a crash included), what pi started is killed with it.
 // If it is killed outright, the watcher pi.mjs starts beside each hand-off does the same within seconds.
 process.on('exit', () => { try { pi.killNow(); } catch { /* nothing running */ } });
 process.on('uncaughtException', (e, origin) => {
+  // The owner, 2026-11-28: the last net. settings.json that can't be used leaves nothing in an unknown state: logged by
+  // its own kind (the run test checks it never comes), and the process goes on.
+  if (isSettingsProblem(e)) { logLine('settings_unreadable', { from: 'uncaught' }); return; }
   console.error(`uncaught exception (${origin}):`, e);
   // A sync throw leaves state unknown; exit after the log line lands so the app restarts us cleanly.
   setTimeout(() => process.exit(1), 200);
@@ -1413,6 +1490,7 @@ async function piWords(watch, final = null) {
  *  reply, an open answer window, a running request or stand down. One that can't be given now isn't marked given, so
  *  what it would have said rolls into the next. */
 async function piUpdate(watch) {
+  if (trouble()) { skipped('pi update'); return; } // the owner, 2026-11-28: no request while the settings can't be used
   const s = settingsNow();
   if (!VOICE_ON() || s.piUpdates === 'off' || piUpdating) return;
   // Nothing playing: the overlay reports a mark handed over now as played (feature 22), within a moment.
@@ -1450,9 +1528,9 @@ const localRoute = createLocalRoute({
   log: (kind, data) => logLine(kind, data),
 });
 // Feature 23, stage 4: private mode, kept in state.json; it never ends by itself, only on "back to Claude".
-const privateMode = () => readState(settingsNow().dir).privateMode === true;
+const privateMode = () => readState(DIR).privateMode === true;
 function setPrivateMode(on) {
-  const dir = settingsNow().dir;
+  const dir = DIR;
   try { writeState(dir, { ...readState(dir), privateMode: !!on }); } catch (e) { console.error('private mode', e); }
   ui({ kind: 'private', on: !!on });
   logLine('private_mode', { on: !!on });
@@ -1544,7 +1622,7 @@ async function localDayTurn() {
 /** The private exchanges since the last summary, summarised by the local model only, into the daily note with the
  *  private mark (daily.privateLines). Never by Claude: when the local model can't be reached they wait. */
 async function summarisePrivate(key) {
-  const dir = settingsNow().dir, since = Number(readState(dir).privateSummarisedAt) || 0, list = localRoute.privateSince(since);
+  const dir = DIR, since = Number(readState(dir).privateSummarisedAt) || 0, list = localRoute.privateSince(since);
   if (!list.length) return;
   const text = list.map((h) => `${userName}: ${h.said}\nYou: ${h.reply}`).join('\n');
   const out = await localRoute.oneShot({ kind: 'handover', private: true, system: `Summarise these private exchanges between ${userName} and their companion in at most three short plain lines, one per line, without dashes: what was decided or asked. Nothing else.`, text, maxTokens: 200 });
@@ -1632,6 +1710,7 @@ async function readyAgent() {
 // About to be asked (talk keys down, the ask bubble open): Claude Code starts now instead of after the words
 // arrive. Queued like a request, so it never swaps the agent under one that's running.
 function warmUp() {
+  if (trouble()) return; // the owner, 2026-11-28
   running = running.then(async () => { if (!busy && !(await readyAgent())) agent?.warm?.(); }).catch(() => {});
 }
 // Local-only build: what's in front, from one call to the helper: the line for the live state (frontLine's wording) and
@@ -1692,6 +1771,9 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
   // request ends stand down before it is queued). A briefing's is held: it is marked given only once it is made, so
   // it comes again after, while its window is open (the owner, 2026-11-25).
   if (stood?.on()) { if (briefing) logLine('stand_down_held', { what: 'briefing', kind: briefing.kind }); else logLine('stand_down_dropped', { what: 'request' }); return; }
+  // The owner, 2026-11-28: no request to any model while the settings can't be used. His own gets the line (if the file
+  // broke after it was queued); one the app makes is skipped.
+  { const p = trouble(); if (p) { if (!briefing && !text.startsWith('(')) refuse(p, byVoice); else skipped(briefing ? 'briefing' : kind); flow.settle(); return; } }
   if (briefing) { pi.briefing.done(briefing.kind); briefing.given = true; logLine('briefing', { kind: briefing.kind }); }
   if (!intro && !text.startsWith('(')) dailyDo('plan', () => daily.ensure()); // Local-only build (feature 18): the first request of the day writes the Plan
   // Local-only build (feature 23, stage 4): which model answers, decided by code (route.mjs).
@@ -1879,6 +1961,14 @@ async function prompt(text, image = null, note = '', byVoice = false, briefing =
     if (ownAsk && !lastReply && !controller.signal.aborted && !stalled && isNetworkError(err) && local.address && local.whenOffline) { logLine('switch_local', { why: 'network' }); running = running.then(() => localPrompt(text, byVoice, 'offline', false)).catch((e) => console.error('local request', e)); return; }
     lastFailed = true;
     const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : friendly(err);
+    if (isSettingsProblem(err) && !controller.signal.aborted) { // the owner, 2026-11-28: the settings broke during the request
+      settingsBad = true; logLine('settings_refused', { by: 'during', kind: err.problem?.kind ?? 'read' });
+      spoken?.flush();
+      if (voice) voice.say(err.spoken); else if (speech.on) { speech.setVoice(''); const v = speech.start(); v.say(err.spoken); v.end(); }
+      replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end();
+      ui({ kind: 'agent', e: { type: 'error', message: err.message } });
+      return;
+    }
     // Local-only build (feature 22): in an exchange started by voice the failure is said as well as shown.
     if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); if (flow.spoken()) voice?.say(forVoice(sir(msg, { said: true }))); replyDone = whenPlayed(voice ? voice.mark() : speech.mark()); voice?.end(); }
     if (controller.signal.aborted && quiet) ui({ kind: 'agent', e: { type: 'done' } });
@@ -2258,6 +2348,7 @@ function panelState() {
   const current = getModel(config.model);
   const doing = activity.doing();
   return {
+    settingsProblem: trouble()?.message ?? null, // the owner, 2026-11-28: shown in the panel's note until the file can be used
     version: VERSION, os: MAC ? 'mac' : process.platform === 'win32' ? 'win' : LINUX ? 'linux' : 'other', snap: SNAP_OK,
     // Wayland: shortcuts are commands bound in the desktop's settings (bind), and there's no Cursor size.
     wayland: WAYLAND, bind: HOTKEYS_OK ? null : BIND,
@@ -2422,6 +2513,7 @@ async function typeToAsk({ interrupt = false } = {}) {
   if (text?.trim()) timing.heard(); // feature 23, stage 5: a typed request has no end of speech
   // The stand-down phrase and a closing phrase ("thanks") typed alone are taken as said (the owner, 2026-11-26).
   if (text?.trim() && isStandDown(text, ...standPhrase())) { standDownNow('typed'); return; }
+  if (text?.trim() && settingsGate(false)) return; // the owner, 2026-11-28: the settings can't be used
   if (text?.trim()) { standUp('typed'); if (!pi.bubble() && !answers.open() && flow.closing(text)) return; foundDrop(); const fq = finder.ask(text, personaName()); if (isReviewAsk(text)) reviewAsked(false); else if (isWaitingAsk(text)) waitingAsked(false); else if (isLeftAsk(text)) leftAsked(); else if (fq) findAsked(fq).catch((e) => console.error('find', e?.name ?? 'error')); else enqueue(text.trim(), { interrupt }); } // feature 33: a typed request ends stand down; features 18, 31 and 32: "review my day", "anything waiting?" and "what left the Mac today?" are the app's, typed as spoken
 }
 function onWriteTap() {
@@ -2531,6 +2623,7 @@ async function onSpoken(text, area, window = null) {
   // Local-only build (feature 33): the stand-down phrase said alone. The shell acts on it first (stand.rs) and these
   // words never come; this is in case they do. Anything else said with the talk keys is a request, which ends it.
   if (isStandDown(text, ...standPhrase())) { ui({ kind: 'heard' }); standDownNow('phrase'); return; }
+  if (settingsGate(true)) return; // the owner, 2026-11-28: the settings can't be used
   if (window == null) standUp('voice');
   // Local-only build (feature 22). Heard in an answer window (the helper marks those words with the window's id):
   // flow.mjs judges them. Only the answer to the model's own question comes back as a request; everything else was
@@ -2734,6 +2827,10 @@ async function onGuide(m) {
 createInterface({ input: process.stdin }).on('line', (line) => {
   let m;
   try { m = JSON.parse(line); } catch { return; }
+  // The owner, 2026-11-28: nothing throws out of this handler (a throw here used to end the process).
+  try { shellMessage(m); } catch (e) { failed(`message ${String(m?.type ?? '').slice(0, 30)}`, e); }
+}).on('close', onShellClosed);
+function shellMessage(m) {
   if (m.type === 'menu') onMenu(m.id).catch((e) => console.error('menu', e));
   else if (m.type === 'panel_open') { panelOpen = true; panelAt = Date.now(); logLine('panel_open', {}); refreshAuth().catch(() => {}).finally(() => panel()); }
   else if (m.type === 'diagnostics') { shellInfo?.(m); shellInfo = null; }
@@ -2803,14 +2900,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   // A second launch with a flag (roamies --talk and friends, bound to keys on Wayland); --summon and --panel the shell does itself.
   else if (m.type === 'cli') onCli(String(m.action ?? '')).catch((e) => console.error('cli', e));
   else if (m.type === 'login_item_status') onLoginStatus(m);
-}).on('close', () => {
+}
+function onShellClosed() {
   // The app quit (or is restarting for an update): save a reply still running, let the last saves land, never hang.
   if (busy) syncSession();
   closeSpare();
   // Local-only build (feature 24): pi and everything it started are ended before this process goes (asked, then
   // killed after 2 s), so nothing of pi's outlives the app.
   Promise.race([Promise.all([flushWrites(), pi.stopAll()]), new Promise((r) => setTimeout(r, 3000))]).finally(() => process.exit(0));
-});
+}
 
 // Retired sign-ins (Claude from before Claude Code, the old ChatGPT, Kimi, Grok and Google ones) no longer work:
 // each is removed from auth.json, and said once.
@@ -2835,10 +2933,14 @@ async function remindTick() {
   // (checkin.mjs); reminders keep their nudge, always spoken and never counted against the speaking budget.
   const due = (await takeDueReminders()).filter((c) => c.kind === 'reminder');
   if (!due.length) return;
-  menu(); showList({ flash: due[0].id, seconds: 6 });
+  try { menu(); showList({ flash: due[0].id, seconds: 6 }); } catch (e) { failed('reminder list', e); }
   const line = nudgeLine(due);
   logLine('nudge', { todos: due.length, chars: line.length });
   ui({ kind: 'agent', e: { type: 'emote', action: 'remind' } });
+  // The owner, 2026-11-28: while the settings can't be used, a reminder still comes, at its time: shown and said by
+  // code in the Mac's own voice with its default, followed by the settings line.
+  const p = trouble();
+  if (p) { settingsBad = true; logLine('settings_reminder', { todos: due.length }); settingsSay(`${line}\n${p.message}`, `${forVoice(line)} ${p.spoken}`); return; }
   say(line, 'concerned');
   voiceLine(forVoice(line));
 }
@@ -2881,6 +2983,7 @@ if (!config.onboarded) send({ type: 'onboarding' });
 // Local-only build: the briefings set up in ~/Documents/roamies-pi/settings.json ("briefings"). Checked once a minute;
 // given when nothing else is going on, once a day each.
 setInterval(() => {
+  if (trouble()) { skipped('briefing'); return; } // the owner, 2026-11-28
   // Local-only build (feature 24): the natural voice's helper, if it is asleep, is woken shortly before a briefing.
   try { if (!stood?.on() && pi.briefing(new Date(Date.now() + WAKE_BEFORE_BRIEFING_MINUTES * 60_000))) kokoro.wake('briefing'); } catch { /* no briefing */ }
   try {
@@ -2912,23 +3015,54 @@ function runBriefing(b) {
 // settings), and what a sync had to say is shown once nothing else is going on.
 // Feature 18: a to-do the sync found done in Super Productivity gets its Done line right after that sync.
 const doneLines = () => { if (!doneInApp) return; doneInApp = false; dailyDo('tick', () => daily.tick()); };
-cal.startup().catch((e) => console.error('calendar', e)).finally(doneLines);
+// The owner, 2026-11-28: while the settings can't be used, the start-up step and the syncs wait (afterReadable).
+let calStarted = false;
+const calStart = () => { if (calStarted || trouble()) return; calStarted = true; cal.startup().catch((e) => failed('calendar', e)).finally(doneLines); };
+if (startTrouble) skipped('calendar'); else calStart();
 (function calTick() {
   let wait = 60;
   try { wait = loadSettings(HOME).calendar.syncSeconds; } catch { /* the default */ }
-  setTimeout(() => { cal.sync('timer').catch((e) => console.error('calendar', e)).finally(() => { doneLines(); calTick(); }); }, wait * 1000);
+  setTimeout(() => {
+    if (trouble()) { skipped('calendar'); calTick(); return; }
+    cal.sync('timer').catch((e) => failed('calendar', e)).finally(() => { try { doneLines(); } catch (e) { failed('calendar', e); } calTick(); });
+  }, wait * 1000);
 })();
 // Features 31 and 33: the quiet queue, after a typed request's reply (a spoken exchange gives it at its end, flow.mjs),
 // comes before the calendar's lines.
 const queueIdle = () => calQuiet() && !pi.bubble() && !answers.open() && !flow.open() && !flow.window() && !reviewing && !checking;
-setInterval(() => { (queue.ready() && queueIdle() ? quietGive('exchange') : Promise.resolve(false)).then((gave) => { if (!gave) calShow(); }, (e) => console.error('quiet queue', e)); }, 3000);
+setInterval(() => whenReadable('quiet queue', () => (queue.ready() && queueIdle() ? quietGive('exchange') : Promise.resolve(false)).then((gave) => { if (!gave) return calShow(); })), 3000);
 // Local-only build (feature 18): to-dos finished since the last check get their Done line in the daily note.
 // The open items whose to-do is done, or whose box was ticked in a recent daily note, are closed.
 // Feature 25: a to-do whose box was ticked in the Plan is marked done; then the check-ins and deadlines at risk.
-setInterval(() => {
+setInterval(() => whenReadable('daily', () => {
   dailyDo('tick', () => daily.tick()); dailyDo('items', () => { handover.checkDone(todoItems()); handover.checkTicks(); notes.pages.renames(); });
-  daily.checkTicks(markDone).catch((e) => dailyDo('ticks', () => { throw e; })).finally(() => { try { checkTick(); } catch (e) { console.error('check-ins', e); } });
-}, 30_000);
+  daily.checkTicks(markDone).catch((e) => dailyDo('ticks', () => { throw e; })).finally(() => { if (trouble()) return skipped('check-ins'); try { checkTick(); } catch (e) { failed('check-ins', e); } });
+}), 30_000);
 // Local-only build (feature 33): stand down ends by itself at the day turn ("standDown.endsAtDayTurn"), saying nothing
 // aloud; and the shortcut and phrase follow settings.json when it changes.
-setInterval(() => { try { if (stood.turned()) standUp('day'); } catch (e) { console.error('stand down', e); } if (JSON.stringify(standKeys()) !== standKeysSent) sendKeys(); }, 30_000);
+setInterval(() => { try { if (stood.turned()) standUp('day'); } catch (e) { failed('stand down', e); } if (!trouble() && JSON.stringify(standKeys()) !== standKeysSent) sendKeys(); }, 30_000); // the owner, 2026-11-28: the shortcut isn't changed to the default while the file can't be used
+
+// The owner, 2026-11-28: settings.json is watched. Its size, time and file are looked at every SETTINGS_WATCH_MS (a
+// look, not a read: an editor that saves by replacing the file is seen too); after a save, a file that can't be used
+// gives the line once, as a notice, and one that can again, when he was told it couldn't, says so. A save that
+// leaves it usable says nothing. No restart, and no request.
+const SETTINGS_WATCH_MS = 2000;
+const settingsStamp = () => { try { const st = statSync(settingsPath(HOME)); return `${st.ino}:${st.size}:${st.mtimeMs}`; } catch (e) { return `none:${e?.code ?? ''}`; } };
+let settingsSeen = settingsStamp();
+setInterval(() => {
+  const now = settingsStamp();
+  if (now === settingsSeen) return;
+  settingsSeen = now;
+  try {
+    const p = trouble();
+    if (p) { settingsBad = true; logLine('settings_notice', { chars: p.message.length, refused: true, from: 'save' }); settingsSay(p.message, p.spoken); }
+    else if (settingsBad) readableAgain(noticesOn());
+  } catch (e) { failed('settings watch', e); }
+}, SETTINGS_WATCH_MS);
+/** What waited while the settings couldn't be used, once they can: the natural voice, the calendar's start-up step,
+ *  and the stand-down shortcut as the file has it. */
+function afterReadable() {
+  try { startKokoro(); } catch (e) { failed('kokoro', e); }
+  try { calStart(); } catch (e) { failed('calendar', e); }
+  try { if (JSON.stringify(standKeys()) !== standKeysSent) sendKeys(); } catch (e) { failed('stand down', e); }
+}

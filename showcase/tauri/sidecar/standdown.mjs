@@ -59,15 +59,15 @@ export function standSummary({ pi = false, processes = 0, questions = 0, lines =
  * The state, in state.json. settings: → loadSettings(home). log(kind, data): the activity log.
  * → { on(), start(by, what), add(counts), end(by, held), turned(), state() }
  */
-export function createStandDown({ home = os.homedir(), settings = () => loadSettings(home), log = () => {}, now = () => Date.now() } = {}) {
+export function createStandDown({ home = os.homedir(), settings = () => loadSettings(home), dir = () => settings().dir, log = () => {}, now = () => Date.now() } = {}) {
   const usable = (s) => !!s && typeof s === 'object' && s.on === true && Number.isFinite(Date.parse(s.since)) && s.counts && typeof s.counts === 'object';
   let cur = null;
-  try { const s = readState(settings().dir).standDown; cur = usable(s) ? s : null; } catch { cur = null; }
+  try { const s = readState(dir()).standDown; cur = usable(s) ? s : null; } catch { cur = null; }
   const save = () => {
     try {
-      const dir = settings().dir, st = readState(dir);
+      const d = dir(), st = readState(d);
       if (cur) st.standDown = cur; else delete st.standDown;
-      writeState(dir, st);
+      writeState(d, st);
     } catch (e) { console.error('stand down', e); }
   };
   const on = () => !!cur?.on;

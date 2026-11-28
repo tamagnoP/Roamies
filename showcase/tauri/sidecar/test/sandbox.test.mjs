@@ -110,14 +110,17 @@ const lastRecord = () => { const logs = path.join(dir, 'log'); const f = fs.read
   const s = loadSettings(home);
   assert.equal(s.sandbox, true); assert.deepEqual(s.readOnly, []); assert.deepEqual(s.docker, []);
   assert.deepEqual(s.toolFolders, TOOL_FOLDERS.map((p) => p.replace(/^~/, home)), 'the built-in tool folders');
-  fs.writeFileSync(settingsFile, JSON.stringify({ sandbox: false, readOnly: ['~/Documents/ref', 7, ''], toolFolders: ['~/mytools', '~/.cargo'], toolFoldersOff: ['~/.npm', '~/.cache/uv'], docker: ['~/Documents/cells'] }));
+  // the owner, 2026-11-28: readOnly protects something, so an entry that can't be used refuses the file
+  fs.writeFileSync(settingsFile, JSON.stringify({ readOnly: ['~/Documents/ref', 7, ''] }));
+  assert.throws(() => loadSettings(home), /readOnly should be a list of folders, each in quotes/);
+  fs.writeFileSync(settingsFile, JSON.stringify({ sandbox: false, readOnly: ['~/Documents/ref'], toolFolders: ['~/mytools', '~/.cargo'], toolFoldersOff: ['~/.npm', '~/.cache/uv'], docker: ['~/Documents/cells'] }));
   const t = loadSettings(home);
   assert.equal(t.sandbox, false); assert.deepEqual(t.readOnly, [ref]); assert.deepEqual(t.docker, [cells]);
   assert.ok(t.toolFolders.includes(H('mytools')) && t.toolFolders.includes(H('.cellpose')), '"toolFolders" adds to the built-in list');
   assert.ok(!t.toolFolders.includes(H('.npm')) && !t.toolFolders.includes(H('.cache', 'uv')), '"toolFoldersOff" drops built-in ones');
   assert.equal(t.toolFolders.filter((p) => p === H('.cargo')).length, 1, 'one listed twice is there once');
   assert.equal(t.toolFolders.length, TOOL_FOLDERS.length - 2 + 1);
-  for (const v of ['yes', 0, null, 'false']) { fs.writeFileSync(settingsFile, JSON.stringify({ sandbox: v })); assert.equal(loadSettings(home).sandbox, true, 'only false switches it off'); }
+  for (const v of ['yes', 0, null, 'false']) { fs.writeFileSync(settingsFile, JSON.stringify({ sandbox: v })); assert.throws(() => loadSettings(home), /sandbox should be true or false/, 'only false switches it off; anything else but true refuses the file (the owner, 2026-11-28)'); }
 }
 { // a new settings file names the four settings, with their defaults
   const fresh = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sbx-fresh-')));

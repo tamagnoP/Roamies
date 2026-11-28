@@ -2188,6 +2188,12 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   refuse requests while the file can't be read (the defaults would empty the masking list, drop his never-look apps
   and folders, and turn back on what he turned off). Waiting for his answer. Point 3 done on `settings-fault`
   (`fish_account` → `speech_ready`; no request is made by that check). Both added to `LESSONS.md`.
+- **2026-11-28 10:22.** Refusing accepted, all seven points, with three additions
+  (`~/Documents/roamies-reports/2026-11-28_1022_owner-answers-settings-fault-and-plan-21.md`): reminders still come,
+  followed by the line; the file is watched (the line once after a save that breaks it, "Your settings can be read
+  again." after one that mends it); a wrong value in a setting that protects something refuses like a broken file
+  (`PROTECTING` in `pi.mjs`, listed in LOCAL-ONLY.md). Built on `settings-fault` with `settingsproblem.mjs`, a unit test
+  and a run test (`settings-broken-run.test.mjs`, in `test:all`). Next: feature 21's plan (both parts), no build.
 
 ## 6. Still to test
 

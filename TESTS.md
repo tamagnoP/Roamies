@@ -22,6 +22,7 @@ checks, fixed since. Everything else is below.
 | Feature 40 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 34 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
+| Settings that can't be used | 1 to 11 | new, 2026-11-28 (the fault on your Mac) |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -472,6 +473,47 @@ pypi.org.
     You should hear: the closing summary worded by the local model; the ledger lines for it say this Mac.
 12. **Clean up.** Remove `"~/Documents/roamies-pi/f41"` from `"projects"`, switch back to your usual project, and
     delete `~/Documents/roamies-pi/f41` and `~/Documents/roamies-pi/f41-remote.git`.
+
+### Settings that can't be used (the fault of 2026-11-27, fixed 2026-11-28)
+
+**Before.** Build from `next`. Spoken replies on. Keep a copy of your settings first, and put it back at the end
+(check 11):
+
+```sh
+cp ~/Documents/roamies-pi/settings.json ~/Documents/roamies-pi/settings.backup.json
+```
+
+1. **Set a reminder first:** say "Remind me in 4 minutes to stretch." Then, in `settings.json`, add a comma after the
+   last name in `"neverLook"` (`"Messages",`) and save.
+   You should see and hear, within a few seconds, in the Mac's own voice and with no "sir": "Your settings file isn't
+   valid JSON: line N, column 3, in ~/Documents/roamies-pi/settings.json. There's a stray comma just before it. I
+   won't act on requests until it's fixed." The path is shown, not said. N is the line of the `]` after the comma.
+2. **Type a request** ("What's on my list?").
+   You should see and hear: the same line, at once, and nothing else; no loading icon left behind.
+3. **Say a request** ("Jarvis, what's on my list?").
+   You should see and hear: the same; the listening pill goes at once.
+4. **Wait for the reminder.**
+   You should see and hear: "Stretch is due at …" at its time, then the same line.
+5. **Open the panel.**
+   You should see: the line in the panel's note, and it stays there.
+6. **Quit Roamies and start it again** with the comma still there.
+   You should see and hear: the line once, as the start-up notice.
+7. **Mend it** (remove the comma) and save.
+   You should see: "Your settings can be read again." within a few seconds, once (heard too if `speakNotices` is
+   on); the panel's note goes. Ask something: answered as usual.
+8. **A wrong value that protects something:** set `"sandbox": "no"` and save.
+   You should see and hear: "Your settings file has a wrong value, in ~/Documents/roamies-pi/settings.json: sandbox
+   should be true or false. I won't act on requests until it's fixed." A request gets the same line. Set it back to
+   `true`: "Your settings can be read again."
+9. **A word on the masking list that can't be used:** add `"X"` to `"people"` under `"mask"` and save.
+   You should see and hear: "… mask.people entry N is under 2 characters …", without the word itself. Take it out.
+10. **A wrong value that protects nothing:** set `"closingReply": ""` and save.
+    You should see: nothing said. Requests are answered. At the next start, the usual notice names `closingReply`.
+    Set it back.
+11. **The log, then clean up.** In the activity log, `~/.gg/sidekick/logs/<today>.log`: `settings_refused`,
+    `settings_reminder`, one `settings_unreadable` for each kind skipped, and no `uncaught`, `error prompt`,
+    `daily_failed` or `calendar_error` from the time it was broken. Then put your settings back:
+    `mv ~/Documents/roamies-pi/settings.backup.json ~/Documents/roamies-pi/settings.json`.
 
 ## Group 3: features 19 and 21
 

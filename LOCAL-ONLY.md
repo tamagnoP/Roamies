@@ -225,10 +225,57 @@ you only, and pi can't read it.
 If `settings.json` lacks a setting, Roamies uses the default and says so once per start, in a bubble, for as long as
 it is missing: "settings.json doesn't have: home, limits. I'm using the values in settings.default.json until you
 add them." A value it can't use gets its own line: "settings.json has a value I can't use for: maxMinutes. I'm
-using 60." In a list (`readOnly`, `projects`, `routines` and the like) the entries it can use are kept, the others
-left out, and the line says what is used. Two settings fall back to the safe side: anything but `true` or `false`
-for `sandbox` leaves the sandbox on, and a `neverLook` that isn't a list of names means the built-in list. If the
-setup guide is open, the bubble waits until it closes.
+using 60." In a list (`projects`, `routines` and the like) the entries it can use are kept, the others left out, and
+the line says what is used. If the setup guide is open, the bubble waits until it closes.
+
+### When settings.json can't be used (the owner, 2026-11-28)
+
+A file that can't be read, isn't valid JSON or isn't one object, or that has a wrong value in a setting that protects
+something, is not run on defaults. Until it is fixed:
+
+- **Every request of yours**, typed or spoken, gets one line and nothing else. The line is worded by code, shown and
+  said, with no form of address, and never quotes the file:
+  - "Your settings file isn't valid JSON: line 110, column 3, in ~/Documents/roamies-pi/settings.json. There's a
+    stray comma just before it. I won't act on requests until it's fixed."
+  - "Your settings file has a wrong value, in ~/Documents/roamies-pi/settings.json: sandbox should be true or false.
+    I won't act on requests until it's fixed." (Up to three settings are named, then "and N more".)
+  - Also "should hold one JSON object, in { }" and "I can't read your settings file (permission denied)".
+  - The path is shown, not said. Line and column are worked out by code (`settingsproblem.mjs`), not taken from the
+    parser's message, which can quote the file. "A stray comma" is added when a `}` or `]` comes straight after a
+    comma; "the file is empty" and "it ends before everything opened in it is closed" likewise.
+- **It is said** in the Mac's own voice with its default, whatever the settings would choose, even with text replies
+  and with `speakNotices` off (neither can be read). Lines are said one after another, never cutting one off.
+- **No request to any model**: not the provider, not the summary model, not the local model. A model request already
+  running makes no further call; its error line is the same line.
+- **The reminders you set still come, at their time**, shown and said, followed by the line.
+- **What runs by itself is skipped**, with one `settings_unreadable {from}` line each in the activity log until the
+  file can be used again: the daily note and its plan, calendar sync and its start-up step, check-ins, the quiet
+  queue, briefings, page rebuilds, the warm-up, the fold, the memory pass and pi's updates.
+- **A pi task approved before** runs on. Its summary isn't requested: the line, then code's lines for the events and
+  pi's reply word for word, as with text replies.
+- **Still working**: Quit, the panel (the line stays in its note until the file can be used), stop speaking, the
+  stand-down shortcut and phrase (the shortcut the shell already has is kept; at a start with a broken file it is the
+  default one), and the talk keys.
+- **At start-up** the line is given once, as a notice, outside the speaking budget.
+- **The file is watched**: its size, time and inode are looked at every 2 s (a look, not a read). Within a few seconds
+  of a save, a file that can't be used gives the line once, as a notice; one that can be used again, after you were
+  told it couldn't, gives "Your settings can be read again." (said too when `speakNotices` is on); a save that leaves
+  it usable says nothing. No restart and no request is needed. If a request finds it mended before the watch does,
+  that line comes with the request instead, once. The natural voice and the calendar's start-up step, if they waited,
+  start then.
+
+**The settings that protect something** (`PROTECTING` in `pi.mjs`, and `refusedWhenWrong` in settings.default.json):
+`mask` (and any entry on it that would leave a word unmasked, while `masking` is on: one that isn't text, is under 2
+characters, has no letter, has a quotation mark, is a stand-in's own word, an unknown group, a group that isn't a
+list, an `also` that isn't a list or has such a form, more entries than `limits.maskEntries`), `masking`, `neverLook`,
+`sandbox`, `readOnly`, `toolFoldersOff`, `findLeaveOut`, `files`, `fileContents`, `findAnywhere`, `findDrives`,
+`autoSendReadOnly`, every part of `local` and `local.start`, every part of `standDown`, `piUpdates`, `maxMinutes`,
+`keepLogsDays`, `autoListenQuestions`, `limits.maskEntries`, `limits.fileReadChars`, `limits.localFileChars`,
+`limits.filesPerRequest`, `limits.piReplyChars`, `limits.piStatements`, `limits.piStatementChars`, and `limits` itself
+when it isn't an object. In a list among them, one entry that can't be used refuses the file. A duplicate on the
+masking list (the first is masked) or an `exactCase` that isn't true or false (taken as false, which masks more) is
+a notice, as before. A protecting setting that is missing takes its default, as before. For every other setting a
+wrong value gets a notice and its default.
 
 `settings.json`:
 

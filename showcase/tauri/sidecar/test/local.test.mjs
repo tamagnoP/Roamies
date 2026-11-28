@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chat, guardedFetch, localAddress, probe } from '../local.mjs';
-import { LOCAL, LOCAL_START, loadSettings, settingsDefaults } from '../pi.mjs';
+import { loadSettings, settingsDefaults } from '../pi.mjs';
 
 // ---- only http://127.0.0.1:<port>, with or without /v1
 assert.equal(localAddress('http://127.0.0.1:8080'), 'http://127.0.0.1:8080/v1');
@@ -66,11 +66,12 @@ await assert.rejects(chat({ address: 'http://example.com', body: {} }), /no addr
   assert.deepEqual(loadSettings(home).local, made.local);
   for (const [name, list] of Object.entries({ address: ['http://localhost:8080', 'https://127.0.0.1:8080', 'http://192.168.1.4:8080', 42], model: ['a b', 7], whenOffline: ['yes'], historyExchanges: [-1, 21, 2.5], maxSteps: [0, 9], confirmChanges: [0, 'false', null], start: [null, 'x', []] })) for (const v of list) {
     put({ ...made, local: { ...made.local, [name]: v } });
-    assert.deepEqual(loadSettings(home).invalid, [{ name: `local.${name}`, using: LOCAL[name].default }], `local.${name}: ${JSON.stringify(v)} is out`);
+    // the owner, 2026-11-28: local protects something, so a wrong part refuses the file, naming the part
+    assert.throws(() => loadSettings(home), (e) => e.name === 'SettingsProblem' && e.problem.wrong.map((w) => w.name).join() === `local.${name}`, `local.${name}: ${JSON.stringify(v)} is out`);
   }
   for (const [name, list] of Object.entries({ python: ['python3', 'relative/py', 5], model: ['qwen', 'E4B'], port: [80, 70000, 8080.5], sleepAfterMinutes: [-1, 1441], draft: ['on'] })) for (const v of list) {
     put({ ...made, local: { ...made.local, start: { ...made.local.start, [name]: v } } });
-    assert.deepEqual(loadSettings(home).invalid, [{ name: `local.start.${name}`, using: LOCAL_START[name].default }], `local.start.${name}: ${JSON.stringify(v)} is out`);
+    assert.throws(() => loadSettings(home), (e) => e.name === 'SettingsProblem' && e.problem.wrong.map((w) => w.name).join() === `local.start.${name}`, `local.start.${name}: ${JSON.stringify(v)} is out`);
   }
   put({ ...made, local: { ...made.local, address: 'http://127.0.0.1:8099', confirmChanges: false, start: { ...made.local.start, python: '/opt/x/bin/python', model: 'e2b', draft: false } } });
   const s = loadSettings(home);

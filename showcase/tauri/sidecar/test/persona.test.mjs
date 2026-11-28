@@ -112,7 +112,9 @@ assert.equal(sir('Downloading Roamies 1.2…'), 'Downloading Roamies 1.2…'); a
 for (const line of ['Nudge test is due at 14:05.', 'I couldn\'t reach Super Productivity.', 'Shall I send it?']) { const out = sir(line); assert.equal(out.replace(', sir', ''), line, 'nothing but the form of address is added: no humour, no rewording'); }
 // where it is applied in sidekick.mjs: the bubble, the spoken line, the app's questions, failures
 assert.match(side, /const say = \(text, mood\) => sayAsIs\(sir\(text\), mood\);/, 'every bubble worded by the app');
-assert.match(side, /if \(!text \|\| !VOICE_ON\(\)\) return null;\n  text = sir\(text, \{ said: true \}\);/, 'every line spoken by the app (nudges, notices, the closing reply, spoken questions)');
+assert.match(side, /if \(!text \|\| !VOICE_ON\(\)\) return null;\n  if \(!asIs\) text = sir\(text, \{ said: true \}\);/, 'every line spoken by the app (nudges, notices, the closing reply, spoken questions)');
+// the owner, 2026-11-28: the settings lines alone carry no form of address (asIs, settingsSay)
+assert.deepEqual(side.match(/voiceLine\([^\n)]*, (?:true|false), true\)/g), ['voiceLine(READABLE_AGAIN, false, true)']);
 assert.match(side, /if \(opts\.choices && opts\.placeholder\) opts = \{ \.\.\.opts, placeholder: sir\(opts\.placeholder\) \};/, 'a question from the app');
 assert.equal(side.split("ui({ kind: 'ask_text', text: sir(text, { again: true }) })").length, 3);
 assert.match(side, /message: sir\(msg\)/); assert.match(side, /voice\?\.say\(forVoice\(sir\(msg, \{ said: true \}\)\)\)/, 'a failure');

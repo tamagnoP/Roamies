@@ -574,10 +574,17 @@
   addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => state && render(), 120); });
 
   let noteTimer = 0;
-  function note(text, bad = false) {
+  function note(text, bad = false, stay = false) {
     const n = $('note');
     n.textContent = text; n.title = text; n.className = `note${bad ? ' bad' : ''}`; n.hidden = false;
-    clearTimeout(noteTimer); noteTimer = setTimeout(() => { n.hidden = true; }, bad ? 9000 : 5000);
+    clearTimeout(noteTimer); if (!stay) noteTimer = setTimeout(() => { n.hidden = true; }, bad ? 9000 : 5000);
+  }
+  // The owner, 2026-11-28: while settings.json can't be used, its line stays in the note until it can.
+  let settingsShown = '';
+  function settingsNote() {
+    const t = state?.settingsProblem ?? '';
+    if (t) note(t, true, true); else if (settingsShown && $('note').textContent === settingsShown) $('note').hidden = true;
+    settingsShown = t;
   }
 
   // ---------------------------------------------------------------- sidebar and keys
@@ -669,6 +676,7 @@
       const first = !state; state = m.state;
       if (ui.arm && !document.querySelector(`[data-k="${CSS.escape(ui.arm)}"]`)) ui.arm = null;
       render(null, first);
+      settingsNote();
     }
     else if (m.kind === 'note') note(m.text, m.bad);
     else if (m.kind === 'copied') {

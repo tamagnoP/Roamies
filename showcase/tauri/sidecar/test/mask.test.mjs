@@ -127,10 +127,16 @@ assert.equal(listedCount('anything', []), 0);
   assert.deepEqual(r.entries.map((e) => [e.group, e.name, e.forms, e.exactCase]), [['people', 'Ana', ['Ana'], false], ['people', 'Bea', ['Bea', 'Beatriz'], false], ['other', 'Lyra', ['Lyra'], false]]);
   const p = r.problems.join('\n');
   for (const w of ['group I don\'t know, "teams"', '"A" is under 2 characters', '"ana" is already listed', 'an entry isn\'t text', 'has no letter', 'a quotation mark', '"Project" is a stand-in\'s own word', '"Person 3" is a stand-in\'s own word', '"exactCase" of "Bea" should be true or false', '"B" (also of "Bea") is under 2 characters', '"Ana" (also of "Bea") is already listed', 'mask.projects should be a list', '"also" of "Lyra" should be a list']) assert.ok(p.includes(w), w);
-  assert.deepEqual(cleanMask(undefined), { entries: [], problems: [] });
+  assert.deepEqual(cleanMask(undefined), { entries: [], problems: [], wrong: [] });
+  // the owner, 2026-11-28: what would leave a word unmasked, without the word (the refusal line is said aloud)
+  assert.deepEqual(r.wrong.map((w) => `${w.name} ${w.what}`), ['mask has a group other than people, organisations, projects and other', 'mask.people entry 1 is under 2 characters', 'mask.people entry 4 isn\'t text', 'mask.people entry 5 is under 2 characters', 'mask.people entry 6 has a quotation mark, a backslash or a control character', 'mask.people entry 7 is a stand-in\'s own word', 'mask.people entry 8 is a stand-in\'s own word', 'mask.people entry 9 has no letter', 'mask.people entry 10: an "also" form is under 2 characters', 'mask.projects should be a list', 'mask.other entry 1: "also" should be a list']);
+  assert.doesNotMatch(JSON.stringify(r.wrong), /Ana|Bea|Atlas|Lyra|teams|Project"|Person 3/, 'no word of the list');
+  assert.deepEqual(cleanMask({ people: ['Ana', 'ana', { name: 'Bea', exactCase: 'yes' }] }).wrong, [], 'a duplicate (the first is masked) and exactCase taken as false leave nothing unmasked');
+  assert.deepEqual(cleanMask(['Ana']).wrong, [{ name: 'mask', what: 'should be an object with the groups people, organisations, projects and other' }]);
   assert.match(cleanMask(['Ana']).problems[0], /should be an object/);
   const many = cleanMask({ people: Array.from({ length: 7 }, (_, i) => `Name${String.fromCharCode(97 + i)}`) }, { maxEntries: 5 });
   assert.equal(many.entries.length, 5); assert.match(many.problems.at(-1), /more than 5 entries \(limits\.maskEntries\); the first 5 are used/);
+  assert.deepEqual(many.wrong, [{ name: 'mask', what: 'has more than 5 entries (limits.maskEntries)' }]);
   assert.match(cleanMask({ people: ['Ana'], organisations: ['ana'] }).problems[0], /"ana" is already listed under people; the first is used/);
 }
 

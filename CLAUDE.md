@@ -137,6 +137,13 @@ code is shown under `reference` (`codeReference` in `pi.mjs`), generated from th
 blocked list stays in code and no setting reaches it. `test/reference.test.mjs` fails if `loadSettings` reads a
 setting the reference file lacks, or if anything reads `settings.default.json`.
 
+**A setting that protects something** (what leaves the Mac, what pi or Roamies may read or look at, the microphone,
+how long things are kept) goes on `PROTECTING` in `pi.mjs`, with its words in `SHOULD`: a wrong value in it refuses
+requests until it is fixed, like a file that can't be read (the owner, 2026-11-28). Never give such a setting a
+fallback that runs on. Anything that reads the settings from a timer or an event handler goes through `whenReadable`
+(or checks `trouble()`) in `sidekick.mjs`, so a broken file never throws out of it; `test/settingsproblem.test.mjs`
+and `test/settings-broken-run.test.mjs` check both.
+
 ## Commands
 
 Run from `showcase/tauri`.

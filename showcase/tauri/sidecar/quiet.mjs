@@ -54,17 +54,17 @@ export function quietSummary({ stood = null, stale = {} } = {}) {
  * an item (or one of its lines) has gone out of date, beyond its "until". onCount(n): the count changed.
  * An item: { kind, text?, mood?, say?, lines?: [{ text, say?, until?, ... }], until?, data? }.
  */
-export function createQuiet({ home = os.homedir(), settings = () => loadSettings(home), log = () => {}, now = () => Date.now(), stood = () => false, away = () => false, call = () => false, stale = () => false, onCount = () => {} } = {}) {
+export function createQuiet({ home = os.homedir(), settings = () => loadSettings(home), dir = () => settings().dir, log = () => {}, now = () => Date.now(), stood = () => false, away = () => false, call = () => false, stale = () => false, onCount = () => {} } = {}) {
   const blank = () => ({ items: [], hour: [], stale: {}, stood: null, due: false });
   let cur;
   try {
-    const q = readState(settings().dir).quiet;
+    const q = readState(dir()).quiet;
     cur = q && typeof q === 'object' && Array.isArray(q.items) ? { ...blank(), ...q, hour: Array.isArray(q.hour) ? q.hour.filter(Number.isFinite) : [], stale: q.stale && typeof q.stale === 'object' ? q.stale : {} } : blank();
   } catch { cur = blank(); }
   let shown = -1;
   const count = () => cur.items.length;
   const save = () => {
-    try { const dir = settings().dir; writeState(dir, { ...readState(dir), quiet: cur }); } catch (e) { console.error('quiet queue', e); }
+    try { const d = dir(); writeState(d, { ...readState(d), quiet: cur }); } catch (e) { console.error('quiet queue', e); }
     if (count() !== shown) { shown = count(); try { onCount(shown); } catch (e) { console.error('quiet queue', e); } }
   };
   const lastHour = () => cur.hour.filter((t) => now() - t < 3600_000 && t <= now());

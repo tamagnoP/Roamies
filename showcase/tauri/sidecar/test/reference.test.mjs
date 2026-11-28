@@ -1,7 +1,8 @@
 // Local-only build: no setting has a value the owner can't see (reference.mjs, and the settings part of pi.mjs).
 //   1. settings.default.json holds every setting loadSettings reads, with its default, and what stays in code.
 //   2. A setting settings.json lacks, or has a value for that can't be used, is named in the start-up notice, and
-//      the default is used. Safety settings fall back to the safe side.
+//      the default is used. A wrong value in a setting that protects something (PROTECTING) refuses the whole file
+//      instead, with a line naming the setting and what it should be (the owner, 2026-11-28).
 //   3. settings.json is never written, and settings.default.json is never read.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -39,7 +40,10 @@ assert.equal(read.length, 2, 'writing the reference file is not reading it');
 const peek = () => { const n = read.length; const text = fs.readFileSync(refFile, 'utf8'); read.length = n; return text; };
 wrote.length = 0; read.length = 0;
 
-const { LIMITS, codeReference, createPi, limitsFor, loadSettings, sandboxProfile, settingsDefaults, TOOL_FOLDERS, NEVER_LOOK } = await import('../pi.mjs');
+const { LIMITS, codeReference, createPi, limitsFor, loadSettings, sandboxProfile, settingsDefaults, TOOL_FOLDERS, NEVER_LOOK, PROTECTING, SHOULD, protects } = await import('../pi.mjs');
+const { isSettingsProblem } = await import('../settingsproblem.mjs');
+const LINE = (names) => `Your settings file has ${names.length === 1 ? 'a wrong value' : 'wrong values'}, in ~/Documents/roamies-pi/settings.json: ${names.map((n) => `${n} ${SHOULD[n]}`).join('; ')}. I won't act on requests until it's fixed.`;
+const refused = (names, what) => { assert.throws(() => loadSettings(home), (e) => isSettingsProblem(e) && e.problem.kind === 'value' && e.message === LINE(names) && !e.spoken.includes('settings.json'), what); assert.equal(settingsNotice(home), LINE(names), what); };
 const { heldNotice, settingsNotice, settingsReference, startupSettings, writeReference } = await import('../reference.mjs');
 const { createNotes } = await import('../notes.mjs');
 const { createGuard } = await import('../guard.mjs');
@@ -121,43 +125,69 @@ for (const name of Object.keys(made)) {
   assert.deepEqual(quiet(s), whole, `${name}: its reference value is used`);
   assert.equal(settingsNotice(home), `settings.json doesn't have: ${name}. I'm using the values in settings.default.json until you add them.`);
   put({ ...made, [name]: null });
+  if (protects(name)) { refused([name], `${name}: null refuses the file`); continue; }
   const t = loadSettings(home);
   assert.deepEqual(t.missing, []); assert.deepEqual(t.invalid.map((i) => i.name), [name], `${name}: null can't be used`);
   assert.deepEqual(quiet(t), whole, `${name}: its default is used instead`);
   assert.match(settingsNotice(home), new RegExp(`^settings\\.json has a value I can't use for: ${name}\\. `));
 }
 // several at once: one line for what's missing, then one line for each value that can't be used
-put({ project: '~/Documents/roamies-pi/workspace', maxMinutes: 0, keepLogsDays: 'soon', pi: '' });
+put({ project: '~/Documents/roamies-pi/workspace', progressSeconds: -1, vault: '', pi: '' });
 assert.deepEqual(settingsNotice(home).split('\n'), [
-  `settings.json doesn't have: ${Object.keys(made).filter((k) => !['project', 'maxMinutes', 'keepLogsDays', 'pi'].includes(k)).join(', ')}. I'm using the values in settings.default.json until you add them.`,
+  `settings.json doesn't have: ${Object.keys(made).filter((k) => !['project', 'progressSeconds', 'vault', 'pi'].includes(k)).join(', ')}. I'm using the values in settings.default.json until you add them.`,
   'settings.json has a value I can\'t use for: pi. I\'m using "pi".',
-  'settings.json has a value I can\'t use for: maxMinutes. I\'m using 60.',
-  'settings.json has a value I can\'t use for: keepLogsDays. I\'m using 30.',
+  'settings.json has a value I can\'t use for: progressSeconds. I\'m using 90.',
+  'settings.json has a value I can\'t use for: vault. I\'m using "~/Documents/roamies-vault".',
 ]);
+// two that protect something: both named, in the order of the file's settings
 assert.ok(loadSettings(home).missing.includes('limits') && !loadSettings(home).missing.some((n) => n.startsWith('limits.')), 'no "limits" at all is one missing setting, not fifteen');
-assert.equal(loadSettings(home).maxMinutes, 60);
-// the safety settings fall back to the safe side, and the notice says so
-for (const v of ['false', 'off', 0, null, [], {}]) { put({ ...made, sandbox: v }); assert.equal(loadSettings(home).sandbox, true, 'the sandbox is on'); assert.equal(settingsNotice(home), 'settings.json has a value I can\'t use for: sandbox. The sandbox stays on.'); }
+assert.equal(loadSettings(home).maxMinutes, 60, 'a missing setting that protects something takes its default, as before');
+put({ project: '~/Documents/roamies-pi/workspace', maxMinutes: 0, keepLogsDays: 'soon' });
+refused(['maxMinutes', 'keepLogsDays'], 'maxMinutes and keepLogsDays');
+// the safety settings: a wrong value refuses the file (the owner, 2026-11-28)
+for (const v of ['false', 'off', 0, null, [], {}]) { put({ ...made, sandbox: v }); refused(['sandbox'], `sandbox: ${JSON.stringify(v)}`); }
 put({ ...made, sandbox: false }); assert.equal(loadSettings(home).sandbox, false); assert.equal(settingsNotice(home), '', 'a plain false is the owner\'s choice');
-for (const v of ['Signal', ['Signal', 7], [''], {}, null, 5]) { put({ ...made, neverLook: v }); assert.deepEqual(loadSettings(home).neverLook, NEVER_LOOK, 'the built-in list'); assert.equal(settingsNotice(home), 'settings.json has a value I can\'t use for: neverLook. I\'m using the built-in list.'); }
-{ // and the guard really uses it
+for (const v of ['Signal', ['Signal', 7], [''], {}, null, 5]) { put({ ...made, neverLook: v }); refused(['neverLook'], `neverLook: ${JSON.stringify(v)}`); }
+{ // and the guard, which can't read the list, uses the built-in one
   put({ ...made, neverLook: 'none' });
   const guard = createGuard({ home, windows: async () => [{ id: 1, app: 'Messages', title: 'Ana', frontApp: true }] });
   await assert.rejects(guard.check('front'), /never-look list/);
 }
 put({ ...made, neverLook: [] }); assert.deepEqual(loadSettings(home).neverLook, []); assert.equal(settingsNotice(home), '', 'an empty list is the owner\'s choice');
 // a list with an entry that can't be used: the rest is kept, and the setting is named with what is used
-put({ ...made, readOnly: ['~/Documents/cells', 7, ''], docker: 'everywhere', home: 'middle', voices: { jarvis: 'Daniel', anime: 3 } });
+put({ ...made, toolFolders: ['~/.mytool', 7, ''], docker: 'everywhere', home: 'middle', voices: { jarvis: 'Daniel', anime: 3 } });
 {
   const s = loadSettings(home);
-  assert.deepEqual(s.readOnly, [path.join(home, 'Documents', 'cells')]); assert.deepEqual(s.docker, []); assert.equal(s.home, 'bottom-left'); assert.deepEqual(s.voices, { jarvis: 'Daniel' });
+  assert.ok(s.toolFolders.includes(path.join(home, '.mytool'))); assert.deepEqual(s.docker, []); assert.equal(s.home, 'bottom-left'); assert.deepEqual(s.voices, { jarvis: 'Daniel' });
   assert.deepEqual(settingsNotice(home).split('\n'), [
     'settings.json has a value I can\'t use for: voices. I\'m using {"jarvis":"Daniel"}.',
-    'settings.json has a value I can\'t use for: readOnly. I\'m using ["~/Documents/cells"].',
+    'settings.json has a value I can\'t use for: toolFolders. I\'m using ["~/.mytool"].',
     'settings.json has a value I can\'t use for: docker. I\'m using [].',
     'settings.json has a value I can\'t use for: home. I\'m using "bottom-left".',
   ]);
 }
+// one in a list that protects something refuses the file, whichever entry it is
+for (const name of ['readOnly', 'toolFoldersOff', 'findLeaveOut']) { put({ ...made, [name]: ['~/Documents/cells', 7] }); refused([name], name); put({ ...made, [name]: ['~/Documents/cells', ''] }); refused([name], name); }
+// the other protecting settings, with an everyday wrong value each; their right values pass
+for (const [name, bad, good] of [['masking', 'yes', false], ['files', 'off', false], ['fileContents', 'always', 'free'], ['findAnywhere', 1, false], ['findDrives', 'no', false], ['autoSendReadOnly', -5, 0], ['piUpdates', 'Off', 'off'], ['maxMinutes', 0, 10], ['keepLogsDays', 'week', 0], ['autoListenQuestions', 'false', false]]) {
+  put({ ...made, [name]: bad }); refused([name], `${name}: ${JSON.stringify(bad)}`);
+  put({ ...made, [name]: good }); assert.equal(loadSettings(home)[name === 'autoSendReadOnly' ? 'autoSendReadOnly' : name], good, `${name}: ${JSON.stringify(good)} is his choice`); assert.equal(settingsNotice(home), '');
+}
+// the parts of local and standDown, and local.start
+for (const [part, bad] of [['local.address', 'http://example.com:8080/v1'], ['local.model', 'a b'], ['local.whenOffline', 'yes'], ['local.historyExchanges', 21], ['local.maxSteps', 0], ['local.confirmChanges', 1], ['local.start', 'go'], ['standDown.phrase', 'yes'], ['standDown.shortcut', 'Period'], ['standDown.endsAtDayTurn', 'no'], ['standDown.waitSeconds', 9]]) {
+  const [group, key] = part.split('.');
+  put({ ...made, [group]: { ...made[group], [key]: bad } }); refused([part], `${part}: ${JSON.stringify(bad)}`);
+}
+for (const [key, bad] of [['python', 'python3'], ['model', 'e9b'], ['port', 80], ['sleepAfterMinutes', -1], ['draft', 'yes'], ['waitSeconds', 5]]) {
+  put({ ...made, local: { ...made.local, start: { ...made.local.start, [key]: bad } } }); refused([`local.start.${key}`], `local.start.${key}`);
+}
+// more than three: three named, then how many more; and the list in the reference
+put({ ...made, sandbox: 'x', files: 'x', findDrives: 'x', masking: 'x', findAnywhere: 'x' });
+assert.throws(() => loadSettings(home), (e) => /: masking should be true or false; neverLook|: neverLook/.test(e.message) || /; and 2 more\. I won't act/.test(e.message));
+assert.match(settingsNotice(home), /^Your settings file has wrong values, in ~\/Documents\/roamies-pi\/settings\.json: \w+ should be true or false; \w+ should be true or false; \w+ should be true or false; and 2 more\. I won't act on requests until it's fixed\.$/);
+assert.ok(codeReference().refusedWhenWrong.settings.slice(0, PROTECTING.length).every((n, i) => n === PROTECTING[i]));
+for (const name of PROTECTING) assert.ok(SHOULD[name], `${name} has its words`);
+for (const n of ['mask', 'masking', 'neverLook', 'sandbox', 'readOnly', 'toolFoldersOff', 'findLeaveOut', 'files', 'fileContents', 'findAnywhere', 'findDrives', 'autoSendReadOnly', 'local', 'standDown']) assert.ok(PROTECTING.includes(n), `the owner's list: ${n}`);
 // limits: each on its own, by name
 for (const [name, l] of Object.entries(LIMITS)) {
   const { [name]: gone, ...others } = made.limits;
@@ -165,13 +195,14 @@ for (const [name, l] of Object.entries(LIMITS)) {
   assert.deepEqual(loadSettings(home).missing, [`limits.${name}`]); assert.equal(loadSettings(home).limits[name], l.default);
   for (const bad of [...(l.min > 0 ? [0] : []), -1, l.min - (l.whole ? 1 : l.min / 2), l.max + 1, String(l.default), null, NaN, true, ...(l.whole ? [l.min + 0.5] : [])]) {
     put(JSON.stringify({ ...made, limits: { ...made.limits, [name]: bad } }));
+    if (protects(`limits.${name}`)) { refused([`limits.${name}`], `limits.${name}: ${bad}`); continue; }
     const s = loadSettings(home);
     assert.deepEqual(s.invalid, [{ name: `limits.${name}`, using: l.default }], `limits.${name}: ${bad} is out`); assert.equal(s.limits[name], l.default);
     assert.equal(settingsNotice(home), `settings.json has a value I can't use for: limits.${name}. I'm using ${l.default}.`);
   }
   for (const good of [l.min, l.max]) { put({ ...made, limits: { ...made.limits, [name]: good } }); const s = loadSettings(home); assert.equal(s.limits[name], good, `limits.${name}: ${good} is in`); assert.deepEqual([s.missing, s.invalid], [[], []]); }
 }
-put({ ...made, limits: [600] }); assert.deepEqual(loadSettings(home).limits, made.limits); assert.equal(settingsNotice(home).split('\n').length, 1);
+put({ ...made, limits: [600] }); refused(['limits'], 'limits that aren\'t an object hold the protecting ones');
 // and they are what the code goes by
 put({ ...made, routines: { one: ['a'], two: ['b'], three: 'c' }, limits: { ...made.limits, promptChars: 500, noteMaxChars: 1000, routinesShown: 2, approvalBubbleChars: 200, frontLookupMs: 450 } });
 {
@@ -203,7 +234,10 @@ assert.match(startupSettings(home), /isn't valid JSON/); assert.deepEqual(limits
   // feature 31: a notice is said unasked: it goes through the speaking budget, and waits in the quiet queue when it
   // can't be given (stood down among others), so it is no longer held back for stand down here
   assert.ok(side.includes('settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed))'));
-  assert.match(side, /const settingsNotice = heldNotice\(startupSettings\(HOME\), \(text\) => \{ logLine\('settings_notice', \{ chars: text\.length \}\); unasked\(\{ kind: 'notice', text, mood: 'concerned' \}\); \}\);/);
+  assert.match(side, /const startNotice = startupSettings\(HOME\);/);
+  assert.match(side, /: heldNotice\(startNotice, \(text\) => \{ logLine\('settings_notice', \{ chars: text\.length \}\); unasked\(\{ kind: 'notice', text, mood: 'concerned' \}\); \}\);/);
+  // the owner, 2026-11-28: a file that can't be used gives the refusal line instead, said too, outside the budget
+  assert.match(side, /\? heldNotice\(startTrouble\.message, \(\) => \{ const p = trouble\(\); if \(!p\) return; settingsBad = true; logLine\('settings_notice', \{ chars: p\.message\.length, refused: true \}\); settingsSay\(p\.message, p\.spoken\); \}\)/);
 }
 
 // ---- 3. settings.json was never written, and settings.default.json never read

@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { STAND_CAUGHT, STAND_FILL, createStandDown, isStandDown, standFill, standSummary, standWords } from '../standdown.mjs';
 import { STAND_DOWN, codeReference, loadSettings, readState, settingsDefaults } from '../pi.mjs';
+import { isSettingsProblem } from '../settingsproblem.mjs';
 import { createCalendar } from '../calendar.mjs';
 
 const SRC = new URL('..', import.meta.url).pathname;
@@ -56,9 +57,8 @@ const put = (o) => fs.writeFileSync(file, JSON.stringify(o));
   const bad = { phrase: ['send', 'Yes', 'thanks', 'drop it', 'review my day', 'please now', 'jarvis', 'one two three four five', 'stand2', 'stand_down', '', ' ', 'x'.repeat(41), 7, null], shortcut: ['Escape', 'Period', 'Control+Alt', 'Control+Alt+', 'Hyper+KeyS', 'Control+Alt+Period+', 'Control+Alt+Shift', 3, ''], endsAtDayTurn: ['yes', 1, null], waitSeconds: [0.4, 3.1, 0, -1, '1.5', null, true] };
   for (const [name, list] of Object.entries(bad)) for (const v of list) {
     put({ ...made, standDown: { ...made.standDown, [name]: v } });
-    const s = loadSettings(home);
-    assert.deepEqual(s.invalid, [{ name: `standDown.${name}`, using: STAND_DOWN[name].default }], `standDown.${name}: ${JSON.stringify(v)} is out`);
-    assert.equal(s.standDown[name], STAND_DOWN[name].default);
+    // the owner, 2026-11-28: standDown protects something, so a wrong part refuses the file, naming the part
+    assert.throws(() => loadSettings(home), (e) => isSettingsProblem(e) && e.problem.wrong.length === 1 && e.problem.wrong[0].name === `standDown.${name}`, `standDown.${name}: ${JSON.stringify(v)} is out`);
   }
   for (const [name, v] of [['phrase', 'At ease'], ['phrase', "that'll do"], ['shortcut', 'Command+Shift+KeyD'], ['shortcut', 'Control+Alt+Period'], ['endsAtDayTurn', false], ['waitSeconds', 0.5], ['waitSeconds', 3], ['waitSeconds', 2.25]]) {
     put({ ...made, standDown: { ...made.standDown, [name]: v } });
@@ -167,7 +167,7 @@ assert.equal(standSummary({ questions: 1, lines: 4, review: true }), 'While I st
   assert.match(tick, /const given = \{ kind: b\.kind, given: false \};\n\s*briefingWaiting = true;/);
   assert.match(tick, /, \{ briefing: given \}\)\.then\(\(\) => \(given\.given && b\.kind === 'morning' && !daily\.morningAsked\(\) \? dailyAsk\('morning'\) : null\)\)/, 'its questions only when it was given');
   assert.match(side, /if \(busy \|\| queued \|\| briefingWaiting \|\| loggingIn/, 'no second one chosen meanwhile');
-  assert.match(side, /if \(stood\?\.on\(\)\) \{ if \(briefing\) logLine\('stand_down_held', \{ what: 'briefing', kind: briefing\.kind \}\); else logLine\('stand_down_dropped', \{ what: 'request' \}\); return; \}\n\s*if \(briefing\) \{ pi\.briefing\.done\(briefing\.kind\); briefing\.given = true; logLine\('briefing', \{ kind: briefing\.kind \}\); \}/, 'held while stood down, marked given when made');
+  assert.match(side, /if \(stood\?\.on\(\)\) \{ if \(briefing\) logLine\('stand_down_held', \{ what: 'briefing', kind: briefing\.kind \}\); else logLine\('stand_down_dropped', \{ what: 'request' \}\); return; \}\n(?:.*\n){0,3}\s*if \(briefing\) \{ pi\.briefing\.done\(briefing\.kind\); briefing\.given = true; logLine\('briefing', \{ kind: briefing\.kind \}\); \}/, 'held while stood down, marked given when made');
   assert.match(side, /if \(briefing\) briefingWaiting = false;/, 'its turn over, the next minute may choose it again');
   // the line left by a stand down that ended at the day turn: after a typed request's reply, or a spoken exchange's end
   assert.match(side, /if \(own && !flow\.spoken\(\)\) queue\?\.exchanged\(\);/); assert.match(side, /ended: \(\) => queue\?\.exchanged\(\),/);

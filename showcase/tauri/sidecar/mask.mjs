@@ -78,21 +78,23 @@ const quoted = (v) => (typeof v === 'string' ? `"${v.trim().slice(0, 60)}"` : 'a
  * is left out and named in problems (for the start-up bubble only: problems name words, so they are never logged).
  */
 export function cleanMask(raw, { maxEntries = 500 } = {}) {
-  const entries = [], problems = [], taken = new Map();
-  if (raw === undefined || raw === null) return { entries, problems };
-  if (typeof raw !== 'object' || Array.isArray(raw)) return { entries, problems: ['"mask" should be an object with the groups people, organisations, projects and other. Nothing is masked until it is fixed.'] };
-  for (const g of Object.keys(raw)) if (!GROUPS.includes(g)) problems.push(`"mask" has a group I don't know, "${g.slice(0, 40)}"; its words are not masked. The groups are people, organisations, projects and other.`);
+  // wrong: what would leave a word unmasked, without the word ({ name, what }): the owner, 2026-11-28, refuses requests
+  // until it is fixed (pi.mjs, loadSettings). A duplicate (the first is masked) or exactCase taken as false is not.
+  const entries = [], problems = [], taken = new Map(), wrong = [];
+  if (raw === undefined || raw === null) return { entries, problems, wrong };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { entries, problems: ['"mask" should be an object with the groups people, organisations, projects and other. Nothing is masked until it is fixed.'], wrong: [{ name: 'mask', what: 'should be an object with the groups people, organisations, projects and other' }] };
+  for (const g of Object.keys(raw)) if (!GROUPS.includes(g)) { problems.push(`"mask" has a group I don't know, "${g.slice(0, 40)}"; its words are not masked. The groups are people, organisations, projects and other.`); wrong.push({ name: 'mask', what: 'has a group other than people, organisations, projects and other' }); }
   let over = false;
   for (const group of GROUPS) {
     const list = raw[group];
     if (list === undefined || list === null) continue;
-    if (!Array.isArray(list)) { problems.push(`mask.${group} should be a list; its words are not masked.`); continue; }
-    for (const item of list) {
+    if (!Array.isArray(list)) { problems.push(`mask.${group} should be a list; its words are not masked.`); wrong.push({ name: `mask.${group}`, what: 'should be a list' }); continue; }
+    for (const [n, item] of list.entries()) {
       const obj = item && typeof item === 'object' && !Array.isArray(item);
       const name = obj ? item.name : item;
       const why = formProblem(name);
-      if (why) { problems.push(`mask.${group}: ${quoted(name)} ${why}, so it isn't used.`); continue; }
-      if (obj && item.also !== undefined && !Array.isArray(item.also)) problems.push(`mask.${group}: "also" of "${name.trim()}" should be a list; it isn't used.`);
+      if (why) { problems.push(`mask.${group}: ${quoted(name)} ${why}, so it isn't used.`); wrong.push({ name: `mask.${group}`, what: `entry ${n + 1} ${why}` }); continue; }
+      if (obj && item.also !== undefined && !Array.isArray(item.also)) { problems.push(`mask.${group}: "also" of "${name.trim()}" should be a list; it isn't used.`); wrong.push({ name: `mask.${group}`, what: `entry ${n + 1}: "also" should be a list` }); }
       if (obj && item.exactCase !== undefined && typeof item.exactCase !== 'boolean') problems.push(`mask.${group}: "exactCase" of "${name.trim()}" should be true or false; it is taken as false.`);
       const key = keyOf(name);
       if (taken.has(key)) { problems.push(`mask.${group}: "${name.trim()}" is already listed${taken.get(key) === group ? '' : ` under ${taken.get(key)}`}; the first is used.`); continue; }
@@ -101,7 +103,7 @@ export function cleanMask(raw, { maxEntries = 500 } = {}) {
       const forms = [name.trim()];
       for (const a of obj && Array.isArray(item.also) ? item.also : []) {
         const w = formProblem(a);
-        if (w) { problems.push(`mask.${group}: ${quoted(a)} (also of "${name.trim()}") ${w}, so it isn't used.`); continue; }
+        if (w) { problems.push(`mask.${group}: ${quoted(a)} (also of "${name.trim()}") ${w}, so it isn't used.`); wrong.push({ name: `mask.${group}`, what: `entry ${n + 1}: an "also" form ${w}` }); continue; }
         const k = keyOf(a);
         if (taken.has(k)) { problems.push(`mask.${group}: "${a.trim()}" (also of "${name.trim()}") is already listed; the first is used.`); continue; }
         taken.set(k, group); forms.push(a.trim());
@@ -109,8 +111,8 @@ export function cleanMask(raw, { maxEntries = 500 } = {}) {
       entries.push({ group, name: name.trim(), forms, exactCase: obj && item.exactCase === true, key });
     }
   }
-  if (over) problems.push(`"mask" has more than ${maxEntries} entries (limits.maskEntries); the first ${maxEntries} are used.`);
-  return { entries, problems };
+  if (over) { problems.push(`"mask" has more than ${maxEntries} entries (limits.maskEntries); the first ${maxEntries} are used.`); wrong.push({ name: 'mask', what: `has more than ${maxEntries} entries (limits.maskEntries)` }); }
+  return { entries, problems, wrong };
 }
 
 /** Numbers for the entries: kept ones stay, new words get the next free number of their group. table: state.json

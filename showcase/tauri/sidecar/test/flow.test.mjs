@@ -113,10 +113,13 @@ const pendingNow = () => readState(dir).pending ?? [];
   assert.deepEqual(ref.limitRanges.answerWindowSeconds, { min: 3, max: 30 });
   // out of range: the default is used, and the setting is named at start-up
   for (const bad of [2, 31, '10']) { writeSettings({ limits: { answerWindowSeconds: bad } }); const s = loadSettings(home); assert.equal(s.limits.answerWindowSeconds, 10); assert.ok(s.invalid.some((i) => i.name === 'limits.answerWindowSeconds')); }
-  writeSettings({ limits: { answerWindowSeconds: 3 }, autoListenQuestions: 'no', closingReply: '  ' });
+  writeSettings({ limits: { answerWindowSeconds: 3 }, closingReply: '  ' });
   const s = loadSettings(home);
   assert.equal(s.limits.answerWindowSeconds, 3); assert.equal(s.autoListenQuestions, true); assert.equal(s.closingReply, 'Any time.');
-  assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['autoListenQuestions', 'closingReply']);
+  assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['closingReply']);
+  // the owner, 2026-11-28: autoListenQuestions protects something (the microphone), so a wrong value refuses the file
+  writeSettings({ autoListenQuestions: 'no' });
+  assert.throws(() => loadSettings(home), /autoListenQuestions should be true or false/);
   writeSettings();
 }
 
@@ -854,7 +857,7 @@ const pendingNow = () => readState(dir).pending ?? [];
 {
   const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
   // words from an answer window are judged by flow.mjs before anything else, and only 'request' goes on
-  assert.match(side, /async function onSpoken\(text, area, window = null\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(isStandDown\(text, \.\.\.standPhrase\(\)\)\) \{ ui\(\{ kind: 'heard' \}\); standDownNow\('phrase'\); return; \}\n\s*if \(window == null\) standUp\('voice'\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(window != null\) \{ if \(flow\.windowPhrase\(text, window\) !== 'request'\) \{ ui\(\{ kind: 'heard' \}\); return; \} \}\n(?:\s*\/\/[^\n]*\n)*\s*else if \(!pi\.bubble\(\) && !answers\.open\(\) && flow\.closing\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n\s*(?:\/\/[^\n]*\n\s*)*if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\)/);
+  assert.match(side, /async function onSpoken\(text, area, window = null\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(isStandDown\(text, \.\.\.standPhrase\(\)\)\) \{ ui\(\{ kind: 'heard' \}\); standDownNow\('phrase'\); return; \}\n\s*if \(settingsGate\(true\)\) return;[^\n]*\n\s*if \(window == null\) standUp\('voice'\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(window != null\) \{ if \(flow\.windowPhrase\(text, window\) !== 'request'\) \{ ui\(\{ kind: 'heard' \}\); return; \} \}\n(?:\s*\/\/[^\n]*\n)*\s*else if \(!pi\.bubble\(\) && !answers\.open\(\) && flow\.closing\(text\)\) \{ ui\(\{ kind: 'heard' \}\); return; \}\n\s*(?:\/\/[^\n]*\n\s*)*if \(pi\.heard\(text\) \|\| answers\.heard\(text\)\)/);
   assert.match(side, /onSpoken\(m\.text\.trim\(\), m\.area, m\.window \?\? null\)/);
   assert.match(side, /if \(m\.type === 'voice_state'\) flow\.voice\(voiceState, m\.window \?\? null\);/);
   assert.match(side, /m\.state === 'listening' && m\.window != null\) \{ \/\*/, 'the window\'s own listening interrupts nothing');
