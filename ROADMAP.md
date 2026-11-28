@@ -2264,6 +2264,9 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   replies, notices, questions and typing, with numbers, times, paths and code in SF Mono; `'mono'` as before. The lines
   are laid out by each letter's own width, and a letter's place is fixed by those before it on its line, so nothing
   shifts while a reply streams in (`test/bubble-text.test.mjs`, letter by letter with a proportional stand-in font).
+- **2026-11-28 14:54, feature 21 (a) merged.** `test:all` and `cargo test` passed on `94bb817`; `look-orb` fast-forwarded
+  into `next`. Report: `~/Documents/roamies-reports/2026-11-28_1454_feature-21a-changes-report.md`. Part (b), Mission
+  Control, starts on `mission-control` off `next`.
 
 ## 6. Still to test
 
