@@ -501,13 +501,12 @@ const settingsNotice = startTrouble
   ? heldNotice(startTrouble.message, () => { const p = trouble(); if (!p) return; settingsBad = true; logLine('settings_notice', { chars: p.message.length, refused: true }); settingsSay(p.message, p.spoken); })
   : heldNotice(startNotice, (text) => { logLine('settings_notice', { chars: text.length }); unasked({ kind: 'notice', text, mood: 'concerned' }); });
 const offerSettingsNotice = () => settingsNotice(uiReady && !onboarding && (!!config.onboarded || guideClosed));
-function startKokoro(why = 'app') { if (MAC) { try { const s = settingsNow(); if (s.voiceEngine === 'kokoro' && (why === 'reply' || s.kokoro.startWith === 'app')) kokoro.start(); } catch { /* settings.json can't be used: the macOS voice speaks; started once it can (afterReadable) */ } } }
+function startKokoro() { if (MAC) { try { if (settingsNow().voiceEngine === 'kokoro') kokoro.start(); } catch { /* settings.json can't be used: the macOS voice speaks; started once it can (afterReadable) */ } } }
 /** The voice a reply is made in (speaker.mjs asks at each; o.reply: a reply, not a short line made ahead). The natural
  *  one when its helper is ready, or loading at start: the reply then waits for it, up to kokoro.waitAtStartSeconds
- *  (kokorovoice.mjs). With kokoro.startWith "firstReply" the first reply starts it (the owner, 2026-11-28). */
+ *  (kokorovoice.mjs). */
 function replyVoice(o) {
   if (trouble()) return null;
-  if (o?.reply && kokoro.state === 'off') startKokoro('reply');
   return kokoro.ready || (o?.reply && kokoro.loadingAtStart) ? KokoroReplyVoice : null;
 }
 startKokoro();

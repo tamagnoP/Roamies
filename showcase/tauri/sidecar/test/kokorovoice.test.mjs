@@ -80,7 +80,7 @@ fs.writeFileSync(path.join(home, '.cache', 'huggingface', 'hub', 'blobs', 'aa', 
 fs.symlinkSync(path.join(home, '.cache', 'huggingface', 'hub', 'blobs', 'aa', 'weights'), path.join(modelDir, 'snapshots', 'abc', 'voices', 'bm_george.safetensors'));
 fs.writeFileSync(path.join(home, 'secret.txt'), 'private');
 
-const base = () => ({ kokoro: { python, model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400, startWith: 'app', waitAtStartSeconds: 8 }, limits: { kokoroTimeoutSeconds: 2, kokoroSentenceChars: 120 } });
+const base = () => ({ kokoro: { python, model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400, waitAtStartSeconds: 8 }, limits: { kokoroTimeoutSeconds: 2, kokoroSentenceChars: 120 } });
 /** An engine on the stand-in helper. spawns: every start, as it was asked for; events: what was asked and what came back, in order. */
 function engine(mode = '', change = (s) => s, extra = {}) {
   const spawns = [], events = [], downs = [], logs = [];
@@ -502,7 +502,7 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   const file = path.join(h, 'Documents', 'roamies-pi', 'settings.json');
   const d = settingsDefaults(h);
   assert.equal(d.voiceEngine, 'kokoro'); assert.deepEqual(VOICE_ENGINES, ['kokoro', 'system']);
-  assert.deepEqual(d.kokoro, { python: '/opt/homebrew/anaconda3/envs/localai/bin/python', model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400, sleepAfterMinutes: 0, startWith: 'app', waitAtStartSeconds: 8 });
+  assert.deepEqual(d.kokoro, { python: '/opt/homebrew/anaconda3/envs/localai/bin/python', model: 'mlx-community/Kokoro-82M-bf16', voice: 'bm_george', lang: 'b', speed: 1.05, cacheMB: 0, memoryMB: 400, sleepAfterMinutes: 0, waitAtStartSeconds: 8 });
   assert.deepEqual([KOKORO.cacheMB.min, KOKORO.cacheMB.max, KOKORO.memoryMB.min, KOKORO.memoryMB.max], [0, 16384, 100, 16384]);
   assert.equal(d.limits.kokoroTimeoutSeconds, 20); assert.equal(d.limits.kokoroSentenceChars, 120);
   const ref = settingsReference(h);
@@ -526,16 +526,16 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   assert.deepEqual(s.invalid.map((i) => i.name).sort(), ['kokoro.cacheMB', 'kokoro.lang', 'kokoro.memoryMB', 'kokoro.model', 'kokoro.sleepAfterMinutes', 'kokoro.speed', 'kokoro.voice', 'limits.kokoroSentenceChars', 'voiceEngine']);
   write({ kokoro: { ...d.kokoro, sleepAfterMinutes: 20 } }); assert.equal(loadSettings(h).kokoro.sleepAfterMinutes, 20); assert.deepEqual(loadSettings(h).invalid, []);
   write({ kokoro: { python: d.kokoro.python } });
-  assert.deepEqual(loadSettings(h).missing, ['kokoro.model', 'kokoro.voice', 'kokoro.lang', 'kokoro.speed', 'kokoro.cacheMB', 'kokoro.memoryMB', 'kokoro.sleepAfterMinutes', 'kokoro.startWith', 'kokoro.waitAtStartSeconds']);
+  assert.deepEqual(loadSettings(h).missing, ['kokoro.model', 'kokoro.voice', 'kokoro.lang', 'kokoro.speed', 'kokoro.cacheMB', 'kokoro.memoryMB', 'kokoro.sleepAfterMinutes', 'kokoro.waitAtStartSeconds']);
   fs.rmSync(h, { recursive: true, force: true });
   // "system" starts nothing; anything else than a Mac starts nothing
   const side = fs.readFileSync(path.join(here, '..', 'sidekick.mjs'), 'utf8');
-  assert.match(side, /if \(MAC\) \{ try \{ const s = settingsNow\(\); if \(s\.voiceEngine === 'kokoro' && \(why === 'reply' \|\| s\.kokoro\.startWith === 'app'\)\) kokoro\.start\(\); \}/);
-  assert.match(side, /^startKokoro\(\);$/m, 'at start-up: with "app"');
+  assert.match(side, /function startKokoro\(\) \{ if \(MAC\) \{ try \{ if \(settingsNow\(\)\.voiceEngine === 'kokoro'\) kokoro\.start\(\); \}/);
+  assert.match(side, /^startKokoro\(\);$/m, 'at start-up'); assert.ok(!/startWith/.test(side), 'the owner, 14:09: kokoro.startWith taken out again; the helper always starts with Roamies');
   assert.equal((side.match(/kokoro\.start\(\)/g) ?? []).length, 1, 'the one place the helper is started');
   assert.match(side, /else if \(id === 'quit'\) \{ pi\.stopAll\(\); kokoro\.stop\(\);/, 'it is stopped when Roamies quits');
   assert.match(side, /pickVoice: \(o\) => replyVoice\(o\),/);
-  assert.match(side, /function replyVoice\(o\) \{\n\s*if \(trouble\(\)\) return null;\n\s*if \(o\?\.reply && kokoro\.state === 'off'\) startKokoro\('reply'\);\n\s*return kokoro\.ready \|\| \(o\?\.reply && kokoro\.loadingAtStart\) \? KokoroReplyVoice : null;/, 'feature 24 and 2026-11-28: the natural voice for a reply if its helper is ready, or loading at start (it waits)');
+  assert.match(side, /function replyVoice\(o\) \{\n\s*if \(trouble\(\)\) return null;\n\s*return kokoro\.ready \|\| \(o\?\.reply && kokoro\.loadingAtStart\) \? KokoroReplyVoice : null;/, 'feature 24 and 2026-11-28: the natural voice for a reply if its helper is ready, or loading at start (it waits)');
   const sp = fs.readFileSync(path.join(here, '..', 'speaker.mjs'), 'utf8');
   assert.match(sp, /Impl = voiceImpl\(\{ reply: true \}\);/, 'a reply asks as a reply; the short lines made ahead don\'t start or wait for it');
   assert.equal((sp.match(/voiceImpl\(/g) ?? []).length, 2, 'asked once per reply, once per short line');
@@ -588,16 +588,17 @@ assert.equal(splitLong('Well, it is done and I will say no more about it at all 
   assert.equal(w.k.state, 'asleep');
   w.k.wake('test'); assert.equal(w.k.state, 'starting'); assert.equal(w.k.loadingAtStart, false, 'a wake is not at start');
   await until(() => w.k.ready); w.k.stop();
-  // the settings: startWith "app" or "firstReply", waitAtStartSeconds 0 to 30
+  // the setting: waitAtStartSeconds 0 to 30 (startWith was taken out again, the owner 14:09; a file that still has it
+  // is not refused and nothing reads it)
   const h = fs.mkdtempSync(path.join(os.tmpdir(), 'kokoro-start-'));
   loadSettings(h);
   const f = path.join(h, 'Documents', 'roamies-pi', 'settings.json'), d0 = JSON.parse(fs.readFileSync(f, 'utf8'));
-  assert.equal(d0.kokoro.startWith, 'app'); assert.equal(d0.kokoro.waitAtStartSeconds, 8);
+  assert.equal('startWith' in d0.kokoro, false); assert.equal(d0.kokoro.waitAtStartSeconds, 8);
   fs.writeFileSync(f, JSON.stringify({ ...d0, kokoro: { ...d0.kokoro, startWith: 'firstReply', waitAtStartSeconds: 30 } }));
-  assert.deepEqual([loadSettings(h).kokoro.startWith, loadSettings(h).kokoro.waitAtStartSeconds], ['firstReply', 30]);
-  fs.writeFileSync(f, JSON.stringify({ ...d0, kokoro: { ...d0.kokoro, startWith: 'reply', waitAtStartSeconds: 31 } }));
-  assert.deepEqual(loadSettings(h).invalid.map((i) => i.name).sort(), ['kokoro.startWith', 'kokoro.waitAtStartSeconds']);
-  assert.deepEqual([loadSettings(h).kokoro.startWith, loadSettings(h).kokoro.waitAtStartSeconds], ['app', 8], 'their defaults, with a notice');
+  assert.equal(loadSettings(h).kokoro.waitAtStartSeconds, 30); assert.equal(loadSettings(h).problem ?? null, null); assert.deepEqual(loadSettings(h).invalid, []);
+  fs.writeFileSync(f, JSON.stringify({ ...d0, kokoro: { ...d0.kokoro, waitAtStartSeconds: 31 } }));
+  assert.deepEqual(loadSettings(h).invalid.map((i) => i.name), ['kokoro.waitAtStartSeconds']);
+  assert.equal(loadSettings(h).kokoro.waitAtStartSeconds, 8, 'its default, with a notice');
   fs.rmSync(h, { recursive: true, force: true });
 }
 

@@ -321,7 +321,7 @@ wrong value gets a notice and its default.
   "voiceEngine": "kokoro",
   "kokoro": { "python": "/opt/homebrew/anaconda3/envs/localai/bin/python", "model": "mlx-community/Kokoro-82M-bf16",
               "voice": "bm_george", "lang": "b", "speed": 1.05, "cacheMB": 0, "memoryMB": 400,
-              "sleepAfterMinutes": 0, "startWith": "app", "waitAtStartSeconds": 8 },
+              "sleepAfterMinutes": 0, "waitAtStartSeconds": 8 },
   "persona": { "name": "Jarvis", "address": "sir", "manner": "calm, precise, formally polite, loyal",
                "humour": "dry and rare", "maxSentences": 2,
                "beats": ["One moment, sir.", "Checking now, sir.", "Right away, sir."],
@@ -461,7 +461,6 @@ wrong value gets a notice and its default.
   | `cacheMB` | 0 | 0 to 16384, whole | MB of freed memory MLX keeps for reuse while it makes a sentence. 0: none. Read at start. |
   | `memoryMB` | 400 | 100 to 16384, whole | MB MLX aims to stay under while it makes a sentence. It goes over when one step needs more. Below about 400 sentences take longer and the helper gets no smaller. Read at start. |
   | `sleepAfterMinutes` | 0 | 0 to 1440, whole | Quiet minutes after which the helper is ended to give its memory back (see "The voice"). 0: never. Read at each check. |
-  | `startWith` | `"app"` | `"app"` or `"firstReply"` | When the helper is started: with Roamies, or at the first spoken reply (its 650 to 700 MB only from then). Read at start-up and at a reply. |
   | `waitAtStartSeconds` | 8 | 0 to 30 | How long a reply ready while the helper is still loading at start waits for it before the Mac's voice speaks it. 0: no wait. |
 - `persona`: how Roamies speaks (see "The manner"). It changes nothing about what Roamies may do. Read for each
   request, so an edit counts from the next one. Each part that is missing or can't be used takes its default and is
@@ -1893,8 +1892,8 @@ and reopen Roamies.
 runs on the Mac. No cloud voice is used and no voice is cloned: a voice is used only if its file is in the model's
 own `voices` folder.
 
-- Roamies starts one helper at start-up (`kokoro.startWith` `"app"`, the default; `"firstReply"`: at the first
-  spoken reply instead) and keeps it loaded: the Python at `kokoro.python`, running
+- Roamies starts one helper at start-up and keeps it loaded (`kokoro.startWith`, which could put the start off to
+  the first spoken reply, was taken out again on 2026-11-28: the helper already started with the app): the Python at `kokoro.python`, running
   `kokoro_server.py`, a script shipped in the app. It is started directly, never through a shell, with a fixed list
   of arguments. `kokoro.python` is used only if it is a full path to a program that exists.
 - There is no port. Each sentence goes in on the helper's input pipe and the audio comes back on its output pipe.
@@ -1922,8 +1921,8 @@ own `voices` folder.
   text is on screen meanwhile. Ready in time: the whole reply in the natural voice. Not: the Mac's voice, to the
   reply's end. A wake from sleep doesn't wait (the Mac's voice speaks, as before). Measured with the real model in a
   throwaway home: the helper is ready 7.6 to 7.9 s after it is started; the sidecar's own start is not delayed by it
-  (its first line at 0.47 s either way); with `"firstReply"` the first reply waited 7.9 s for its first sound, close to
-  the 8 s limit.
+  (its first line at 0.47 s either way); a request 3 s after start had its first sound after 5.2 s, in the natural
+  voice.
 - **One voice per reply.** A reply is spoken by the natural voice only if the helper is ready when the reply
   starts, and then to its end; otherwise by the Mac's voice to its end, even if the helper becomes ready meanwhile.
   A short "one moment" line kept in the other voice is said afresh in the reply's own. (Only a helper that fails in

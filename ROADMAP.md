@@ -2246,6 +2246,9 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   ring drains with the time left when an answer window opened the microphone (a clap or the talk keys: a full ring);
   the bubble font one constant, SF Pro for replies and notices, numbers, times and paths mono. Then merge and start
   part (b).
+- **2026-11-28, `kokoro.startWith` taken out again** (on `look-orb`, its own commit): the helper starts with Roamies, as
+  since feature 16; a reply no longer starts it. A file that still has the key is not refused; nothing reads it.
+  `kokoro.waitAtStartSeconds` stays.
 
 ## 6. Still to test
 
