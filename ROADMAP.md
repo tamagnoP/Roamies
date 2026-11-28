@@ -2255,6 +2255,11 @@ Decided by the owner on 2026-11-21, after the differences between the checklist 
   (`enable()`); sidekick.json keeps only what is still read. The guide's Connect AI offers Anthropic only (it showed
   ChatGPT and thirteen key providers in the installed 0.1.34). Test: `test/no-cloud-voice.test.mjs`, no "fish" in
   anything shipped or shown but the fish shell in the safety rules and pi's watch.
+- **2026-11-28, the draining ring** (on `look-orb`): the sidecar tells the page each answer window it opens the
+  microphone for (`answer_window`: its id, the seconds left, its whole length); when that window's listening starts,
+  the orb's ring drains from the top with the time left; a clap, the talk keys or a key press taking the window over
+  give a full ring. `test/page.mjs` now gives the page a wall clock that moves with the test's clock (LESSONS.md: a
+  run had met a five-minute mark of the dial).
 
 ## 6. Still to test
 

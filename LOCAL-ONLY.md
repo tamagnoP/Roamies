@@ -577,7 +577,7 @@ faces, hands, acts and sounds are deleted. The credit stays: "Based on Roamies b
   | State | What is drawn | Moves? |
   | --- | --- | --- |
   | At rest | the centre rings and the particles, still | no |
-  | Listening | a bright open ring; the particles ripple with the microphone's level | yes |
+  | Listening | a bright open ring; the particles ripple with the microphone's level. Opened by an answer window, the ring drains from the top with the window's time left, over a faint ring (a reopened window goes on from what it has left); opened by a clap or the talk keys, or taken over by a key press, it stays whole | yes |
   | Thinking (a request, a tool call) | one arc travelling round a dotted ring | yes |
   | Speaking (the reply's words or voice) | five bars that follow the voice's loudness | yes |
   | Waiting on you | an amber half ring and the quiet queue's count ("9+" past nine) | no |

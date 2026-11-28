@@ -684,12 +684,15 @@ async function calShow() {
 const guard = createGuard({ windows: async () => (await hands('windows')).windows ?? [] });
 // Local-only build (feature 22): conversation flow (flow.mjs). The microphone is opened for an answer only through
 // here, and only after the overlay has reported that the question has finished playing.
+/** An answer window's whole length (limits.answerWindowSeconds), for the orb's draining ring; a reopened window is
+ *  given only what it has left. */
+function windowLength(seconds) { try { return Math.max(seconds, settingsNow().limits.answerWindowSeconds); } catch { return seconds; } }
 const flow = createFlow({
   home: HOME,
   speak: (text) => lineDone(text),
   // closing: the reply to "thanks" carries the form of address whatever the clock says
   announce: (text, { closing = false } = {}) => { addressClock.allow(closing); try { say(text, 'happy'); return lineDone(forVoice(text)); } finally { addressClock.allow(false); } },
-  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !onboarding && !stood?.on()) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); } }, // feature 24: the natural voice wakes for the answer
+  listen: ({ seconds, window, again }) => { if (VOICE_OK && config.voice && voiceReady() && !onboarding && !stood?.on()) { kokoro.wake('answer window'); send({ type: 'listen', seconds, window, again }); ui({ kind: 'answer_window', id: window, seconds, total: windowLength(seconds) }); } }, // feature 24: the natural voice wakes for the answer; feature 21: the orb's ring drains with the time left
   cancel: () => send({ type: 'listen_cancel' }),
   bubbles: () => [pi, answers],
   idle: () => calQuiet() && !pi.bubble() && !answers.open(),

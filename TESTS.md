@@ -24,7 +24,7 @@ checks, fixed since. Everything else is below.
 | Feature 41 | 1 to 12 | new; review accepted 2026-11-27, in `next` |
 | Settings that can't be used | 1 to 12 | new, 2026-11-28 (the fault on your Mac; 12 added at 12:06) |
 | The natural voice at start | 1 and 2 | new, 2026-11-28 |
-| Feature 21 (a): the orb and the bubbles | 1 to 14 | new; how it looks is yours to judge; 14 changed at 14:09 |
+| Feature 21 (a): the orb and the bubbles | 1 to 15 | new; how it looks is yours to judge; 14 changed and 15 added at 14:09 |
 
 ## Group 1: features 18, 33, 25 and 31
 
@@ -572,6 +572,10 @@ looks: no test can judge them.
     beside it; no look or size picker, no chat, no drawing demo; and no tour on the desktop after Done. Connect AI
     shows Claude and, under "Use an API key instead", Anthropic only. Replies has no key form, no affiliate link and
     no billing note.
+15. **The draining ring:** ask something that ends in a question with spoken replies on, and stay quiet.
+    You should see: when the microphone opens for your answer, the ring drains from the top over the answer window
+    (10 s), over a faint ring. Say a word or two and stop: it goes on from where it was. Then hold the talk keys or
+    clap: a full ring.
 
 ## Group 4: features 17, 28, 15, 20 and 27
 

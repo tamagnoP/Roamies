@@ -348,6 +348,7 @@
     }
   }
 
+  let answerWin = null; // the last answer window the sidecar asked for (feature 21)
   // ---------- voice (⌃⌥) ----------
   function onVoice(m) {
     // Windows: the pen trail while the talk keys are held (pen.js).
@@ -362,7 +363,9 @@
       // a spoken answer can settle it. It stays on screen as it is: the character doesn't step away and no
       // listening bubble takes its place, and clicking a button still works.
       // An answer window reopened after a phrase (m.again) is the same listening: no second sound.
-      orb()?.setHearing?.(true);
+      // Feature 21: opened by an answer window, the ring drains with the time left; by a clap or the talk keys
+      // (no window, or a key press that took the window over), it is a full ring.
+      orb()?.setHearing?.(true, m.window != null && answerWin?.id === m.window ? answerWin : null);
       if (ask?.choices) return;
       if (ask) finishAsk(null);
       endTalk();
@@ -429,6 +432,9 @@
     if (m.kind === 'orb') { orb()?.setSize?.(m.size); return; }
     if (m.kind === 'pi') { orb()?.setPi?.(m.on); return; }
     if (m.kind === 'dial') { orb()?.setDial?.(m); return; }
+    // An answer window the sidecar has asked the microphone for (its id, the seconds it has left, its whole length):
+    // the listening ring drains with the time left when that window's listening starts (onVoice).
+    if (m.kind === 'answer_window') { answerWin = { id: m.id, end: performance.now() + Math.max(0, Number(m.seconds) || 0) * 1000, total: Math.max(0, Number(m.total) || 0) * 1000 }; return; }
     // Local-only build: where it rests in its default and small sizes (the "home" setting; home.js, agent.js).
     if (m.kind === 'home') { getAgent()?.setHome?.(m.home); return; }
     if (!getAgent()) return;

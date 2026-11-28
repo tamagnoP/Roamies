@@ -203,4 +203,52 @@ const images = (ops) => ops.filter((o) => o.op === 'image').length;
     assert.ok(!/fonts\.googleapis|fonts\.gstatic/.test(t), `roamies/${f}: no web fonts`);
   }
 }
+// ---- the listening ring (the owner, 14:09): it drains with the time left when an answer window opened the
+// microphone; opened by a clap or the talk keys it stays a full ring
+{
+  const whole = ringsAt(draw({ state: 'listen' }), RC, 'hsla(194');
+  assert.equal(whole.length, 1); assert.ok(near(whole[0].path[0].a1 - whole[0].path[0].a0, 2 * Math.PI), 'no window: a full ring');
+  const half = draw({ state: 'listen', left: 0.5 });
+  const bright = ringsAt(half, RC, 'hsla(194');
+  assert.equal(bright.length, 1); assert.ok(near(bright[0].path[0].a0, -Math.PI / 2), 'from the top');
+  assert.ok(near(bright[0].path[0].a1 - bright[0].path[0].a0, Math.PI), 'half the time left: half the ring');
+  assert.equal(ringsAt(half, RC, 'rgba(242,247,251,0.3').length, 1, 'over a faint ring');
+  assert.equal(ringsAt(draw({ state: 'listen', left: 0 }), RC, 'hsla(194').length, 0, 'none left: only the faint ring');
+
+  const p = await started();
+  // the share of the window left, as the page passes it to drawOrb
+  const left = () => { const w = p.creature.window; return w ? Math.max(0, Math.min(1, (w.end - p.win.performance.now()) / w.total)) : null; };
+  p.host({ kind: 'answer_window', id: 7, seconds: 10, total: 10 });
+  p.host({ kind: 'voice', type: 'state', state: 'listening', mode: 'handsfree', wave: true, window: 7 });
+  await p.tick(0.1);
+  assert.equal(p.creature.state, 'listen'); assert.ok(left() > 0.97, `opened by the answer window: nearly whole (${left()})`);
+  await p.tick(5);
+  assert.ok(Math.abs(left() - 0.49) < 0.03, `five seconds on: about half (${left()})`);
+  // a phrase ended and the window reopened for what it has left (4 s of 10): the ring goes on from there
+  p.host({ kind: 'voice', type: 'state', state: 'idle', window: 7 }); await p.tick(1);
+  p.host({ kind: 'answer_window', id: 7, seconds: 4, total: 10 });
+  p.host({ kind: 'voice', type: 'state', state: 'listening', mode: 'handsfree', wave: true, window: 7, again: true });
+  await p.tick(0.1);
+  assert.ok(Math.abs(left() - 0.4) < 0.03, `reopened: 4 s of 10 (${left()})`);
+  // the talk keys take the window over: from here a full ring
+  p.host({ kind: 'voice', type: 'state', state: 'listening', mode: 'hold', wave: true });
+  await p.tick(0.1);
+  assert.equal(p.creature.window, null, 'a key press: a full ring');
+  p.host({ kind: 'voice', type: 'state', state: 'idle' }); await p.tick(0.5);
+  // a clap or the talk keys, with an answer window asked for earlier: a full ring
+  p.host({ kind: 'voice', type: 'state', state: 'listening', mode: 'hold', wave: true });
+  await p.tick(0.1);
+  assert.equal(p.creature.state, 'listen'); assert.equal(p.creature.window, null, 'the talk keys: a full ring');
+  p.host({ kind: 'voice', type: 'state', state: 'idle' }); await p.tick(0.5);
+  // a listening that names another window than the last one asked for: a full ring
+  p.host({ kind: 'voice', type: 'state', state: 'listening', mode: 'handsfree', wave: true, window: 8 });
+  await p.tick(0.1);
+  assert.equal(p.creature.window, null);
+  p.host({ kind: 'voice', type: 'state', state: 'idle', window: 8 }); await p.tick(3);
+  assert.equal(p.creature.state, 'rest'); assert.equal(p.creature.window, null, 'the window is forgotten when listening ends');
+  const side = fs.readFileSync(new URL('../sidekick.mjs', import.meta.url), 'utf8');
+  assert.match(side, /send\(\{ type: 'listen', seconds, window, again \}\); ui\(\{ kind: 'answer_window', id: window, seconds, total: windowLength\(seconds\) \}\);/, 'the sidecar tells the page each answer window it asks the microphone for');
+  assert.match(side, /function windowLength\(seconds\) \{ try \{ return Math\.max\(seconds, settingsNow\(\)\.limits\.answerWindowSeconds\); \} catch \{ return seconds; \} \}/);
+}
+
 console.log('orb tests: passed');

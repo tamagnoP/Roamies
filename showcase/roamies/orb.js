@@ -124,8 +124,15 @@
         ctx.beginPath(); ctx.moveTo(cx + Math.cos(na) * (RA + w * 0.012), cy + Math.sin(na) * (RA + w * 0.012)); ctx.lineTo(cx + Math.cos(na) * (RB - w * 0.022), cy + Math.sin(na) * (RB - w * 0.022)); ctx.stroke();
       }
     }
-    // Listening: a bright open ring.
-    if (st.state === 'listen') { ctx.strokeStyle = blue(1); ctx.lineWidth = lw * 2.2; arc(RC, 0, TAU); }
+    // Listening: a bright open ring. Opened by an answer window (st.left: the share of its time left), it drains from
+    // the top as the time goes, over a faint ring; opened by a clap or the talk keys, it stays whole.
+    if (st.state === 'listen') {
+      if (st.left == null) { ctx.strokeStyle = blue(1); ctx.lineWidth = lw * 2.2; arc(RC, 0, TAU); }
+      else {
+        ctx.strokeStyle = white(0.3); ctx.lineWidth = lw; arc(RC, 0, TAU);
+        if (st.left > 0) { ctx.strokeStyle = blue(1); ctx.lineWidth = lw * 2.2; arc(RC, TOP, TOP + TAU * st.left); }
+      }
+    }
     // Waiting on the owner: an amber half ring over the top, the lower half a faint line.
     if (st.state === 'waiting') {
       ctx.lineCap = 'round'; ctx.strokeStyle = amber(1); ctx.lineWidth = lw * 2.6; arc(RC, Math.PI, TAU);
@@ -194,7 +201,7 @@
       const face = new R.Face(); // where it looks: the agent layer still keeps it, and the orb has no face to show it
       const sq = new R.Spring(170, 8); // a press's little squeeze
       let size = SIZE.default, form = 'default', userForm = 'default', lastEnv = null, t = 0;
-      let stood = false, queued = 0, mark = '', pi = false, dial = null, hearing = false, level = 0;
+      let stood = false, queued = 0, mark = '', pi = false, dial = null, hearing = false, level = 0, win = null;
       let ang = 0, at = 0, stateWas = '', drawnKey = '', dialTimer = 0;
       let pose = null;
       // Presence: 'shown' | 'hidden' | 'in' (appearing) | 'out' (going); u runs 0 → 1 over the change.
@@ -304,7 +311,9 @@
         get size() { return size; },
         setPi(v) { pi = !!v; },
         // The microphone is open (the voice helper's listening, shown by the cursor on macOS), and its level.
-        setHearing(v) { hearing = !!v; if (!hearing) level = 0; },
+        // w: the answer window that opened it ({ end, total } in the page's milliseconds), or none (a clap, the keys).
+        setHearing(v, w = null) { hearing = !!v; win = hearing && w && w.total > 0 && Number.isFinite(w.end) ? { end: w.end, total: w.total } : null; if (!hearing) level = 0; },
+        get window() { return win; },
         setLevel(v) { const x = Number(v); level = Number.isFinite(x) ? clamp(x, 0, 1) : 0; },
         get pi() { return pi; },
         // The working day and today's blocks, in minutes from midnight: { start, end, mine: [[s, e]], theirs: [[s, e]] }.
@@ -363,7 +372,8 @@
           const d = new Date(), now = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
           ctx.save();
           ctx.globalAlpha *= alphaNow();
-          if (D > 1) drawOrb(ctx, m.x, m.y, D, { state: s, ang, at, level: levelNow(s), dial, now, queued, pi: pi && s !== 'stood', cursor: form === 'cursor' });
+          const left = s === 'listen' && win ? clamp((win.end - performance.now()) / win.total, 0, 1) : null;
+          if (D > 1) drawOrb(ctx, m.x, m.y, D, { state: s, ang, at, level: levelNow(s), dial, now, queued, pi: pi && s !== 'stood', cursor: form === 'cursor', left });
           ctx.restore();
           plug?.over?.(ctx, env);
           // Feature 23: private mode's mark, under the orb, while it is on screen.

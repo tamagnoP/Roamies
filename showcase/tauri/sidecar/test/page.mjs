@@ -7,8 +7,11 @@ import vm from 'node:vm';
 
 const ROOT = new URL('../../../', import.meta.url); // showcase/
 /** The overlay page with stand-ins for the browser and the shell. Time only moves in tick(). */
-export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80, right: 0, ox: 0, oy: 0 }, ink = false } = {}) {
+export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80, right: 0, ox: 0, oy: 0 }, ink = false, wall = new Date(2026, 10, 28, 12, 0, 30).getTime() } = {}) {
   let clock = 1000, tid = 1, frames = 0;
+  // The wall clock moves with the page's clock, from `wall` (a weekday's noon and a half minute): the orb's dial is
+  // drawn again at the five-minute marks, so a test must never meet one by chance (feature 21).
+  const PageDate = class extends Date { constructor(...a) { if (a.length) super(...a); else super(wall + clock - 1000); } static now() { return wall + clock - 1000; } };
   const rafs = [], timers = [], listeners = {}, sent = [], invoked = [], made = [];
   // Something that can be read, called and built without complaint: the parts of the browser nothing here depends on.
   const anything = () => new Proxy(function () {}, {
@@ -37,7 +40,7 @@ export function page({ w = 1440, h = 900, safe = { top: 33, left: 0, bottom: 80,
   };
   const canvas = el('canvas');
   const win = {
-    Math, Map, Set, Promise, JSON, Date, Array, Object, Number, String, Symbol, Error, RegExp, Uint32Array, Uint8ClampedArray, Uint8Array, Float32Array, Int32Array, Infinity, NaN, isFinite, parseFloat, parseInt, console, URLSearchParams,
+    Math, Map, Set, Promise, JSON, Date: PageDate, Array, Object, Number, String, Symbol, Error, RegExp, Uint32Array, Uint8ClampedArray, Uint8Array, Float32Array, Int32Array, Infinity, NaN, isFinite, parseFloat, parseInt, console, URLSearchParams,
     ROAMIE_ONLY: ['sidekick'], ROAMIE_UNIT: 400, // as the shell sets them (main.rs)
     innerWidth: w, innerHeight: h, devicePixelRatio: 2,
     performance: { now: () => clock },

@@ -76,3 +76,14 @@ differently. Read this file at the start of each feature (CLAUDE.md, "How to wor
 - **Do differently:** when a service is removed, rename every log kind and field that names it to what the build
   really does, reword what can still be shown on any platform, and add a test that scans the log kinds and checks
   that no request is made.
+
+## A page test that failed at a five-minute mark (feature 21, 2026-11-28)
+
+- **What went wrong:** `test/orb.test.mjs` failed once with "at rest: not one frame in 20 s" and passed when run
+  again a minute later.
+- **Why:** the stand-in page (`test/page.mjs`) moved its own clock for timers and frames but used the real `Date`, and
+  the orb draws its dial again at each five-minute mark of the wall clock; a run that met 14:20:00 saw frames.
+- **Do differently:** a stand-in page or helper gives the code a wall clock that moves only with the test's own
+  clock, starting at a fixed time (`page({ wall })`); and for every new timer that follows the wall clock, ask what a
+  test running across that moment would see.
+
