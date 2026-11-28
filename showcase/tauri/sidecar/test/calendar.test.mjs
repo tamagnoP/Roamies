@@ -1419,7 +1419,7 @@ for (const n of ['set_priority', 'sort_tasks', 'show_matrix']) assert.ok(codeRef
   const shell = fs.readFileSync(new URL('../../src-tauri/src/main.rs', import.meta.url), 'utf8');
   assert.match(shell.slice(shell.indexOf('fn shows_answer')), /^[^}]*Some\("summon" \| "say" \| "ask" \| "list" \| "heard"\) => true/, 'on "heard" the shell lets the listening pill go (to_overlays: handoff)');
   const hostPage = fs.readFileSync(new URL('../../../roamies/host.js', import.meta.url), 'utf8');
-  assert.match(hostPage, /orb\(\)\?\.setHearing\?\.\(true\);\n\s*if \(ask\?\.choices\) return;\n\s*if \(ask\) finishAsk\(null\);\n\s*endTalk\(\);/, 'the page leaves a bubble with buttons as it is when listening starts: before anything is closed or hidden');
+  assert.match(hostPage, /orb\(\)\?\.setHearing\?\.\(true, [^\n]*\);\n\s*if \(ask\?\.choices\) return;\n\s*if \(ask\) finishAsk\(null\);\n\s*endTalk\(\);/, 'the page leaves a bubble with buttons as it is when listening starts: before anything is closed or hidden');
   assert.match(calV.live(), /they answer it by saying yes or no, or by clicking: don't ask them yourself as well, and never tell them they have to click\./);
 }
 
